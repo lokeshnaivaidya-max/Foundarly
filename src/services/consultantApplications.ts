@@ -49,11 +49,9 @@ export const consultantApplicationsService = {
   },
 
   async create(application: ConsultantApplicationInsert) {
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('consultant_applications')
-      .insert(application)
-      .select()
-      .single();
+      .insert(application);
 
     if (error) {
       console.error('Supabase error creating consultant_application:', {
@@ -64,7 +62,6 @@ export const consultantApplicationsService = {
       });
       throw error;
     }
-    return data as ConsultantApplication;
   },
 
   async update(id: string, updates: ConsultantApplicationUpdate) {

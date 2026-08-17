@@ -207,19 +207,18 @@ export default function AdminBookings() {
     try {
       const result = await emailService.sendBookingConfirmation(bookingId);
       if (result.success) {
-        toast.success("Confirmation emails sent successfully!");
+        toast.success("Confirmation email sent successfully!");
         // Mark email as sent in local state
         setBookings(prev => prev.map(b => 
           b.id === bookingId ? { ...b, email_sent: true } : b
         ));
       } else {
-        // Email system unavailable - not critical, just log
-        console.warn("Email system unavailable:", result.error);
-        toast.info("Booking confirmed! Email notifications are temporarily unavailable.");
+        console.warn("Email sending failed:", result.error);
+        toast.error(result.error || "Failed to send confirmation email. Please check email service configuration.");
       }
-    } catch (error) {
-      console.warn('Email error:', error);
-      toast.info("Booking confirmed! Email notifications are temporarily unavailable.");
+    } catch (error: any) {
+      console.error('Email error:', error);
+      toast.error(error?.message || "Failed to send confirmation email.");
     } finally {
       setSendingEmailId(null);
     }
@@ -242,6 +241,21 @@ export default function AdminBookings() {
       }
       
       toast.success("Booking approved and meeting room created!");
+
+      // Trigger automatic confirmation email in background
+      emailService.sendBookingConfirmation(booking.id).then((res) => {
+        if (res.success) {
+          toast.success("Confirmation email sent to attendee!");
+          setBookings(prev => prev.map(b => 
+            b.id === booking.id ? { ...b, email_sent: true } : b
+          ));
+        } else {
+          console.warn("Automatic email notification not sent:", res.error);
+        }
+      }).catch((err) => {
+        console.warn("Error sending automatic confirmation email on approval:", err);
+      });
+
       loadBookings();
     } catch (error) {
       console.error('Error approving booking:', error);
@@ -276,6 +290,20 @@ export default function AdminBookings() {
           status: "confirmed",
           payment_status: "paid",
           meeting_room_id: `foundarly-${booking.id}`,
+        });
+
+        // Trigger automatic confirmation email in background
+        emailService.sendBookingConfirmation(booking.id).then((res) => {
+          if (res.success) {
+            toast.success("Confirmation email sent to attendee!");
+            setBookings(prev => prev.map(b => 
+              b.id === booking.id ? { ...b, email_sent: true } : b
+            ));
+          } else {
+            console.warn("Automatic email notification not sent:", res.error);
+          }
+        }).catch((err) => {
+          console.warn("Error sending automatic confirmation email on payment verification:", err);
         });
       }
       

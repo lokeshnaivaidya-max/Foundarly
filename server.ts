@@ -2,7 +2,18 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
-import { generateUserEmailHTML, generateConsultantEmailHTML, EmailBookingData } from "./src/utils/emailTemplates.ts";
+import dotenv from "dotenv";
+import {
+  generateUserEmailHTML,
+  generateConsultantEmailHTML,
+  generateApplicationApprovedEmailHTML,
+  generateApplicationRejectedEmailHTML,
+  EmailBookingData,
+  EmailApplicationApprovedData,
+  EmailApplicationRejectedData,
+} from "./src/utils/emailTemplates.ts";
+
+dotenv.config();
 
 const currentDir = typeof __dirname !== "undefined" ? __dirname : process.cwd();
 
@@ -36,7 +47,7 @@ async function startServer() {
       }
 
       const resendApiKey = process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY;
-      const fromEmail = process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || "Foundarly <onboarding@resend.dev>";
+      const fromEmail = process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>";
       const siteUrl = process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`;
 
       if (!resendApiKey) {
@@ -185,6 +196,106 @@ async function startServer() {
       return res.status(500).json({
         success: false,
         error: error?.message || "Internal server error while sending email",
+      });
+    }
+  });
+
+  // API Route: Send Consultant Application Status Notification (Approved / Rejected)
+  app.post("/api/send-application-email", async (req, res) => {
+    try {
+      const { type, applicationData } = req.body || {};
+
+      if (!type || !applicationData) {
+        return res.status(400).json({
+          success: false,
+          error: "Application decision type ('approved' | 'rejected') and applicationData are required.",
+        });
+      }
+
+      const resendApiKey = process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY;
+      const fromEmail = process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>";
+      const siteUrl = process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`;
+
+      if (!resendApiKey) {
+        console.warn("[Server Email] RESEND_API_KEY is not configured.");
+        return res.status(400).json({
+          success: false,
+          error: "RESEND_API_KEY is not configured on the server. Please add your Resend API Key in Settings.",
+          missingConfig: "RESEND_API_KEY",
+        });
+      }
+
+      const recipientEmail = applicationData.applicantEmail?.toLowerCase().trim();
+      if (!recipientEmail || !recipientEmail.includes("@")) {
+        return res.status(400).json({
+          success: false,
+          error: "Valid applicant email address is required.",
+        });
+      }
+
+      let emailHtml = "";
+      let emailSubject = "";
+
+      if (type === "approved") {
+        emailSubject = "🎉 Your Foundarly Consultant Application has been APPROVED!";
+        emailHtml = generateApplicationApprovedEmailHTML({
+          ...applicationData,
+          dashboardUrl: applicationData.dashboardUrl || siteUrl,
+        });
+      } else if (type === "rejected") {
+        emailSubject = "Update regarding your Foundarly Consultant Application";
+        emailHtml = generateApplicationRejectedEmailHTML({
+          ...applicationData,
+          supportUrl: applicationData.supportUrl || siteUrl,
+        });
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid application notification type: '${type}'. Expected 'approved' or 'rejected'.`,
+        });
+      }
+
+      console.log(`[Server Email] Dispatching ${type} notification to applicant ${recipientEmail}...`);
+
+      const resendResponse = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${resendApiKey}`,
+        },
+        body: JSON.stringify({
+          from: fromEmail,
+          to: [recipientEmail],
+          subject: emailSubject,
+          html: emailHtml,
+        }),
+      });
+
+      const resendResult = await resendResponse.json();
+
+      if (!resendResponse.ok) {
+        console.error("[Server Email] Resend API Error:", resendResult);
+        const errMsg = resendResult?.message || resendResult?.error || JSON.stringify(resendResult);
+        return res.status(resendResponse.status).json({
+          success: false,
+          error: `Resend API Error: ${errMsg}`,
+          details: resendResult,
+        });
+      }
+
+      console.log(`[Server Email] Application ${type} email sent successfully! Resend ID: ${resendResult.id}`);
+
+      return res.json({
+        success: true,
+        message: `Application ${type} email sent successfully`,
+        emailId: resendResult.id,
+        recipient: recipientEmail,
+      });
+    } catch (error: any) {
+      console.error("[Server Email] Unexpected error sending application notification email:", error);
+      return res.status(500).json({
+        success: false,
+        error: error?.message || "Internal server error while sending application email",
       });
     }
   });

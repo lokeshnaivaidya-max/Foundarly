@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Eye, Check, X, UserPlus } from 'lucide-react';
+import { Search, Eye, Check, X, UserPlus, Mail } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import {
 import { consultantApplicationsService } from '@/services/consultantApplications';
 import { consultantsService } from '@/services/consultants';
 import { profilesService } from '@/services/profiles';
+import { emailService } from '@/services/email';
 import { useToast } from '@/hooks/use-toast';
 import type { Database } from '@/lib/database.types';
 
@@ -28,6 +29,7 @@ export default function AdminConsultantApplications() {
   const [selectedApp, setSelectedApp] = useState<ConsultantApplication | null>(null);
   const [adminNotes, setAdminNotes] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
 
   useEffect(() => {
@@ -102,10 +104,36 @@ export default function AdminConsultantApplications() {
         admin_notes: adminNotes
       });
 
-      toast({
-        title: 'Application Approved',
-        description: `${selectedApp.name} has been approved and added as a consultant!`
-      });
+      // Step 5: Send Application Approval Email Notification to the applicant
+      try {
+        console.log(`[AdminApplications] Sending approval email to ${selectedApp.email}...`);
+        const emailResult = await emailService.sendApplicationApproval({
+          applicantName: selectedApp.name,
+          applicantEmail: selectedApp.email,
+          qualification: selectedApp.qualification,
+          currentJob: selectedApp.current_job,
+          preferredTiming: selectedApp.preferred_session_timing,
+          adminNotes: adminNotes || null,
+        });
+
+        if (emailResult.success) {
+          toast({
+            title: 'Application Approved & Email Sent',
+            description: `${selectedApp.name} has been approved and a welcome email was sent to ${selectedApp.email}.`
+          });
+        } else {
+          toast({
+            title: 'Approved (Email Notice)',
+            description: `${selectedApp.name} was approved, but email delivery noted: ${emailResult.error || 'Check Resend key'}`
+          });
+        }
+      } catch (emailErr) {
+        console.warn('[AdminApplications] Non-fatal email error on approval:', emailErr);
+        toast({
+          title: 'Application Approved',
+          description: `${selectedApp.name} has been approved and added as a consultant!`
+        });
+      }
 
       setViewDialogOpen(false);
       loadApplications();
@@ -156,10 +184,33 @@ export default function AdminConsultantApplications() {
         admin_notes: adminNotes
       });
 
-      toast({
-        title: 'Application Rejected',
-        description: 'Application has been rejected'
-      });
+      // Send Application Rejection Email Notification to the applicant
+      try {
+        console.log(`[AdminApplications] Sending rejection email to ${selectedApp.email}...`);
+        const emailResult = await emailService.sendApplicationRejection({
+          applicantName: selectedApp.name,
+          applicantEmail: selectedApp.email,
+          reason: adminNotes || null,
+        });
+
+        if (emailResult.success) {
+          toast({
+            title: 'Application Rejected & Email Sent',
+            description: `Application rejected and notification email sent to ${selectedApp.email}.`
+          });
+        } else {
+          toast({
+            title: 'Application Rejected',
+            description: `Application rejected. Note on email: ${emailResult.error || 'Check Resend key'}`
+          });
+        }
+      } catch (emailErr) {
+        console.warn('[AdminApplications] Non-fatal email error on rejection:', emailErr);
+        toast({
+          title: 'Application Rejected',
+          description: 'Application has been rejected'
+        });
+      }
 
       setViewDialogOpen(false);
       loadApplications();
@@ -177,6 +228,44 @@ export default function AdminConsultantApplications() {
       });
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleResendEmail = async () => {
+    if (!selectedApp) return;
+    setSendingEmail(true);
+
+    try {
+      if (selectedApp.status === 'approved') {
+        const res = await emailService.sendApplicationApproval({
+          applicantName: selectedApp.name,
+          applicantEmail: selectedApp.email,
+          qualification: selectedApp.qualification,
+          currentJob: selectedApp.current_job,
+          preferredTiming: selectedApp.preferred_session_timing,
+          adminNotes: adminNotes || selectedApp.admin_notes || null,
+        });
+        if (res.success) {
+          toast({ title: 'Email Sent', description: `Approval email sent to ${selectedApp.email}` });
+        } else {
+          toast({ title: 'Email Failed', description: res.error || 'Failed to send email', variant: 'destructive' });
+        }
+      } else if (selectedApp.status === 'rejected') {
+        const res = await emailService.sendApplicationRejection({
+          applicantName: selectedApp.name,
+          applicantEmail: selectedApp.email,
+          reason: adminNotes || selectedApp.admin_notes || null,
+        });
+        if (res.success) {
+          toast({ title: 'Email Sent', description: `Rejection email sent to ${selectedApp.email}` });
+        } else {
+          toast({ title: 'Email Failed', description: res.error || 'Failed to send email', variant: 'destructive' });
+        }
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err?.message || 'Failed to resend email', variant: 'destructive' });
+    } finally {
+      setSendingEmail(false);
     }
   };
 
@@ -467,9 +556,20 @@ export default function AdminConsultantApplications() {
           )}
 
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setViewDialogOpen(false)} disabled={processing}>
+            <Button variant="outline" onClick={() => setViewDialogOpen(false)} disabled={processing || sendingEmail}>
               Close
             </Button>
+            {selectedApp?.status !== 'pending' && (
+              <Button
+                variant="outline"
+                onClick={handleResendEmail}
+                disabled={sendingEmail || processing}
+                className="border-primary/40 text-primary hover:bg-primary/10"
+              >
+                <Mail className="h-4 w-4 mr-1" />
+                {sendingEmail ? 'Sending Email...' : `Resend ${selectedApp?.status === 'approved' ? 'Approval' : 'Rejection'} Email`}
+              </Button>
+            )}
             {selectedApp?.status === 'pending' && (
               <>
                 <Button

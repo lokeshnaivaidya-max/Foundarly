@@ -1,6 +1,14 @@
 import { supabase } from '@/lib/supabase';
 import { secureLog, validateEmail, validateUUID } from '@/utils/security';
-import { generateUserEmailHTML, generateConsultantEmailHTML, EmailBookingData } from '@/utils/emailTemplates';
+import {
+  generateUserEmailHTML,
+  generateConsultantEmailHTML,
+  generateApplicationApprovedEmailHTML,
+  generateApplicationRejectedEmailHTML,
+  EmailBookingData,
+  EmailApplicationApprovedData,
+  EmailApplicationRejectedData,
+} from '@/utils/emailTemplates';
 
 export interface EmailSendResult {
   success: boolean;
@@ -148,7 +156,7 @@ export const emailService = {
       if (clientResendKey) {
         try {
           console.log('[EmailService] Attempting delivery via client Resend key...');
-          const fromEmail = import.meta.env.VITE_EMAIL_FROM || 'Foundarly <onboarding@resend.dev>';
+          const fromEmail = import.meta.env.VITE_EMAIL_FROM || 'Foundarly <officialfoundarly@gmail.com>';
           const userHtml = generateUserEmailHTML(emailData);
 
           const clientRes = await fetch('https://api.resend.com/emails', {
@@ -198,6 +206,184 @@ export const emailService = {
         success: false,
         error: error?.message || 'Unexpected error sending confirmation email',
       };
+    }
+  },
+
+  /**
+   * Send application approval notification email to consultant applicant
+   */
+  async sendApplicationApproval(data: EmailApplicationApprovedData): Promise<EmailSendResult> {
+    try {
+      console.log(`[EmailService] Dispatching application APPROVAL email to: ${data.applicantEmail}`);
+
+      if (!data.applicantEmail || !validateEmail(data.applicantEmail)) {
+        return { success: false, error: `Invalid applicant email address: ${data.applicantEmail}` };
+      }
+
+      const siteUrl = typeof window !== 'undefined' ? window.location.origin : (import.meta.env.VITE_SITE_URL || 'https://foundarly.com');
+      const payload: EmailApplicationApprovedData = {
+        ...data,
+        dashboardUrl: data.dashboardUrl || siteUrl,
+      };
+
+      // ── Method 1: Server-side API endpoint (/api/send-application-email) ──
+      try {
+        const apiResponse = await fetch('/api/send-application-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'approved',
+            applicationData: payload,
+          }),
+        });
+
+        if (apiResponse.ok) {
+          const apiResult = await apiResponse.json();
+          if (apiResult?.success) {
+            console.log('[EmailService] Application approval email sent via Server API:', apiResult);
+            return {
+              success: true,
+              message: 'Application approval email sent successfully',
+              userEmailId: apiResult.emailId,
+              recipient: payload.applicantEmail,
+            };
+          }
+        }
+      } catch (serverErr) {
+        console.warn('[EmailService] Server API call for application approval failed:', serverErr);
+      }
+
+      // ── Method 2: Direct Client Resend API fallback ──
+      const clientResendKey = import.meta.env.VITE_RESEND_API_KEY;
+      if (clientResendKey) {
+        try {
+          const fromEmail = import.meta.env.VITE_EMAIL_FROM || 'Foundarly <officialfoundarly@gmail.com>';
+          const html = generateApplicationApprovedEmailHTML(payload);
+          const clientRes = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${clientResendKey}`,
+            },
+            body: JSON.stringify({
+              from: fromEmail,
+              to: [payload.applicantEmail],
+              subject: '🎉 Your Foundarly Consultant Application has been APPROVED!',
+              html,
+            }),
+          });
+
+          if (clientRes.ok) {
+            const clientResult = await clientRes.json();
+            return {
+              success: true,
+              message: 'Application approval email sent successfully',
+              userEmailId: clientResult?.id,
+              recipient: payload.applicantEmail,
+            };
+          }
+        } catch (clientErr) {
+          console.error('[EmailService] Client fallback for approval email failed:', clientErr);
+        }
+      }
+
+      return {
+        success: false,
+        error: 'Email service could not dispatch approval notification. Please verify RESEND_API_KEY.',
+        recipient: payload.applicantEmail,
+      };
+    } catch (error: any) {
+      console.error('[EmailService] Fatal error sending approval email:', error);
+      return { success: false, error: error?.message || 'Error sending approval email' };
+    }
+  },
+
+  /**
+   * Send application rejection notification email to consultant applicant
+   */
+  async sendApplicationRejection(data: EmailApplicationRejectedData): Promise<EmailSendResult> {
+    try {
+      console.log(`[EmailService] Dispatching application REJECTION email to: ${data.applicantEmail}`);
+
+      if (!data.applicantEmail || !validateEmail(data.applicantEmail)) {
+        return { success: false, error: `Invalid applicant email address: ${data.applicantEmail}` };
+      }
+
+      const siteUrl = typeof window !== 'undefined' ? window.location.origin : (import.meta.env.VITE_SITE_URL || 'https://foundarly.com');
+      const payload: EmailApplicationRejectedData = {
+        ...data,
+        supportUrl: data.supportUrl || siteUrl,
+      };
+
+      // ── Method 1: Server-side API endpoint (/api/send-application-email) ──
+      try {
+        const apiResponse = await fetch('/api/send-application-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'rejected',
+            applicationData: payload,
+          }),
+        });
+
+        if (apiResponse.ok) {
+          const apiResult = await apiResponse.json();
+          if (apiResult?.success) {
+            console.log('[EmailService] Application rejection email sent via Server API:', apiResult);
+            return {
+              success: true,
+              message: 'Application rejection email sent successfully',
+              userEmailId: apiResult.emailId,
+              recipient: payload.applicantEmail,
+            };
+          }
+        }
+      } catch (serverErr) {
+        console.warn('[EmailService] Server API call for application rejection failed:', serverErr);
+      }
+
+      // ── Method 2: Direct Client Resend API fallback ──
+      const clientResendKey = import.meta.env.VITE_RESEND_API_KEY;
+      if (clientResendKey) {
+        try {
+          const fromEmail = import.meta.env.VITE_EMAIL_FROM || 'Foundarly <officialfoundarly@gmail.com>';
+          const html = generateApplicationRejectedEmailHTML(payload);
+          const clientRes = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${clientResendKey}`,
+            },
+            body: JSON.stringify({
+              from: fromEmail,
+              to: [payload.applicantEmail],
+              subject: 'Update regarding your Foundarly Consultant Application',
+              html,
+            }),
+          });
+
+          if (clientRes.ok) {
+            const clientResult = await clientRes.json();
+            return {
+              success: true,
+              message: 'Application rejection email sent successfully',
+              userEmailId: clientResult?.id,
+              recipient: payload.applicantEmail,
+            };
+          }
+        } catch (clientErr) {
+          console.error('[EmailService] Client fallback for rejection email failed:', clientErr);
+        }
+      }
+
+      return {
+        success: false,
+        error: 'Email service could not dispatch rejection notification. Please verify RESEND_API_KEY.',
+        recipient: payload.applicantEmail,
+      };
+    } catch (error: any) {
+      console.error('[EmailService] Fatal error sending rejection email:', error);
+      return { success: false, error: error?.message || 'Error sending rejection email' };
     }
   },
 };

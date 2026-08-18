@@ -46,9 +46,9 @@ async function startServer() {
         });
       }
 
-      const resendApiKey = (process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY || '').trim();
-      const fromEmail = (process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>").trim();
-      const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`).trim();
+      const resendApiKey = process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY;
+      const fromEmail = process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>";
+      const siteUrl = process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`;
 
       if (!resendApiKey) {
         console.warn("[Server Email] RESEND_API_KEY is not configured.");
@@ -212,9 +212,9 @@ async function startServer() {
         });
       }
 
-      const resendApiKey = (process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY || '').trim();
-      const fromEmail = (process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>").trim();
-      const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`).trim();
+      const resendApiKey = process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY;
+      const fromEmail = process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>";
+      const siteUrl = process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`;
 
       if (!resendApiKey) {
         console.warn("[Server Email] RESEND_API_KEY is not configured.");

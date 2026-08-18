@@ -1,4 +1,4 @@
-import { generateUserEmailHTML, generateConsultantEmailHTML, EmailBookingData } from '../src/utils/emailTemplates.js';
+import { generateUserEmailHTML, generateConsultantEmailHTML, EmailBookingData } from '../src/utils/emailTemplates';
 
 interface RequestLike {
   method?: string;
@@ -28,7 +28,16 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
   }
 
   try {
-    const { bookingId, emailData } = req.body || {};
+    const rawBody = req.body;
+    let parsedBody = rawBody;
+    if (typeof rawBody === 'string') {
+      try {
+        parsedBody = JSON.parse(rawBody);
+      } catch {
+        parsedBody = {};
+      }
+    }
+    const { bookingId, emailData } = parsedBody || {};
 
     if (!bookingId && !emailData) {
       return res.status(400).json({
@@ -37,9 +46,9 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       });
     }
 
-    const resendApiKey = process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY;
-    const fromEmail = process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || 'Foundarly <officialfoundarly@gmail.com>';
-    const siteUrl = process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || 'https://foundarly.com';
+    const resendApiKey = (process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY || '').trim();
+    const fromEmail = (process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || 'Foundarly <officialfoundarly@gmail.com>').trim();
+    const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || 'https://foundarly.com').trim();
 
     if (!resendApiKey) {
       return res.status(400).json({

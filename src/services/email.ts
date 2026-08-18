@@ -83,6 +83,8 @@ export const emailService = {
         message: booking.message,
       };
 
+      let lastServerError: string | undefined;
+
       // ── Method 1: Try Server-side API endpoint (/api/send-booking-email) ──
       try {
         console.log('[EmailService] Attempting delivery via server API /api/send-booking-email...');
@@ -108,16 +110,23 @@ export const emailService = {
               userEmailId: apiResult.userEmailId,
               recipient: emailData.userEmail,
             };
-          } else if (apiResult?.missingConfig === 'RESEND_API_KEY') {
-            console.warn('[EmailService] Server reported missing RESEND_API_KEY, attempting edge/client fallbacks...');
           } else {
-            console.warn('[EmailService] Server API returned error:', apiResult?.error);
+            lastServerError = apiResult?.error;
+            console.warn('[EmailService] Server API returned error result:', apiResult?.error);
           }
-        } else if (apiResponse.status !== 404) {
-          const errorText = await apiResponse.text();
-          console.warn(`[EmailService] Server API responded with status ${apiResponse.status}:`, errorText);
+        } else {
+          try {
+            const errJson = await apiResponse.json();
+            lastServerError = errJson?.error || errJson?.message;
+          } catch {
+            const errorText = await apiResponse.text();
+            if (errorText && errorText.length < 200 && !errorText.includes('<!doctype')) {
+              lastServerError = errorText;
+            }
+          }
+          console.warn(`[EmailService] Server API responded with status ${apiResponse.status}:`, lastServerError);
         }
-      } catch (serverErr) {
+      } catch (serverErr: any) {
         console.warn('[EmailService] Server API unreachable or threw error:', serverErr);
       }
 
@@ -192,7 +201,7 @@ export const emailService = {
       }
 
       // If all methods failed:
-      const configHelp = 'Email service is not configured. Please set the RESEND_API_KEY environment variable in settings or deploy the Supabase edge function.';
+      const configHelp = lastServerError || 'Email service is not configured. Please set the RESEND_API_KEY environment variable in settings or deploy the Supabase edge function.';
       console.warn(`[EmailService] ${configHelp}`);
       return {
         success: false,

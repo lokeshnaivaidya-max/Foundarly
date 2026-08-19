@@ -12,6 +12,7 @@ import {
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
 } from "./src/utils/emailTemplates.ts";
+import { sendEmail, verifySmtpConnection } from "./src/server/mailer.ts";
 
 dotenv.config();
 
@@ -25,13 +26,40 @@ async function startServer() {
 
   // API Health Check
   app.get("/api/health", (req, res) => {
-    const hasResend = Boolean(process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY);
+    const hasSmtp = Boolean(process.env.SMTP_PASS);
     res.json({
       status: "ok",
       service: "Foundarly Server",
-      emailConfigured: hasResend,
+      emailService: "Gmail SMTP (Nodemailer)",
+      emailConfigured: hasSmtp,
+      smtpHost: process.env.SMTP_HOST || "smtp.gmail.com",
+      smtpPort: parseInt(process.env.SMTP_PORT || "587", 10),
+      smtpUser: process.env.SMTP_USER || "officialfoundarly@gmail.com",
       timestamp: new Date().toISOString(),
     });
+  });
+
+  // API Route: Verify SMTP Connection
+  app.get("/api/verify-smtp", async (req, res) => {
+    try {
+      const result = await verifySmtpConnection();
+      if (result.success) {
+        return res.json({
+          success: true,
+          message: "Gmail SMTP connection verified successfully over TLS.",
+        });
+      } else {
+        return res.status(500).json({
+          success: false,
+          error: result.error || "SMTP verification failed",
+        });
+      }
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: err?.message || "Internal error verifying SMTP",
+      });
+    }
   });
 
   // API Route: Send Booking Confirmation Email
@@ -46,16 +74,15 @@ async function startServer() {
         });
       }
 
-      const resendApiKey = (process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY || '').trim();
-      const fromEmail = (process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>").trim();
+      const fromEmail = (process.env.EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>").trim();
       const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`).trim();
 
-      if (!resendApiKey) {
-        console.warn("[Server Email] RESEND_API_KEY is not configured.");
+      if (!process.env.SMTP_PASS) {
+        console.warn("[Server Email] SMTP_PASS is not configured.");
         return res.status(400).json({
           success: false,
-          error: "RESEND_API_KEY is not configured on the server. Please add your Resend API Key in Settings.",
-          missingConfig: "RESEND_API_KEY",
+          error: "SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Google App Password).",
+          missingConfig: "SMTP_PASS",
         });
       }
 
@@ -127,57 +154,38 @@ async function startServer() {
 
       const userHtml = generateUserEmailHTML(dataToSend);
 
-      // Send to user via Resend API
-      const resendResponse = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${resendApiKey}`,
-        },
-        body: JSON.stringify({
-          from: fromEmail,
-          to: [dataToSend.userEmail],
-          subject: "✓ Booking Confirmed - Your Consultation is Scheduled | Foundarly",
-          html: userHtml,
-        }),
+      // Send to user via Gmail SMTP
+      const mailResult = await sendEmail({
+        from: fromEmail,
+        to: dataToSend.userEmail,
+        subject: "✓ Booking Confirmed - Your Consultation is Scheduled | Foundarly",
+        html: userHtml,
       });
 
-      const resendResult = await resendResponse.json();
-
-      if (!resendResponse.ok) {
-        console.error("[Server Email] Resend API Error:", resendResult);
-        const errMsg = resendResult?.message || resendResult?.error || JSON.stringify(resendResult);
-        return res.status(resendResponse.status).json({
+      if (!mailResult.success) {
+        return res.status(500).json({
           success: false,
-          error: `Resend API Error: ${errMsg}`,
-          details: resendResult,
+          error: mailResult.error || "Failed to send booking confirmation email via Gmail SMTP",
+          details: mailResult.details,
         });
       }
 
-      console.log(`[Server Email] User email sent successfully! Resend ID: ${resendResult.id}`);
+      console.log(`[Server Email] User email sent successfully! Message ID: ${mailResult.messageId}`);
 
       // Optionally send to consultant if email is present
-      let consultantResendId = null;
+      let consultantEmailId = null;
       if (dataToSend.consultantEmail && dataToSend.consultantEmail.includes("@") && dataToSend.consultantEmail !== dataToSend.userEmail) {
         try {
           const consultantHtml = generateConsultantEmailHTML(dataToSend);
-          const consultantRes = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${resendApiKey}`,
-            },
-            body: JSON.stringify({
-              from: fromEmail,
-              to: [dataToSend.consultantEmail],
-              subject: `🎉 New Booking Scheduled with ${dataToSend.userName} | Foundarly`,
-              html: consultantHtml,
-            }),
+          const consultantMailRes = await sendEmail({
+            from: fromEmail,
+            to: dataToSend.consultantEmail,
+            subject: `🎉 New Booking Scheduled with ${dataToSend.userName} | Foundarly`,
+            html: consultantHtml,
           });
-          if (consultantRes.ok) {
-            const consJson = await consultantRes.json();
-            consultantResendId = consJson?.id;
-            console.log(`[Server Email] Consultant email sent successfully! Resend ID: ${consultantResendId}`);
+          if (consultantMailRes.success) {
+            consultantEmailId = consultantMailRes.messageId;
+            console.log(`[Server Email] Consultant email sent successfully! Message ID: ${consultantEmailId}`);
           }
         } catch (consErr) {
           console.warn("[Server Email] Consultant email error (non-fatal):", consErr);
@@ -187,8 +195,8 @@ async function startServer() {
       return res.json({
         success: true,
         message: "Booking confirmation email sent successfully",
-        userEmailId: resendResult.id,
-        consultantEmailId: consultantResendId,
+        userEmailId: mailResult.messageId,
+        consultantEmailId: consultantEmailId,
         recipient: dataToSend.userEmail,
       });
     } catch (error: any) {
@@ -212,16 +220,15 @@ async function startServer() {
         });
       }
 
-      const resendApiKey = (process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY || '').trim();
-      const fromEmail = (process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>").trim();
+      const fromEmail = (process.env.EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>").trim();
       const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`).trim();
 
-      if (!resendApiKey) {
-        console.warn("[Server Email] RESEND_API_KEY is not configured.");
+      if (!process.env.SMTP_PASS) {
+        console.warn("[Server Email] SMTP_PASS is not configured.");
         return res.status(400).json({
           success: false,
-          error: "RESEND_API_KEY is not configured on the server. Please add your Resend API Key in Settings.",
-          missingConfig: "RESEND_API_KEY",
+          error: "SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Google App Password).",
+          missingConfig: "SMTP_PASS",
         });
       }
 
@@ -257,38 +264,27 @@ async function startServer() {
 
       console.log(`[Server Email] Dispatching ${type} notification to applicant ${recipientEmail}...`);
 
-      const resendResponse = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${resendApiKey}`,
-        },
-        body: JSON.stringify({
-          from: fromEmail,
-          to: [recipientEmail],
-          subject: emailSubject,
-          html: emailHtml,
-        }),
+      const mailResult = await sendEmail({
+        from: fromEmail,
+        to: recipientEmail,
+        subject: emailSubject,
+        html: emailHtml,
       });
 
-      const resendResult = await resendResponse.json();
-
-      if (!resendResponse.ok) {
-        console.error("[Server Email] Resend API Error:", resendResult);
-        const errMsg = resendResult?.message || resendResult?.error || JSON.stringify(resendResult);
-        return res.status(resendResponse.status).json({
+      if (!mailResult.success) {
+        return res.status(500).json({
           success: false,
-          error: `Resend API Error: ${errMsg}`,
-          details: resendResult,
+          error: mailResult.error || `Failed to send ${type} email via Gmail SMTP`,
+          details: mailResult.details,
         });
       }
 
-      console.log(`[Server Email] Application ${type} email sent successfully! Resend ID: ${resendResult.id}`);
+      console.log(`[Server Email] Application ${type} email sent successfully! Message ID: ${mailResult.messageId}`);
 
       return res.json({
         success: true,
         message: `Application ${type} email sent successfully`,
-        emailId: resendResult.id,
+        emailId: mailResult.messageId,
         recipient: recipientEmail,
       });
     } catch (error: any) {

@@ -18,12 +18,16 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     return res.status(200).end();
   }
 
-  const hasResend = Boolean(process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY);
+  const hasSmtp = Boolean(process.env.SMTP_PASS);
 
   return res.status(200).json({
     status: 'ok',
     service: 'Foundarly Serverless API',
-    emailConfigured: hasResend,
+    emailService: 'Gmail SMTP (Nodemailer)',
+    emailConfigured: hasSmtp,
+    smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com',
+    smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
+    smtpUser: process.env.SMTP_USER || 'officialfoundarly@gmail.com',
     timestamp: new Date().toISOString(),
   });
 }

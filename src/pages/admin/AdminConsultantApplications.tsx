@@ -124,7 +124,7 @@ export default function AdminConsultantApplications() {
         } else {
           toast({
             title: 'Approved (Email Notice)',
-            description: `${selectedApp.name} was approved, but email delivery noted: ${emailResult.error || 'Check Resend key'}`
+            description: `${selectedApp.name} was approved, but email delivery noted: ${emailResult.error || 'Check SMTP configuration'}`
           });
         }
       } catch (emailErr) {
@@ -201,7 +201,7 @@ export default function AdminConsultantApplications() {
         } else {
           toast({
             title: 'Application Rejected',
-            description: `Application rejected. Note on email: ${emailResult.error || 'Check Resend key'}`
+            description: `Application rejected. Note on email: ${emailResult.error || 'Check SMTP configuration'}`
           });
         }
       } catch (emailErr) {

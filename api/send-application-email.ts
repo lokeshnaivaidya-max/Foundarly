@@ -4,6 +4,7 @@ import {
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
 } from '../src/utils/emailTemplates';
+import { sendEmail } from '../src/server/mailer';
 
 interface RequestLike {
   method?: string;
@@ -51,15 +52,14 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       });
     }
 
-    const resendApiKey = (process.env.RESEND_API_KEY || process.env.RESEND_KEY || process.env.VITE_RESEND_API_KEY || '').trim();
-    const fromEmail = (process.env.EMAIL_FROM || process.env.VITE_EMAIL_FROM || 'Foundarly <officialfoundarly@gmail.com>').trim();
+    const fromEmail = (process.env.EMAIL_FROM || 'Foundarly <officialfoundarly@gmail.com>').trim();
     const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || 'https://foundarly.com').trim();
 
-    if (!resendApiKey) {
+    if (!process.env.SMTP_PASS) {
       return res.status(400).json({
         success: false,
-        error: 'RESEND_API_KEY is not configured on the server.',
-        missingConfig: 'RESEND_API_KEY',
+        error: 'SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Google App Password).',
+        missingConfig: 'SMTP_PASS',
       });
     }
 
@@ -93,41 +93,31 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       });
     }
 
-    const resendResponse = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${resendApiKey}`,
-      },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [recipientEmail],
-        subject: emailSubject,
-        html: emailHtml,
-      }),
+    const mailResult = await sendEmail({
+      from: fromEmail,
+      to: recipientEmail,
+      subject: emailSubject,
+      html: emailHtml,
     });
 
-    const resendResult = (await resendResponse.json()) as any;
-
-    if (!resendResponse.ok) {
-      const errMsg = resendResult?.message || resendResult?.error || JSON.stringify(resendResult);
-      return res.status(resendResponse.status).json({
+    if (!mailResult.success) {
+      return res.status(500).json({
         success: false,
-        error: `Resend API Error: ${errMsg}`,
-        details: resendResult,
+        error: mailResult.error || `Failed to send ${type} email via Gmail SMTP`,
+        details: mailResult.details,
       });
     }
 
     return res.status(200).json({
       success: true,
       message: `Application ${type} email sent successfully`,
-      emailId: resendResult.id,
+      emailId: mailResult.messageId,
       recipient: recipientEmail,
     });
   } catch (error: any) {
     return res.status(500).json({
       success: false,
-      error: error?.message || 'Internal server error while sending email',
+      error: error?.message || 'Internal server error while sending application email',
     });
   }
 }

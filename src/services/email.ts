@@ -1,10 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { secureLog, validateEmail, validateUUID } from '@/utils/security';
 import {
-  generateUserEmailHTML,
-  generateConsultantEmailHTML,
-  generateApplicationApprovedEmailHTML,
-  generateApplicationRejectedEmailHTML,
   EmailBookingData,
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
@@ -21,10 +17,7 @@ export interface EmailSendResult {
 export const emailService = {
   /**
    * Send booking confirmation emails to user (and consultant)
-   * Resilient, multi-layer delivery:
-   * 1. Express backend API route (/api/send-booking-email)
-   * 2. Supabase Edge Function (send-booking-email)
-   * 3. Direct client-side Resend API (if VITE_RESEND_API_KEY configured)
+   * Dispatches via server-side Gmail SMTP endpoint (/api/send-booking-email)
    *
    * @param bookingId - The booking ID to send emails for
    * @returns Promise with success status and informative error/message
@@ -85,9 +78,9 @@ export const emailService = {
 
       let lastServerError: string | undefined;
 
-      // ── Method 1: Try Server-side API endpoint (/api/send-booking-email) ──
+      // ── Method 1: Primary Delivery via Server-side Gmail SMTP (/api/send-booking-email) ──
       try {
-        console.log('[EmailService] Attempting delivery via server API /api/send-booking-email...');
+        console.log('[EmailService] Dispatching confirmation email via /api/send-booking-email...');
         const apiResponse = await fetch('/api/send-booking-email', {
           method: 'POST',
           headers: {
@@ -102,8 +95,8 @@ export const emailService = {
         if (apiResponse.ok) {
           const apiResult = await apiResponse.json();
           if (apiResult?.success) {
-            console.log('[EmailService] Confirmation email sent successfully via server API:', apiResult);
-            secureLog.info('Booking confirmation emails sent successfully via Server API');
+            console.log('[EmailService] Confirmation email sent successfully via server Gmail SMTP:', apiResult);
+            secureLog.info('Booking confirmation email sent successfully via server Gmail SMTP');
             return {
               success: true,
               message: 'Confirmation email sent successfully',
@@ -112,7 +105,7 @@ export const emailService = {
             };
           } else {
             lastServerError = apiResult?.error;
-            console.warn('[EmailService] Server API returned error result:', apiResult?.error);
+            console.warn('[EmailService] Server SMTP returned error:', apiResult?.error);
           }
         } else {
           try {
@@ -124,15 +117,14 @@ export const emailService = {
               lastServerError = errorText;
             }
           }
-          console.warn(`[EmailService] Server API responded with status ${apiResponse.status}:`, lastServerError);
+          console.warn(`[EmailService] Server SMTP API status ${apiResponse.status}:`, lastServerError);
         }
       } catch (serverErr: any) {
-        console.warn('[EmailService] Server API unreachable or threw error:', serverErr);
+        console.warn('[EmailService] Server SMTP API unreachable:', serverErr);
       }
 
-      // ── Method 2: Try Supabase Edge Function (send-booking-email) ──
+      // ── Method 2: Fallback to Supabase Edge Function (if deployed) ──
       try {
-        console.log('[EmailService] Attempting delivery via Supabase Edge Function "send-booking-email"...');
         const { data: { session } } = await supabase.auth.getSession();
         
         const { data: edgeData, error: edgeError } = await supabase.functions.invoke('send-booking-email', {
@@ -146,62 +138,19 @@ export const emailService = {
         });
 
         if (!edgeError && edgeData?.success) {
-          console.log('[EmailService] Confirmation email sent successfully via Supabase Edge Function:', edgeData);
+          console.log('[EmailService] Confirmation email delivered via Edge Function:', edgeData);
           secureLog.info('Booking confirmation emails sent successfully via Edge Function');
           return {
             success: true,
             message: 'Confirmation email sent successfully',
             recipient: emailData.userEmail,
           };
-        } else if (edgeError) {
-          console.warn('[EmailService] Supabase Edge Function returned error or not found:', edgeError.message);
         }
       } catch (edgeErr) {
-        console.warn('[EmailService] Supabase Edge Function invocation failed:', edgeErr);
+        console.warn('[EmailService] Supabase Edge Function invocation skipped or failed:', edgeErr);
       }
 
-      // ── Method 3: Direct Client-Side Resend API (if VITE_RESEND_API_KEY available) ──
-      const clientResendKey = import.meta.env.VITE_RESEND_API_KEY;
-      if (clientResendKey) {
-        try {
-          console.log('[EmailService] Attempting delivery via client Resend key...');
-          const fromEmail = import.meta.env.VITE_EMAIL_FROM || 'Foundarly <officialfoundarly@gmail.com>';
-          const userHtml = generateUserEmailHTML(emailData);
-
-          const clientRes = await fetch('https://api.resend.com/emails', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${clientResendKey}`,
-            },
-            body: JSON.stringify({
-              from: fromEmail,
-              to: [emailData.userEmail],
-              subject: '✓ Booking Confirmed - Your Consultation is Scheduled | Foundarly',
-              html: userHtml,
-            }),
-          });
-
-          if (clientRes.ok) {
-            const clientResult = await clientRes.json();
-            console.log('[EmailService] Confirmation email sent successfully via client Resend API:', clientResult);
-            return {
-              success: true,
-              message: 'Confirmation email sent successfully',
-              userEmailId: clientResult?.id,
-              recipient: emailData.userEmail,
-            };
-          } else {
-            const clientErr = await clientRes.text();
-            console.error('[EmailService] Client Resend API error:', clientErr);
-          }
-        } catch (clientDirectErr: any) {
-          console.error('[EmailService] Client direct email dispatch error:', clientDirectErr);
-        }
-      }
-
-      // If all methods failed:
-      const configHelp = lastServerError || 'Email service is not configured. Please set the RESEND_API_KEY environment variable in settings or deploy the Supabase edge function.';
+      const configHelp = lastServerError || 'Email service is not configured. Please ensure SMTP_PASS is set in server environment variables.';
       console.warn(`[EmailService] ${configHelp}`);
       return {
         success: false,
@@ -210,7 +159,7 @@ export const emailService = {
       };
 
     } catch (error: any) {
-      console.error('[EmailService] Unexpected fatal error in sendBookingConfirmation:', error);
+      console.error('[EmailService] Fatal error in sendBookingConfirmation:', error);
       return {
         success: false,
         error: error?.message || 'Unexpected error sending confirmation email',
@@ -235,7 +184,8 @@ export const emailService = {
         dashboardUrl: data.dashboardUrl || siteUrl,
       };
 
-      // ── Method 1: Server-side API endpoint (/api/send-application-email) ──
+      let lastServerError: string | undefined;
+
       try {
         const apiResponse = await fetch('/api/send-application-email', {
           method: 'POST',
@@ -249,56 +199,34 @@ export const emailService = {
         if (apiResponse.ok) {
           const apiResult = await apiResponse.json();
           if (apiResult?.success) {
-            console.log('[EmailService] Application approval email sent via Server API:', apiResult);
+            console.log('[EmailService] Application approval email sent via Server Gmail SMTP:', apiResult);
             return {
               success: true,
               message: 'Application approval email sent successfully',
               userEmailId: apiResult.emailId,
               recipient: payload.applicantEmail,
             };
+          } else {
+            lastServerError = apiResult?.error;
+          }
+        } else {
+          try {
+            const errJson = await apiResponse.json();
+            lastServerError = errJson?.error || errJson?.message;
+          } catch {
+            const errorText = await apiResponse.text();
+            if (errorText && errorText.length < 200 && !errorText.includes('<!doctype')) {
+              lastServerError = errorText;
+            }
           }
         }
       } catch (serverErr) {
         console.warn('[EmailService] Server API call for application approval failed:', serverErr);
       }
 
-      // ── Method 2: Direct Client Resend API fallback ──
-      const clientResendKey = import.meta.env.VITE_RESEND_API_KEY;
-      if (clientResendKey) {
-        try {
-          const fromEmail = import.meta.env.VITE_EMAIL_FROM || 'Foundarly <officialfoundarly@gmail.com>';
-          const html = generateApplicationApprovedEmailHTML(payload);
-          const clientRes = await fetch('https://api.resend.com/emails', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${clientResendKey}`,
-            },
-            body: JSON.stringify({
-              from: fromEmail,
-              to: [payload.applicantEmail],
-              subject: '🎉 Your Foundarly Consultant Application has been APPROVED!',
-              html,
-            }),
-          });
-
-          if (clientRes.ok) {
-            const clientResult = await clientRes.json();
-            return {
-              success: true,
-              message: 'Application approval email sent successfully',
-              userEmailId: clientResult?.id,
-              recipient: payload.applicantEmail,
-            };
-          }
-        } catch (clientErr) {
-          console.error('[EmailService] Client fallback for approval email failed:', clientErr);
-        }
-      }
-
       return {
         success: false,
-        error: 'Email service could not dispatch approval notification. Please verify RESEND_API_KEY.',
+        error: lastServerError || 'Email service could not dispatch approval notification. Please verify SMTP_PASS configuration.',
         recipient: payload.applicantEmail,
       };
     } catch (error: any) {
@@ -324,7 +252,8 @@ export const emailService = {
         supportUrl: data.supportUrl || siteUrl,
       };
 
-      // ── Method 1: Server-side API endpoint (/api/send-application-email) ──
+      let lastServerError: string | undefined;
+
       try {
         const apiResponse = await fetch('/api/send-application-email', {
           method: 'POST',
@@ -338,56 +267,34 @@ export const emailService = {
         if (apiResponse.ok) {
           const apiResult = await apiResponse.json();
           if (apiResult?.success) {
-            console.log('[EmailService] Application rejection email sent via Server API:', apiResult);
+            console.log('[EmailService] Application rejection email sent via Server Gmail SMTP:', apiResult);
             return {
               success: true,
               message: 'Application rejection email sent successfully',
               userEmailId: apiResult.emailId,
               recipient: payload.applicantEmail,
             };
+          } else {
+            lastServerError = apiResult?.error;
+          }
+        } else {
+          try {
+            const errJson = await apiResponse.json();
+            lastServerError = errJson?.error || errJson?.message;
+          } catch {
+            const errorText = await apiResponse.text();
+            if (errorText && errorText.length < 200 && !errorText.includes('<!doctype')) {
+              lastServerError = errorText;
+            }
           }
         }
       } catch (serverErr) {
         console.warn('[EmailService] Server API call for application rejection failed:', serverErr);
       }
 
-      // ── Method 2: Direct Client Resend API fallback ──
-      const clientResendKey = import.meta.env.VITE_RESEND_API_KEY;
-      if (clientResendKey) {
-        try {
-          const fromEmail = import.meta.env.VITE_EMAIL_FROM || 'Foundarly <officialfoundarly@gmail.com>';
-          const html = generateApplicationRejectedEmailHTML(payload);
-          const clientRes = await fetch('https://api.resend.com/emails', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${clientResendKey}`,
-            },
-            body: JSON.stringify({
-              from: fromEmail,
-              to: [payload.applicantEmail],
-              subject: 'Update regarding your Foundarly Consultant Application',
-              html,
-            }),
-          });
-
-          if (clientRes.ok) {
-            const clientResult = await clientRes.json();
-            return {
-              success: true,
-              message: 'Application rejection email sent successfully',
-              userEmailId: clientResult?.id,
-              recipient: payload.applicantEmail,
-            };
-          }
-        } catch (clientErr) {
-          console.error('[EmailService] Client fallback for rejection email failed:', clientErr);
-        }
-      }
-
       return {
         success: false,
-        error: 'Email service could not dispatch rejection notification. Please verify RESEND_API_KEY.',
+        error: lastServerError || 'Email service could not dispatch rejection notification. Please verify SMTP_PASS configuration.',
         recipient: payload.applicantEmail,
       };
     } catch (error: any) {

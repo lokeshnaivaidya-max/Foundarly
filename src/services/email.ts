@@ -78,7 +78,7 @@ export const emailService = {
 
       let lastServerError: string | undefined;
 
-      // ── Method 1: Primary Delivery via Server-side Gmail SMTP (/api/send-booking-email) ──
+      // ── Primary Delivery via Server-side Gmail SMTP (/api/send-booking-email) ──
       try {
         console.log('[EmailService] Dispatching confirmation email via /api/send-booking-email...');
         const apiResponse = await fetch('/api/send-booking-email', {
@@ -120,34 +120,8 @@ export const emailService = {
           console.warn(`[EmailService] Server SMTP API status ${apiResponse.status}:`, lastServerError);
         }
       } catch (serverErr: any) {
+        lastServerError = serverErr?.message || 'Server SMTP API unreachable';
         console.warn('[EmailService] Server SMTP API unreachable:', serverErr);
-      }
-
-      // ── Method 2: Fallback to Supabase Edge Function (if deployed) ──
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        const { data: edgeData, error: edgeError } = await supabase.functions.invoke('send-booking-email', {
-          body: {
-            bookingId: booking.id,
-            emailData,
-          },
-          headers: session ? {
-            Authorization: `Bearer ${session.access_token}`,
-          } : undefined,
-        });
-
-        if (!edgeError && edgeData?.success) {
-          console.log('[EmailService] Confirmation email delivered via Edge Function:', edgeData);
-          secureLog.info('Booking confirmation emails sent successfully via Edge Function');
-          return {
-            success: true,
-            message: 'Confirmation email sent successfully',
-            recipient: emailData.userEmail,
-          };
-        }
-      } catch (edgeErr) {
-        console.warn('[EmailService] Supabase Edge Function invocation skipped or failed:', edgeErr);
       }
 
       const configHelp = lastServerError || 'Email service is not configured. Please ensure SMTP_PASS is set in server environment variables.';

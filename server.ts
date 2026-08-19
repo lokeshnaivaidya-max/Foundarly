@@ -5,14 +5,18 @@ import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import {
   generateUserEmailHTML,
+  generateUserEmailText,
   generateConsultantEmailHTML,
+  generateConsultantEmailText,
   generateApplicationApprovedEmailHTML,
+  generateApplicationApprovedEmailText,
   generateApplicationRejectedEmailHTML,
+  generateApplicationRejectedEmailText,
   EmailBookingData,
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
-} from "./src/utils/emailTemplates.ts";
-import { sendEmail, verifySmtpConnection } from "./src/server/mailer.ts";
+} from "./src/utils/emailTemplates.js";
+import { sendEmail, verifySmtpConnection } from "./src/server/mailer.js";
 
 dotenv.config();
 
@@ -39,33 +43,62 @@ async function startServer() {
     });
   });
 
-  // API Route: Verify SMTP Connection
+  // API: Verify SMTP Credentials & Handshake
   app.get("/api/verify-smtp", async (req, res) => {
+    const host = process.env.SMTP_HOST || "smtp.gmail.com";
+    const user = process.env.SMTP_USER || "officialfoundarly@gmail.com";
+    const hasPass = Boolean(process.env.SMTP_PASS);
+    const passLength = process.env.SMTP_PASS ? process.env.SMTP_PASS.trim().replace(/\s+/g, "").length : 0;
+
+    if (!hasPass) {
+      return res.status(400).json({
+        success: false,
+        error: "SMTP_PASS environment variable is not configured. Please set SMTP_PASS in environment variables.",
+        config: {
+          smtpHost: host,
+          smtpUser: user,
+          hasSmtpPass: false,
+        },
+      });
+    }
+
     try {
       const result = await verifySmtpConnection();
       if (result.success) {
         return res.json({
           success: true,
-          message: "Gmail SMTP connection verified successfully over TLS.",
+          message: "Gmail SMTP authentication and connection verified successfully!",
+          config: {
+            smtpHost: host,
+            smtpUser: user,
+            hasSmtpPass: true,
+            passLength,
+          },
         });
       } else {
         return res.status(500).json({
           success: false,
-          error: result.error || "SMTP verification failed",
+          error: result.error || "Failed to authenticate with Gmail SMTP server",
+          config: {
+            smtpHost: host,
+            smtpUser: user,
+            hasSmtpPass: true,
+            passLength,
+          },
         });
       }
-    } catch (err: any) {
+    } catch (error: any) {
       return res.status(500).json({
         success: false,
-        error: err?.message || "Internal error verifying SMTP",
+        error: error?.message || "Unexpected error during SMTP verification",
       });
     }
   });
 
-  // API Route: Send Booking Confirmation Email
+  // API Route: Send Booking Confirmation Email (to User & Consultant)
   app.post("/api/send-booking-email", async (req, res) => {
     try {
-      const { bookingId, emailData } = req.body;
+      const { bookingId, emailData } = req.body || {};
 
       if (!bookingId && !emailData) {
         return res.status(400).json({
@@ -88,11 +121,10 @@ async function startServer() {
 
       let dataToSend: EmailBookingData = emailData;
 
-      // If data was not directly passed, or missing recipient info, fetch from Supabase
       if (!dataToSend || !dataToSend.userEmail) {
         const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co";
         const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd";
-        
+
         try {
           const fetchRes = await fetch(`${supabaseUrl}/rest/v1/bookings?id=eq.${bookingId}&select=*,consultants(name,email,title)`, {
             headers: {
@@ -153,13 +185,16 @@ async function startServer() {
       console.log(`[Server Email] Sending confirmation email for booking ${dataToSend.bookingId} to ${dataToSend.userEmail}...`);
 
       const userHtml = generateUserEmailHTML(dataToSend);
+      const userText = generateUserEmailText(dataToSend);
+      const clientSubject = `Booking Confirmation: Consultation with ${dataToSend.consultantName} | Foundarly`;
 
       // Send to user via Gmail SMTP
       const mailResult = await sendEmail({
         from: fromEmail,
         to: dataToSend.userEmail,
-        subject: "✓ Booking Confirmed - Your Consultation is Scheduled | Foundarly",
+        subject: clientSubject,
         html: userHtml,
+        text: userText,
       });
 
       if (!mailResult.success) {
@@ -177,11 +212,15 @@ async function startServer() {
       if (dataToSend.consultantEmail && dataToSend.consultantEmail.includes("@") && dataToSend.consultantEmail !== dataToSend.userEmail) {
         try {
           const consultantHtml = generateConsultantEmailHTML(dataToSend);
+          const consultantText = generateConsultantEmailText(dataToSend);
+          const consultantSubject = `New Consultation Booked: ${dataToSend.userName} | Foundarly`;
+
           const consultantMailRes = await sendEmail({
             from: fromEmail,
             to: dataToSend.consultantEmail,
-            subject: `🎉 New Booking Scheduled with ${dataToSend.userName} | Foundarly`,
+            subject: consultantSubject,
             html: consultantHtml,
+            text: consultantText,
           });
           if (consultantMailRes.success) {
             consultantEmailId = consultantMailRes.messageId;
@@ -241,17 +280,26 @@ async function startServer() {
       }
 
       let emailHtml = "";
+      let emailText = "";
       let emailSubject = "";
 
       if (type === "approved") {
-        emailSubject = "🎉 Your Foundarly Consultant Application has been APPROVED!";
+        emailSubject = "Foundarly Consultant Application Approved";
         emailHtml = generateApplicationApprovedEmailHTML({
+          ...applicationData,
+          dashboardUrl: applicationData.dashboardUrl || siteUrl,
+        });
+        emailText = generateApplicationApprovedEmailText({
           ...applicationData,
           dashboardUrl: applicationData.dashboardUrl || siteUrl,
         });
       } else if (type === "rejected") {
         emailSubject = "Update regarding your Foundarly Consultant Application";
         emailHtml = generateApplicationRejectedEmailHTML({
+          ...applicationData,
+          supportUrl: applicationData.supportUrl || siteUrl,
+        });
+        emailText = generateApplicationRejectedEmailText({
           ...applicationData,
           supportUrl: applicationData.supportUrl || siteUrl,
         });
@@ -262,13 +310,12 @@ async function startServer() {
         });
       }
 
-      console.log(`[Server Email] Dispatching ${type} notification to applicant ${recipientEmail}...`);
-
       const mailResult = await sendEmail({
         from: fromEmail,
         to: recipientEmail,
         subject: emailSubject,
         html: emailHtml,
+        text: emailText,
       });
 
       if (!mailResult.success) {
@@ -279,8 +326,6 @@ async function startServer() {
         });
       }
 
-      console.log(`[Server Email] Application ${type} email sent successfully! Message ID: ${mailResult.messageId}`);
-
       return res.json({
         success: true,
         message: `Application ${type} email sent successfully`,
@@ -288,7 +333,7 @@ async function startServer() {
         recipient: recipientEmail,
       });
     } catch (error: any) {
-      console.error("[Server Email] Unexpected error sending application notification email:", error);
+      console.error("[Server Email] Error sending application email:", error);
       return res.status(500).json({
         success: false,
         error: error?.message || "Internal server error while sending application email",
@@ -296,7 +341,7 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development vs static files for production
+  // Vite middleware for development vs static build for production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -304,7 +349,7 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = path.join(currentDir, "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
@@ -312,7 +357,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Foundarly server running on http://0.0.0.0:${PORT}`);
+    console.log(`[Foundarly Server] Running on http://localhost:${PORT}`);
   });
 }
 

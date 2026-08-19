@@ -18,8 +18,7 @@ export interface MailSendResult {
 }
 
 /**
- * Strips HTML tags to generate a clean plain-text fallback.
- * Essential for spam filters and anti-phishing scoring.
+ * Strips HTML tags to generate a clean plain-text fallback when not explicitly provided.
  */
 function stripHtml(html: string): string {
   return html
@@ -41,7 +40,6 @@ export function createMailTransporter(): Transporter {
   const user = (process.env.SMTP_USER || 'officialfoundarly@gmail.com').trim();
   
   // Google App Passwords are 16 characters often copied with spaces (e.g., "abcd efgh ijkl mnop")
-  // We sanitize spaces and quotes so authentication doesn't fail silently.
   const pass = (process.env.SMTP_PASS || '').trim().replace(/\s+/g, '').replace(/["']/g, '');
 
   if (!pass) {
@@ -85,12 +83,15 @@ export function createMailTransporter(): Transporter {
 
 /**
  * Sends a transactional email using Gmail SMTP via Nodemailer.
- * Performs safe logging without exposing passwords or tokens.
+ * Configured specifically for optimal Inbox placement and RFC compliance.
  */
 export async function sendEmail(options: SendMailOptions): Promise<MailSendResult> {
   const user = (process.env.SMTP_USER || 'officialfoundarly@gmail.com').trim();
   const pass = (process.env.SMTP_PASS || '').trim().replace(/\s+/g, '').replace(/["']/g, '');
+  
+  // Explicit sender format aligned with Gmail account
   const defaultFrom = (process.env.EMAIL_FROM || `Foundarly <${user}>`).trim();
+  const replyTo = options.replyTo || `Foundarly <${user}>`;
 
   if (!pass) {
     console.warn('[SMTP Mailer] SMTP_PASS is missing in server environment variables.');
@@ -106,23 +107,26 @@ export async function sendEmail(options: SendMailOptions): Promise<MailSendResul
   try {
     const transporter = createMailTransporter();
     
-    // Plain text alternative helps bypass spam filters
-    const textContent = options.text || stripHtml(options.html);
+    // Clean multi-part plain-text alternative is mandatory for inbox deliverability
+    const textContent = (options.text && options.text.trim().length > 0) 
+      ? options.text 
+      : stripHtml(options.html);
 
     const info = await transporter.sendMail({
       from: options.from || defaultFrom,
       to: options.to,
-      replyTo: options.replyTo || user,
+      replyTo: replyTo,
       subject: options.subject,
-      html: options.html,
       text: textContent,
+      html: options.html,
       envelope: {
         from: user,
         to: Array.isArray(options.to) ? options.to : [options.to],
       },
+      // Standard transactional headers without spam-triggering priority flags
       headers: {
-        'X-Mailer': 'Foundarly Mail Engine',
-        'X-Priority': '1',
+        'Auto-Submitted': 'auto-generated',
+        'X-Auto-Response-Suppress': 'All',
       },
     });
 

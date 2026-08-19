@@ -1,4 +1,10 @@
-import { generateUserEmailHTML, generateConsultantEmailHTML, EmailBookingData } from '../src/utils/emailTemplates.js';
+import {
+  generateUserEmailHTML,
+  generateUserEmailText,
+  generateConsultantEmailHTML,
+  generateConsultantEmailText,
+  EmailBookingData,
+} from '../src/utils/emailTemplates.js';
 import { sendEmail } from '../src/server/mailer.js';
 
 interface RequestLike {
@@ -123,13 +129,18 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }
 
     const userHtml = generateUserEmailHTML(dataToSend);
+    const userText = generateUserEmailText(dataToSend);
+
+    // Clean, professional subject line without spam symbols
+    const clientSubject = `Booking Confirmation: Consultation with ${dataToSend.consultantName} | Foundarly`;
 
     // Send to user via Gmail SMTP
     const mailResult = await sendEmail({
       from: fromEmail,
       to: dataToSend.userEmail,
-      subject: '✓ Booking Confirmed - Your Consultation is Scheduled | Foundarly',
+      subject: clientSubject,
       html: userHtml,
+      text: userText,
     });
 
     if (!mailResult.success) {
@@ -140,16 +151,20 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       });
     }
 
-    // Optionally send to consultant
+    // Send to consultant if provided
     let consultantEmailId = null;
     if (dataToSend.consultantEmail && dataToSend.consultantEmail.includes('@') && dataToSend.consultantEmail !== dataToSend.userEmail) {
       try {
         const consultantHtml = generateConsultantEmailHTML(dataToSend);
+        const consultantText = generateConsultantEmailText(dataToSend);
+        const consultantSubject = `New Consultation Booked: ${dataToSend.userName} | Foundarly`;
+
         const consultantMailRes = await sendEmail({
           from: fromEmail,
           to: dataToSend.consultantEmail,
-          subject: `🎉 New Booking Scheduled with ${dataToSend.userName} | Foundarly`,
+          subject: consultantSubject,
           html: consultantHtml,
+          text: consultantText,
         });
         if (consultantMailRes.success) {
           consultantEmailId = consultantMailRes.messageId;

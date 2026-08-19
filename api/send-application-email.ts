@@ -1,6 +1,8 @@
 import {
   generateApplicationApprovedEmailHTML,
+  generateApplicationApprovedEmailText,
   generateApplicationRejectedEmailHTML,
+  generateApplicationRejectedEmailText,
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
 } from '../src/utils/emailTemplates.js';
@@ -72,17 +74,26 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }
 
     let emailHtml = '';
+    let emailText = '';
     let emailSubject = '';
 
     if (type === 'approved') {
-      emailSubject = '🎉 Your Foundarly Consultant Application has been APPROVED!';
+      emailSubject = 'Foundarly Consultant Application Approved';
       emailHtml = generateApplicationApprovedEmailHTML({
+        ...applicationData,
+        dashboardUrl: applicationData.dashboardUrl || siteUrl,
+      });
+      emailText = generateApplicationApprovedEmailText({
         ...applicationData,
         dashboardUrl: applicationData.dashboardUrl || siteUrl,
       });
     } else if (type === 'rejected') {
       emailSubject = 'Update regarding your Foundarly Consultant Application';
       emailHtml = generateApplicationRejectedEmailHTML({
+        ...applicationData,
+        supportUrl: applicationData.supportUrl || siteUrl,
+      });
+      emailText = generateApplicationRejectedEmailText({
         ...applicationData,
         supportUrl: applicationData.supportUrl || siteUrl,
       });
@@ -98,6 +109,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       to: recipientEmail,
       subject: emailSubject,
       html: emailHtml,
+      text: emailText,
     });
 
     if (!mailResult.success) {

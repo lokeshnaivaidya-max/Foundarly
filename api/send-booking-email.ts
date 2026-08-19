@@ -1,5 +1,5 @@
-import { generateUserEmailHTML, generateConsultantEmailHTML, EmailBookingData } from '../src/utils/emailTemplates';
-import { sendEmail } from '../src/server/mailer';
+import { generateUserEmailHTML, generateConsultantEmailHTML, EmailBookingData } from '../src/utils/emailTemplates.js';
+import { sendEmail } from '../src/server/mailer.js';
 
 interface RequestLike {
   method?: string;

@@ -3,8 +3,8 @@ import {
   generateApplicationRejectedEmailHTML,
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
-} from '../src/utils/emailTemplates';
-import { sendEmail } from '../src/server/mailer';
+} from '../src/utils/emailTemplates.js';
+import { sendEmail } from '../src/server/mailer.js';
 
 interface RequestLike {
   method?: string;

@@ -17,6 +17,8 @@ type BookingUpdate = Database['public']['Tables']['bookings']['Update'];
 export const bookingsService = {
   async getAll() {
     console.log('[BookingsService.getAll] Fetching all bookings from Supabase...');
+    let rawBookings: any[] = [];
+    
     const response = await supabase
       .from('bookings')
       .select(`
@@ -28,19 +30,37 @@ export const bookingsService = {
       `, { count: 'exact' })
       .order('created_at', { ascending: false });
     
-    console.log('[BookingsService.getAll] Supabase response:', {
-      data: response.data,
-      error: response.error,
-      count: response.count,
-      status: response.status,
-    });
-    
     if (response.error) {
-      console.error('[BookingsService.getAll] COMPLETE SUPABASE ERROR OBJECT:', JSON.stringify(response.error, null, 2), response.error);
-      throw response.error;
+      console.warn('[BookingsService.getAll] Joined query failed, attempting flat select fallback:', response.error);
+      const fallbackResponse = await supabase
+        .from('bookings')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (fallbackResponse.error) {
+        console.error('[BookingsService.getAll] Flat select fallback also failed:', fallbackResponse.error);
+        throw fallbackResponse.error;
+      }
+      rawBookings = fallbackResponse.data || [];
+    } else {
+      rawBookings = response.data || [];
     }
 
-    return response.data || [];
+    console.log('[BookingsService.getAll] Fetched bookings count:', rawBookings.length);
+
+    // Normalize consultant objects (handling both single object and array return formats from PostgREST)
+    return rawBookings.map((b: any) => {
+      let consultantObj = b.consultants;
+      if (Array.isArray(consultantObj)) {
+        consultantObj = consultantObj[0] || null;
+      }
+      return {
+        ...b,
+        status: (b.status || 'pending').toLowerCase().trim(),
+        payment_status: (b.payment_status || 'pending').toLowerCase().trim(),
+        consultants: consultantObj,
+      };
+    });
   },
 
   async getById(id: string) {

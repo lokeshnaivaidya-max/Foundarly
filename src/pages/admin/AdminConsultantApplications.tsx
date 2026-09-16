@@ -361,23 +361,23 @@ export default function AdminConsultantApplications() {
       </div>
 
       {/* Applications Table */}
-      <div className="bg-card border border-border rounded-lg overflow-hidden w-full">
-        <Table className="w-full min-w-[700px]">
+      <div className="bg-card border border-border rounded-lg overflow-hidden w-full min-w-0">
+        <Table className="w-full min-w-[750px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Name</TableHead>
-              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Email</TableHead>
-              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Location</TableHead>
-              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Experience</TableHead>
-              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Status</TableHead>
-              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Applied</TableHead>
-              <TableHead className="text-xs px-4 py-3.5 text-right whitespace-nowrap">Actions</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap min-w-[160px]">Name</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap min-w-[180px]">Email</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap min-w-[120px]">Location</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap min-w-[150px]">Experience</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap min-w-[100px]">Status</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap min-w-[100px]">Applied</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 text-right whitespace-nowrap min-w-[120px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.map((app) => (
               <TableRow key={app.id}>
-                <TableCell className="font-medium text-sm px-4 py-3 whitespace-nowrap">
+                <TableCell className="font-medium text-sm px-4 py-3 whitespace-nowrap min-w-[160px]">
                   {app.name}
                   <span className="block text-xs text-muted-foreground">{app.age} yrs, {app.gender}</span>
                 </TableCell>

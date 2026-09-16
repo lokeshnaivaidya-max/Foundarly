@@ -73,6 +73,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = async (userId: string, currentUser?: User | null): Promise<Profile | null> => {
     try {
+      const targetUser = currentUser || user;
+      const userEmail = (targetUser?.email || '').toLowerCase().trim();
+      const adminEmails = ['admin@foundarly.com', 'lokesh.naivaidya@gmail.com', 'poosala15@gmail.com', 'starkcloudie@gmail.com'];
+      const isAdminEmail = adminEmails.includes(userEmail) || targetUser?.user_metadata?.role === 'admin';
+
       // Query profile row from public.profiles table
       const { data, error } = await supabase
         .from('profiles')
@@ -81,9 +86,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
 
       if (data) {
-        setProfile(data as Profile);
-        console.log("[AuthContext] Profile loaded from public.profiles:", data);
-        return data as Profile;
+        let profileData = data as Profile;
+        if (isAdminEmail && profileData.role !== 'admin') {
+          profileData = { ...profileData, role: 'admin' };
+          // Sync with database asynchronously
+          supabase.from('profiles').update({ role: 'admin' }).eq('id', userId).then();
+        }
+        setProfile(profileData);
+        console.log("[AuthContext] Profile loaded from public.profiles:", profileData);
+        return profileData;
       }
 
       if (error) {
@@ -91,11 +102,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // If profile does not exist in DB, construct a fallback and attempt creation
-      const targetUser = currentUser || user;
       const fallbackName = targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'User';
+      const fallbackRole = isAdminEmail ? 'admin' : 'client';
       const fallbackProfile: Profile = {
         id: userId,
-        role: 'client',
+        role: fallbackRole,
         full_name: fallbackName,
         is_consultant: false,
       };
@@ -108,7 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             id: userId,
             full_name: fallbackName,
             email: targetUser?.email,
-            role: 'client',
+            role: fallbackRole,
             is_consultant: false,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),

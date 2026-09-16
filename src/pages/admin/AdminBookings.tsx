@@ -26,17 +26,25 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
-const statusColor = (s: string) => {
-  if (s === "confirmed") return "bg-primary/15 text-primary border-primary/30";
-  if (s === "completed") return "bg-green-500/15 text-green-400 border-green-500/30";
-  if (s === "pending") return "bg-yellow-500/15 text-yellow-400 border-yellow-500/30";
+const statusColor = (s?: string) => {
+  const st = (s || "").toLowerCase().trim();
+  if (st === "confirmed") return "bg-primary/15 text-primary border-primary/30";
+  if (st === "completed") return "bg-green-500/15 text-green-400 border-green-500/30";
+  if (st === "pending") return "bg-yellow-500/15 text-yellow-400 border-yellow-500/30";
   return "bg-destructive/15 text-destructive border-destructive/30";
 };
 
-const paymentColor = (s: string) => {
-  if (s === "paid") return "text-green-400";
-  if (s === "pending") return "text-yellow-400";
+const paymentColor = (s?: string) => {
+  const st = (s || "").toLowerCase().trim();
+  if (st === "paid") return "text-green-400";
+  if (st === "pending") return "text-yellow-400";
   return "text-destructive";
+};
+
+const getConsultantName = (b: any): string => {
+  if (b?.consultant_name) return b.consultant_name;
+  if (Array.isArray(b?.consultants)) return b.consultants[0]?.name || 'N/A';
+  return b?.consultants?.name || 'N/A';
 };
 
 export default function AdminBookings() {
@@ -267,10 +275,23 @@ export default function AdminBookings() {
 
   const openPaymentDialog = (booking: any) => {
     if (!booking.upi_payment) {
-      toast.error("No payment details found");
-      return;
+      const fallbackPayment = {
+        id: `direct-${booking.id}`,
+        booking_id: booking.id,
+        customer_name: booking.name,
+        customer_email: booking.email,
+        customer_phone: booking.phone || 'N/A',
+        payment_amount: booking.session_price || 0,
+        transaction_id: 'DIRECT_VERIFICATION',
+        status: booking.payment_status || 'pending',
+        created_at: booking.created_at,
+        is_direct: true,
+      };
+      setSelectedPayment(fallbackPayment);
+    } else {
+      setSelectedPayment(booking.upi_payment);
     }
-    setSelectedPayment(booking.upi_payment);
+    setSelectedBooking(booking);
     setAdminNotes("");
     setPaymentDialogOpen(true);
   };
@@ -280,31 +301,48 @@ export default function AdminBookings() {
     
     setVerifyingPayment(true);
     try {
-      // Verify the payment
-      await upiPaymentService.verifyPayment(selectedPayment.id, user.id, adminNotes || "Payment verified");
-      
-      // Get the booking and update it with meeting room
-      const booking = bookings.find(b => b.id === selectedPayment.booking_id);
-      if (booking) {
-        await bookingsService.update(booking.id, {
-          status: "confirmed",
-          payment_status: "paid",
-          meeting_room_id: `foundarly-${booking.id}`,
-        });
+      if (selectedPayment.is_direct) {
+        // Direct booking payment verification
+        const booking = bookings.find(b => b.id === selectedPayment.booking_id);
+        if (booking) {
+          await bookingsService.update(booking.id, {
+            status: "confirmed",
+            payment_status: "paid",
+            meeting_room_id: `foundarly-${booking.id}`,
+          });
 
-        // Trigger automatic confirmation email in background
-        emailService.sendBookingConfirmation(booking.id).then((res) => {
-          if (res.success) {
-            toast.success("Confirmation email sent to attendee!");
-            setBookings(prev => prev.map(b => 
-              b.id === booking.id ? { ...b, email_sent: true } : b
-            ));
-          } else {
-            console.warn("Automatic email notification not sent:", res.error);
-          }
-        }).catch((err) => {
-          console.warn("Error sending automatic confirmation email on payment verification:", err);
-        });
+          // Trigger automatic confirmation email in background
+          emailService.sendBookingConfirmation(booking.id).catch((err) => {
+            console.warn("Error sending automatic confirmation email on payment verification:", err);
+          });
+        }
+      } else {
+        // Verify the payment
+        await upiPaymentService.verifyPayment(selectedPayment.id, user.id, adminNotes || "Payment verified");
+        
+        // Get the booking and update it with meeting room
+        const booking = bookings.find(b => b.id === selectedPayment.booking_id);
+        if (booking) {
+          await bookingsService.update(booking.id, {
+            status: "confirmed",
+            payment_status: "paid",
+            meeting_room_id: `foundarly-${booking.id}`,
+          });
+
+          // Trigger automatic confirmation email in background
+          emailService.sendBookingConfirmation(booking.id).then((res) => {
+            if (res.success) {
+              toast.success("Confirmation email sent to attendee!");
+              setBookings(prev => prev.map(b => 
+                b.id === booking.id ? { ...b, email_sent: true } : b
+              ));
+            } else {
+              console.warn("Automatic email notification not sent:", res.error);
+            }
+          }).catch((err) => {
+            console.warn("Error sending automatic confirmation email on payment verification:", err);
+          });
+        }
       }
       
       toast.success("Payment verified! Booking confirmed and meeting room created.");
@@ -412,16 +450,23 @@ export default function AdminBookings() {
   };
 
   const filtered = bookings.filter((b) => {
+    const idStr = (b.id || "").toLowerCase();
     const nameStr = (b.name || "").toLowerCase();
     const emailStr = (b.email || "").toLowerCase();
-    const consultantNameStr = (b.consultants?.name || "").toLowerCase();
-    const searchStr = search.toLowerCase();
+    const consultantNameStr = getConsultantName(b).toLowerCase();
+    const searchStr = search.trim().toLowerCase();
 
-    const matchesSearch = nameStr.includes(searchStr) || emailStr.includes(searchStr) || consultantNameStr.includes(searchStr);
-    const matchesStatus = statusFilter === "all" || b.status === statusFilter;
+    const matchesSearch = !searchStr || 
+      idStr.includes(searchStr) || 
+      nameStr.includes(searchStr) || 
+      emailStr.includes(searchStr) || 
+      consultantNameStr.includes(searchStr);
+
+    const bookingStatus = (b.status || "pending").toLowerCase().trim();
+    const matchesStatus = statusFilter === "all" || bookingStatus === statusFilter.toLowerCase().trim();
     
     // Filter for reschedule requests (missed meetings with only 1 participant or no participants)
-    const needsReschedule = b.status === "missed" && (b.participants_count || 0) < 2;
+    const needsReschedule = bookingStatus === "missed" && (b.participants_count || 0) < 2;
     const matchesReschedule = !showRescheduleOnly || needsReschedule;
     
     return matchesSearch && matchesStatus && matchesReschedule;
@@ -429,11 +474,11 @@ export default function AdminBookings() {
 
   const stats = {
     total: bookings.length,
-    pending: bookings.filter(b => b.status === "pending").length,
-    confirmed: bookings.filter(b => b.status === "confirmed").length,
-    completed: bookings.filter(b => b.status === "completed").length,
-    cancelled: bookings.filter(b => b.status === "cancelled").length,
-    rescheduleRequests: bookings.filter(b => b.status === "missed" && (b.participants_count || 0) < 2).length,
+    pending: bookings.filter(b => (b.status || "").toLowerCase().trim() === "pending").length,
+    confirmed: bookings.filter(b => (b.status || "").toLowerCase().trim() === "confirmed").length,
+    completed: bookings.filter(b => (b.status || "").toLowerCase().trim() === "completed").length,
+    cancelled: bookings.filter(b => (b.status || "").toLowerCase().trim() === "cancelled").length,
+    rescheduleRequests: bookings.filter(b => (b.status || "").toLowerCase().trim() === "missed" && (b.participants_count || 0) < 2).length,
   };
 
   console.log('[AdminBookings] Rendering with bookings.length:', bookings.length, 'filtered.length:', filtered.length);
@@ -543,9 +588,9 @@ export default function AdminBookings() {
                 <TableRow key={b.id}>
                   <TableCell className="font-mono text-xs text-muted-foreground px-3 py-3 whitespace-nowrap">{b.id.slice(0, 8)}</TableCell>
                   <TableCell className="text-sm px-3 py-3 whitespace-nowrap font-medium">{b.name}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground px-3 py-3 whitespace-nowrap">{b.consultants?.name || 'N/A'}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground px-3 py-3 whitespace-nowrap">{new Date(b.date).toLocaleDateString()}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground px-3 py-3 whitespace-nowrap">{b.time}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground px-3 py-3 whitespace-nowrap">{getConsultantName(b)}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground px-3 py-3 whitespace-nowrap">{b.date ? (!isNaN(new Date(b.date).getTime()) ? new Date(b.date).toLocaleDateString() : b.date) : 'N/A'}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground px-3 py-3 whitespace-nowrap">{b.time || 'N/A'}</TableCell>
                   <TableCell className="text-sm text-muted-foreground px-3 py-3 whitespace-nowrap">{b.session_duration ? `${b.session_duration} min` : 'N/A'}</TableCell>
                   <TableCell className="text-sm font-medium text-primary px-3 py-3 whitespace-nowrap">{b.session_price ? formatPrice(b.session_price) : 'N/A'}</TableCell>
                   <TableCell className="text-xs px-3 py-3 whitespace-nowrap">
@@ -585,15 +630,15 @@ export default function AdminBookings() {
                   <TableCell className={`text-xs font-medium px-3 py-3 whitespace-nowrap ${paymentColor(b.payment_status)}`}>
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-2 whitespace-nowrap">
-                        <span>{b.payment_status.charAt(0).toUpperCase() + b.payment_status.slice(1)}</span>
-                        {b.payment_status === "pending" && b.upi_payment && (
+                        <span>{((b.payment_status || "pending")).charAt(0).toUpperCase() + (b.payment_status || "pending").slice(1)}</span>
+                        {((b.payment_status || "pending").toLowerCase() === "pending" || b.upi_payment) && (
                           <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 border-amber-500/30 whitespace-nowrap">
-                            Needs Verification
+                            {b.upi_payment ? "Needs Verification" : "Payment Pending"}
                           </Badge>
                         )}
                       </div>
                       {/* Verify Payment Button under Payment column */}
-                      {b.payment_status === "pending" && b.upi_payment && (
+                      {((b.payment_status || "pending").toLowerCase() === "pending" || b.upi_payment) && (
                         <Button 
                           variant="default"
                           size="sm" 
@@ -609,7 +654,7 @@ export default function AdminBookings() {
                   </TableCell>
                   <TableCell className="px-3 py-3 whitespace-nowrap">
                     <Badge variant="outline" className={`text-xs ${statusColor(b.status)}`}>
-                      {b.status.charAt(0).toUpperCase() + b.status.slice(1)}
+                      {((b.status || "pending")).charAt(0).toUpperCase() + (b.status || "pending").slice(1)}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-center px-3 py-3 whitespace-nowrap">

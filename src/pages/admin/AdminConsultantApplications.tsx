@@ -361,80 +361,84 @@ export default function AdminConsultantApplications() {
       </div>
 
       {/* Applications Table */}
-      <div className="bg-card border border-border rounded-lg overflow-hidden w-full max-w-full">
-        <div className="overflow-x-auto w-full">
-          <Table className="w-full min-w-[850px]">
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Name</TableHead>
-                <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Email</TableHead>
-                <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Location</TableHead>
-                <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Experience</TableHead>
-                <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Status</TableHead>
-                <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Applied</TableHead>
-                <TableHead className="text-xs px-4 py-3.5 text-right whitespace-nowrap">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((app) => (
-                <TableRow key={app.id}>
-                  <TableCell className="font-medium text-sm px-4 py-3 whitespace-nowrap">
-                    {app.name}
-                    <span className="block text-xs text-muted-foreground">{app.age} yrs, {app.gender}</span>
-                  </TableCell>
-                  <TableCell className="text-sm px-4 py-3 whitespace-nowrap">{app.email}</TableCell>
-                  <TableCell className="text-sm px-4 py-3 whitespace-nowrap">{app.location}</TableCell>
-                  <TableCell className="text-sm max-w-xs truncate px-4 py-3">{app.current_job}</TableCell>
-                  <TableCell className="px-4 py-3 whitespace-nowrap">
-                    <Badge
+      <div className="bg-card border border-border rounded-lg overflow-hidden w-full">
+        <Table className="w-full min-w-[700px]">
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Name</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Email</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Location</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Experience</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Status</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Applied</TableHead>
+              <TableHead className="text-xs px-4 py-3.5 text-right whitespace-nowrap">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filtered.map((app) => (
+              <TableRow key={app.id}>
+                <TableCell className="font-medium text-sm px-4 py-3 whitespace-nowrap">
+                  {app.name}
+                  <span className="block text-xs text-muted-foreground">{app.age} yrs, {app.gender}</span>
+                </TableCell>
+                <TableCell className="text-sm px-4 py-3 max-w-[200px] truncate" title={app.email}>
+                  {app.email}
+                </TableCell>
+                <TableCell className="text-sm px-4 py-3 max-w-[140px] truncate" title={app.location}>
+                  {app.location}
+                </TableCell>
+                <TableCell className="text-sm px-4 py-3 max-w-[180px] truncate" title={app.current_job}>
+                  {app.current_job}
+                </TableCell>
+                <TableCell className="px-4 py-3 whitespace-nowrap">
+                  <Badge
+                    variant="outline"
+                    className={`text-xs ${
+                      app.status === 'approved'
+                        ? 'bg-green-500/15 text-green-400 border-green-500/30'
+                        : app.status === 'rejected'
+                        ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                        : 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'
+                    }`}
+                  >
+                    {app.status}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-sm text-muted-foreground px-4 py-3 whitespace-nowrap">
+                  {new Date(app.created_at).toLocaleDateString()}
+                </TableCell>
+                <TableCell className="text-right px-4 py-3 whitespace-nowrap">
+                  <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                    <Button
                       variant="outline"
-                      className={`text-xs ${
-                        app.status === 'approved'
-                          ? 'bg-green-500/15 text-green-400 border-green-500/30'
-                          : app.status === 'rejected'
-                          ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                          : 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'
-                      }`}
+                      size="sm"
+                      className="text-xs h-7"
+                      onClick={() => openView(app)}
                     >
-                      {app.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground px-4 py-3 whitespace-nowrap">
-                    {new Date(app.created_at).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell className="text-right px-4 py-3 whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-1 whitespace-nowrap">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-xs h-7"
-                        onClick={() => openView(app)}
-                      >
-                        <Eye className="h-3 w-3 mr-1" />
-                        View
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-xs h-7 text-destructive hover:text-destructive"
-                        onClick={() => handleDelete(app.id)}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {filtered.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                    No applications found
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                      <Eye className="h-3 w-3 mr-1" />
+                      View
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs h-7 text-destructive hover:text-destructive"
+                      onClick={() => handleDelete(app.id)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            {filtered.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  No applications found
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
       </div>
 
       {/* View/Action Dialog */}

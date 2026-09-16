@@ -520,9 +520,8 @@ export default function AdminBookings() {
         </Select>
       </div>
 
-      <div className="bg-card border border-border rounded-lg overflow-hidden w-full max-w-full">
-        <div className="overflow-x-auto w-full">
-          <Table className="w-full min-w-[1000px]">
+      <div className="bg-card border border-border rounded-lg overflow-hidden w-full">
+        <Table className="w-full min-w-[1000px]">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">ID</TableHead>
@@ -687,7 +686,6 @@ export default function AdminBookings() {
               )}
             </TableBody>
           </Table>
-        </div>
       </div>
 
       {/* Edit Dialog */}

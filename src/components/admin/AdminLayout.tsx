@@ -1,5 +1,5 @@
 import { Outlet, Link } from "react-router-dom";
-import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import AdminSidebar from "./AdminSidebar";
 
 export default function AdminLayout() {
@@ -7,8 +7,8 @@ export default function AdminLayout() {
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-background min-w-0">
         <AdminSidebar />
-        <div className="flex-1 flex flex-col min-w-0 max-w-full overflow-hidden">
-          <header className="h-14 flex items-center justify-between border-b border-border px-6 bg-background/80 backdrop-blur-sm sticky top-0 z-40">
+        <SidebarInset className="flex-1 flex flex-col min-w-0 w-full overflow-x-auto">
+          <header className="h-14 flex items-center justify-between border-b border-border px-6 bg-background/80 backdrop-blur-sm sticky top-0 z-40 shrink-0">
             <div className="flex items-center gap-3">
               <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
               <Link to="/" className="font-display text-lg font-bold text-gradient-gold">
@@ -20,10 +20,10 @@ export default function AdminLayout() {
               ← Back to Site
             </Link>
           </header>
-          <main className="flex-1 p-6 overflow-y-auto overflow-x-hidden min-w-0 max-w-full">
+          <main className="flex-1 p-4 md:p-6 min-w-0 w-full overflow-y-auto overflow-x-auto">
             <Outlet />
           </main>
-        </div>
+        </SidebarInset>
       </div>
     </SidebarProvider>
   );

@@ -354,9 +354,8 @@ export default function AdminConsultants() {
       </div>
 
       {view === "table" ? (
-        <div className="bg-card border border-border rounded-lg overflow-hidden w-full max-w-full">
-          <div className="overflow-x-auto w-full">
-            <Table className="w-full min-w-[850px]">
+        <div className="bg-card border border-border rounded-lg overflow-hidden w-full">
+          <Table className="w-full min-w-[850px]">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Name</TableHead>
@@ -437,7 +436,6 @@ export default function AdminConsultants() {
                 ))}
               </TableBody>
             </Table>
-          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

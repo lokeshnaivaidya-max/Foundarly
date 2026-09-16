@@ -54,13 +54,14 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       });
     }
 
-    const fromEmail = (process.env.EMAIL_FROM || 'Foundarly <officialfoundarly@gmail.com>').trim();
+    const fromEmail = (process.env.EMAIL_FROM || 'Foundarly <hello@foundarlybusinessworld.in>').trim();
+    const replyTo = (process.env.EMAIL_REPLY_TO || 'hello@foundarlybusinessworld.in').trim();
     const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || 'https://foundarly.com').trim();
 
     if (!process.env.SMTP_PASS) {
       return res.status(400).json({
         success: false,
-        error: 'SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Google App Password).',
+        error: 'SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Titan mailbox password).',
         missingConfig: 'SMTP_PASS',
       });
     }
@@ -107,6 +108,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     const mailResult = await sendEmail({
       from: fromEmail,
       to: recipientEmail,
+      replyTo: replyTo,
       subject: emailSubject,
       html: emailHtml,
       text: emailText,
@@ -115,7 +117,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     if (!mailResult.success) {
       return res.status(500).json({
         success: false,
-        error: mailResult.error || `Failed to send ${type} email via Gmail SMTP`,
+        error: mailResult.error || `Failed to send ${type} email via Titan SMTP`,
         details: mailResult.details,
       });
     }

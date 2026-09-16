@@ -79,11 +79,14 @@ VITE_RAZORPAY_KEY_ID=your_razorpay_key_id
 VITE_AGORA_APP_ID=your_agora_app_id
 VITE_AGORA_APP_CERTIFICATE=your_agora_certificate
 VITE_GEMINI_API_KEY=your_gemini_api_key
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=officialfoundarly@gmail.com
-SMTP_PASS=your_google_app_password
-EMAIL_FROM=Foundarly <officialfoundarly@gmail.com>
+SMTP_HOST=smtp.titan.email
+SMTP_PORT=465
+SMTP_USER=hello@foundarlybusinessworld.in
+SMTP_PASS=your_titan_mailbox_password
+FROM_EMAIL=hello@foundarlybusinessworld.in
+FROM_NAME=Foundarly
+EMAIL_FROM=Foundarly <hello@foundarlybusinessworld.in>
+EMAIL_REPLY_TO=hello@foundarlybusinessworld.in
 SITE_URL=http://localhost:3000
 ```
 

@@ -34,19 +34,22 @@ async function startServer() {
     res.json({
       status: "ok",
       service: "Foundarly Server",
-      emailService: "Gmail SMTP (Nodemailer)",
+      emailService: "Titan SMTP (Nodemailer)",
       emailConfigured: hasSmtp,
-      smtpHost: process.env.SMTP_HOST || "smtp.gmail.com",
-      smtpPort: parseInt(process.env.SMTP_PORT || "587", 10),
-      smtpUser: process.env.SMTP_USER || "officialfoundarly@gmail.com",
+      smtpHost: process.env.SMTP_HOST || "smtp.titan.email",
+      smtpPort: parseInt(process.env.SMTP_PORT || "465", 10),
+      smtpUser: process.env.SMTP_USER || "hello@foundarlybusinessworld.in",
+      fromEmail: process.env.FROM_EMAIL || "hello@foundarlybusinessworld.in",
+      replyTo: process.env.EMAIL_REPLY_TO || "hello@foundarlybusinessworld.in",
       timestamp: new Date().toISOString(),
     });
   });
 
   // API: Verify SMTP Credentials & Handshake
   app.get("/api/verify-smtp", async (req, res) => {
-    const host = process.env.SMTP_HOST || "smtp.gmail.com";
-    const user = process.env.SMTP_USER || "officialfoundarly@gmail.com";
+    const host = process.env.SMTP_HOST || "smtp.titan.email";
+    const port = parseInt(process.env.SMTP_PORT || "465", 10);
+    const user = process.env.SMTP_USER || "hello@foundarlybusinessworld.in";
     const hasPass = Boolean(process.env.SMTP_PASS);
     const passLength = process.env.SMTP_PASS ? process.env.SMTP_PASS.trim().replace(/\s+/g, "").length : 0;
 
@@ -56,7 +59,9 @@ async function startServer() {
         error: "SMTP_PASS environment variable is not configured. Please set SMTP_PASS in environment variables.",
         config: {
           smtpHost: host,
+          smtpPort: port,
           smtpUser: user,
+          encryption: "SSL",
           hasSmtpPass: false,
         },
       });
@@ -67,10 +72,12 @@ async function startServer() {
       if (result.success) {
         return res.json({
           success: true,
-          message: "Gmail SMTP authentication and connection verified successfully!",
+          message: "Titan SMTP authentication and connection verified successfully!",
           config: {
             smtpHost: host,
+            smtpPort: port,
             smtpUser: user,
+            encryption: "SSL",
             hasSmtpPass: true,
             passLength,
           },
@@ -78,10 +85,12 @@ async function startServer() {
       } else {
         return res.status(500).json({
           success: false,
-          error: result.error || "Failed to authenticate with Gmail SMTP server",
+          error: result.error || "Failed to authenticate with Titan SMTP server",
           config: {
             smtpHost: host,
+            smtpPort: port,
             smtpUser: user,
+            encryption: "SSL",
             hasSmtpPass: true,
             passLength,
           },
@@ -107,14 +116,15 @@ async function startServer() {
         });
       }
 
-      const fromEmail = (process.env.EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>").trim();
+      const fromEmail = (process.env.EMAIL_FROM || "Foundarly <hello@foundarlybusinessworld.in>").trim();
+      const replyTo = (process.env.EMAIL_REPLY_TO || "hello@foundarlybusinessworld.in").trim();
       const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`).trim();
 
       if (!process.env.SMTP_PASS) {
         console.warn("[Server Email] SMTP_PASS is not configured.");
         return res.status(400).json({
           success: false,
-          error: "SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Google App Password).",
+          error: "SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Titan mailbox password).",
           missingConfig: "SMTP_PASS",
         });
       }
@@ -188,10 +198,11 @@ async function startServer() {
       const userText = generateUserEmailText(dataToSend);
       const clientSubject = `Booking Confirmation: Consultation with ${dataToSend.consultantName} | Foundarly`;
 
-      // Send to user via Gmail SMTP
+      // Send to user via Titan SMTP
       const mailResult = await sendEmail({
         from: fromEmail,
         to: dataToSend.userEmail,
+        replyTo: replyTo,
         subject: clientSubject,
         html: userHtml,
         text: userText,
@@ -200,7 +211,7 @@ async function startServer() {
       if (!mailResult.success) {
         return res.status(500).json({
           success: false,
-          error: mailResult.error || "Failed to send booking confirmation email via Gmail SMTP",
+          error: mailResult.error || "Failed to send booking confirmation email via Titan SMTP",
           details: mailResult.details,
         });
       }
@@ -218,6 +229,7 @@ async function startServer() {
           const consultantMailRes = await sendEmail({
             from: fromEmail,
             to: dataToSend.consultantEmail,
+            replyTo: replyTo,
             subject: consultantSubject,
             html: consultantHtml,
             text: consultantText,
@@ -259,14 +271,15 @@ async function startServer() {
         });
       }
 
-      const fromEmail = (process.env.EMAIL_FROM || "Foundarly <officialfoundarly@gmail.com>").trim();
+      const fromEmail = (process.env.EMAIL_FROM || "Foundarly <hello@foundarlybusinessworld.in>").trim();
+      const replyTo = (process.env.EMAIL_REPLY_TO || "hello@foundarlybusinessworld.in").trim();
       const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`).trim();
 
       if (!process.env.SMTP_PASS) {
         console.warn("[Server Email] SMTP_PASS is not configured.");
         return res.status(400).json({
           success: false,
-          error: "SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Google App Password).",
+          error: "SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Titan mailbox password).",
           missingConfig: "SMTP_PASS",
         });
       }
@@ -313,6 +326,7 @@ async function startServer() {
       const mailResult = await sendEmail({
         from: fromEmail,
         to: recipientEmail,
+        replyTo: replyTo,
         subject: emailSubject,
         html: emailHtml,
         text: emailText,
@@ -321,7 +335,7 @@ async function startServer() {
       if (!mailResult.success) {
         return res.status(500).json({
           success: false,
-          error: mailResult.error || `Failed to send ${type} email via Gmail SMTP`,
+          error: mailResult.error || `Failed to send ${type} email via Titan SMTP`,
           details: mailResult.details,
         });
       }
@@ -351,8 +365,11 @@ async function startServer() {
   } else {
     const distPath = path.join(currentDir, "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+    app.use((req, res, next) => {
+      if (req.method === "GET" && !req.path.startsWith("/api")) {
+        return res.sendFile(path.join(distPath, "index.html"));
+      }
+      next();
     });
   }
 

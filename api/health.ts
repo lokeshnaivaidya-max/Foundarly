@@ -23,11 +23,13 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
   return res.status(200).json({
     status: 'ok',
     service: 'Foundarly Serverless API',
-    emailService: 'Gmail SMTP (Nodemailer)',
+    emailService: 'Titan SMTP (Nodemailer)',
     emailConfigured: hasSmtp,
-    smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com',
-    smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
-    smtpUser: process.env.SMTP_USER || 'officialfoundarly@gmail.com',
+    smtpHost: process.env.SMTP_HOST || 'smtp.titan.email',
+    smtpPort: parseInt(process.env.SMTP_PORT || '465', 10),
+    smtpUser: process.env.SMTP_USER || 'hello@foundarlybusinessworld.in',
+    fromEmail: process.env.FROM_EMAIL || 'hello@foundarlybusinessworld.in',
+    replyTo: process.env.EMAIL_REPLY_TO || 'hello@foundarlybusinessworld.in',
     timestamp: new Date().toISOString(),
   });
 }

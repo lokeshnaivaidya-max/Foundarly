@@ -17,7 +17,7 @@ export interface EmailSendResult {
 export const emailService = {
   /**
    * Send booking confirmation emails to user (and consultant)
-   * Dispatches via server-side Gmail SMTP endpoint (/api/send-booking-email)
+   * Dispatches via server-side Titan SMTP endpoint (/api/send-booking-email)
    *
    * @param bookingId - The booking ID to send emails for
    * @returns Promise with success status and informative error/message
@@ -78,7 +78,7 @@ export const emailService = {
 
       let lastServerError: string | undefined;
 
-      // ── Primary Delivery via Server-side Gmail SMTP (/api/send-booking-email) ──
+      // ── Primary Delivery via Server-side Titan SMTP (/api/send-booking-email) ──
       try {
         console.log('[EmailService] Dispatching confirmation email via /api/send-booking-email...');
         const apiResponse = await fetch('/api/send-booking-email', {
@@ -95,8 +95,8 @@ export const emailService = {
         if (apiResponse.ok) {
           const apiResult = await apiResponse.json();
           if (apiResult?.success) {
-            console.log('[EmailService] Confirmation email sent successfully via server Gmail SMTP:', apiResult);
-            secureLog.info('Booking confirmation email sent successfully via server Gmail SMTP');
+            console.log('[EmailService] Confirmation email sent successfully via server Titan SMTP:', apiResult);
+            secureLog.info('Booking confirmation email sent successfully via server Titan SMTP');
             return {
               success: true,
               message: 'Confirmation email sent successfully',
@@ -173,7 +173,7 @@ export const emailService = {
         if (apiResponse.ok) {
           const apiResult = await apiResponse.json();
           if (apiResult?.success) {
-            console.log('[EmailService] Application approval email sent via Server Gmail SMTP:', apiResult);
+            console.log('[EmailService] Application approval email sent via Server Titan SMTP:', apiResult);
             return {
               success: true,
               message: 'Application approval email sent successfully',
@@ -241,7 +241,7 @@ export const emailService = {
         if (apiResponse.ok) {
           const apiResult = await apiResponse.json();
           if (apiResult?.success) {
-            console.log('[EmailService] Application rejection email sent via Server Gmail SMTP:', apiResult);
+            console.log('[EmailService] Application rejection email sent via Server Titan SMTP:', apiResult);
             return {
               success: true,
               message: 'Application rejection email sent successfully',

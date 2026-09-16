@@ -20,18 +20,21 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     return res.status(200).end();
   }
 
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const user = process.env.SMTP_USER || 'officialfoundarly@gmail.com';
+  const host = process.env.SMTP_HOST || 'smtp.titan.email';
+  const port = parseInt(process.env.SMTP_PORT || '465', 10);
+  const user = process.env.SMTP_USER || 'hello@foundarlybusinessworld.in';
   const hasPass = Boolean(process.env.SMTP_PASS);
   const passLength = process.env.SMTP_PASS ? process.env.SMTP_PASS.trim().replace(/\s+/g, '').length : 0;
 
   if (!hasPass) {
     return res.status(400).json({
       success: false,
-      error: 'SMTP_PASS environment variable is not configured in Vercel. Please set SMTP_PASS in Vercel Project Settings > Environment Variables.',
+      error: 'SMTP_PASS environment variable is not configured. Please set SMTP_PASS in environment variables (Titan mailbox password).',
       config: {
         smtpHost: host,
+        smtpPort: port,
         smtpUser: user,
+        encryption: 'SSL',
         hasSmtpPass: false,
       },
     });
@@ -42,10 +45,12 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     if (result.success) {
       return res.status(200).json({
         success: true,
-        message: 'Gmail SMTP authentication and connection verified successfully!',
+        message: 'Titan SMTP authentication and connection verified successfully!',
         config: {
           smtpHost: host,
+          smtpPort: port,
           smtpUser: user,
+          encryption: 'SSL',
           hasSmtpPass: true,
           passLength,
         },
@@ -53,10 +58,12 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     } else {
       return res.status(500).json({
         success: false,
-        error: result.error || 'Failed to authenticate with Gmail SMTP server',
+        error: result.error || 'Failed to authenticate with Titan SMTP server',
         config: {
           smtpHost: host,
+          smtpPort: port,
           smtpUser: user,
+          encryption: 'SSL',
           hasSmtpPass: true,
           passLength,
         },

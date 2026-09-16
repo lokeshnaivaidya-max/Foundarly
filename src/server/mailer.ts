@@ -30,43 +30,30 @@ function stripHtml(html: string): string {
 }
 
 /**
- * Creates and configures a Nodemailer transporter for Gmail SMTP.
- * Sanitizes App Passwords and configures reliable SSL/TLS settings for serverless runtimes.
+ * Creates and configures a Nodemailer transporter for Titan SMTP.
+ * Configured for SSL encryption on port 465 with high delivery reliability.
  */
 export function createMailTransporter(): Transporter {
-  const host = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
-  const rawPort = (process.env.SMTP_PORT || '587').trim();
-  const port = parseInt(rawPort, 10) || 587;
-  const user = (process.env.SMTP_USER || 'officialfoundarly@gmail.com').trim();
+  const host = (process.env.SMTP_HOST || 'smtp.titan.email').trim();
+  const rawPort = (process.env.SMTP_PORT || '465').trim();
+  const port = parseInt(rawPort, 10) || 465;
+  const user = (process.env.SMTP_USER || 'hello@foundarlybusinessworld.in').trim();
   
-  // Google App Passwords are 16 characters often copied with spaces (e.g., "abcd efgh ijkl mnop")
-  const pass = (process.env.SMTP_PASS || '').trim().replace(/\s+/g, '').replace(/["']/g, '');
+  // Clean mailbox or application password
+  const pass = (process.env.SMTP_PASS || '').trim().replace(/["']/g, '');
 
   if (!pass) {
-    throw new Error('SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Google App Password).');
+    throw new Error('SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Titan mailbox password).');
   }
 
-  const isPort465 = port === 465;
-
-  // Use service 'gmail' or direct SMTP config with high compatibility
-  if (host === 'smtp.gmail.com') {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user,
-        pass,
-      },
-      connectionTimeout: 10000,
-      greetingTimeout: 5000,
-      socketTimeout: 15000,
-    });
-  }
+  // Titan Email uses port 465 with SSL (secure: true)
+  const isSecure = port === 465;
 
   return nodemailer.createTransport({
     host,
     port,
-    secure: isPort465,
-    requireTLS: port === 587,
+    secure: isSecure,
+    requireTLS: !isSecure && port === 587,
     auth: {
       user,
       pass,
@@ -75,34 +62,38 @@ export function createMailTransporter(): Transporter {
       minVersion: 'TLSv1.2',
       rejectUnauthorized: true,
     },
-    connectionTimeout: 10000,
-    greetingTimeout: 5000,
-    socketTimeout: 15000,
+    connectionTimeout: 15000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
   });
 }
 
 /**
- * Sends a transactional email using Gmail SMTP via Nodemailer.
+ * Sends a transactional email using Titan SMTP via Nodemailer.
  * Configured specifically for optimal Inbox placement and RFC compliance.
+ * Sender address, SMTP username, and envelope sender are aligned with hello@foundarlybusinessworld.in.
  */
 export async function sendEmail(options: SendMailOptions): Promise<MailSendResult> {
-  const user = (process.env.SMTP_USER || 'officialfoundarly@gmail.com').trim();
-  const pass = (process.env.SMTP_PASS || '').trim().replace(/\s+/g, '').replace(/["']/g, '');
+  const user = (process.env.SMTP_USER || 'hello@foundarlybusinessworld.in').trim();
+  const pass = (process.env.SMTP_PASS || '').trim().replace(/["']/g, '');
   
-  // Explicit sender format aligned with Gmail account
-  const defaultFrom = (process.env.EMAIL_FROM || `Foundarly <${user}>`).trim();
-  const replyTo = options.replyTo || `Foundarly <${user}>`;
+  // Default From and Reply-To configured for Foundarly via Titan SMTP
+  const fromName = (process.env.FROM_NAME || 'Foundarly').trim();
+  const fromEmail = (process.env.FROM_EMAIL || user).trim();
+  const defaultFrom = (process.env.EMAIL_FROM || `${fromName} <${fromEmail}>`).trim();
+  const defaultReplyTo = (process.env.EMAIL_REPLY_TO || fromEmail).trim();
+  const replyTo = (options.replyTo || defaultReplyTo).trim();
 
   if (!pass) {
     console.warn('[SMTP Mailer] SMTP_PASS is missing in server environment variables.');
     return {
       success: false,
-      error: 'SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Google App Password).',
+      error: 'SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Titan mailbox password).',
     };
   }
 
   const recipients = Array.isArray(options.to) ? options.to.join(', ') : options.to;
-  console.log(`[SMTP Mailer] Dispatching email via Gmail SMTP from "${options.from || defaultFrom}" to "${recipients}" | Subject: "${options.subject}"`);
+  console.log(`[SMTP Mailer] Dispatching email via Titan SMTP from "${options.from || defaultFrom}" to "${recipients}" | Subject: "${options.subject}"`);
 
   try {
     const transporter = createMailTransporter();
@@ -120,7 +111,7 @@ export async function sendEmail(options: SendMailOptions): Promise<MailSendResul
       text: textContent,
       html: options.html,
       envelope: {
-        from: user,
+        from: fromEmail,
         to: Array.isArray(options.to) ? options.to : [options.to],
       },
       // Standard transactional headers without spam-triggering priority flags
@@ -158,18 +149,18 @@ export async function sendEmail(options: SendMailOptions): Promise<MailSendResul
 }
 
 /**
- * Checks if the SMTP transporter can connect and verify credentials.
+ * Checks if the SMTP transporter can connect and verify credentials with Titan SMTP.
  */
 export async function verifySmtpConnection(): Promise<{ success: boolean; error?: string; message?: string }> {
   try {
     const transporter = createMailTransporter();
     await transporter.verify();
-    console.log('[SMTP Mailer] SMTP connection verified successfully with Gmail.');
-    return { success: true, message: 'SMTP connection verified successfully with Gmail.' };
+    console.log('[SMTP Mailer] SMTP connection verified successfully with Titan Email.');
+    return { success: true, message: 'SMTP connection verified successfully with Titan Email.' };
   } catch (error: any) {
     const errCode = error?.code || 'UNKNOWN';
     const errMsg = error?.message || 'Unknown verification error';
-    console.warn(`[SMTP Mailer] SMTP verification check failed. Code: ${errCode} | Message: ${errMsg}`);
+    console.warn(`[SMTP Mailer] Titan SMTP verification check failed. Code: ${errCode} | Message: ${errMsg}`);
     return { success: false, error: `${errCode}: ${errMsg}` };
   }
 }

@@ -212,7 +212,7 @@ Manage your bookings: ${dashboardLink}
 
 ---
 Foundarly Consultation Platform
-Contact: officialfoundarly@gmail.com
+Contact: hello@foundarlybusinessworld.in
 This is a transactional confirmation regarding your booking on foundarly.com.`;
 }
 
@@ -354,7 +354,7 @@ ${data.meetingLink}
 
 ---
 Foundarly Consultation Platform
-Contact: officialfoundarly@gmail.com`;
+Contact: hello@foundarlybusinessworld.in`;
 }
 
 /* ==========================================================================
@@ -499,7 +499,7 @@ NEXT STEPS:
 
 ---
 Foundarly Consultation Platform
-Contact: officialfoundarly@gmail.com`;
+Contact: hello@foundarlybusinessworld.in`;
 }
 
 /* ==========================================================================
@@ -558,7 +558,7 @@ export function generateApplicationRejectedEmailHTML(data: EmailApplicationRejec
               </p>
 
               <p style="margin: 24px 0 0; color: #64748b; font-size: 14px; line-height: 1.5;">
-                If you have questions, please reach out to us at <a href="mailto:officialfoundarly@gmail.com" style="color: #b45309; text-decoration: underline;">officialfoundarly@gmail.com</a>.
+                If you have questions, please reach out to us at <a href="mailto:hello@foundarlybusinessworld.in" style="color: #b45309; text-decoration: underline;">hello@foundarlybusinessworld.in</a>.
               </p>
             </td>
           </tr>
@@ -593,5 +593,5 @@ ${data.reason ? `Feedback from review team: ${data.reason}\n\n` : ''}We encourag
 
 ---
 Foundarly Consultation Platform
-Contact: officialfoundarly@gmail.com`;
+Contact: hello@foundarlybusinessworld.in`;
 }

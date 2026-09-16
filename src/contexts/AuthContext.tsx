@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { secureLog } from '@/utils/security';
+import { isAllowedAdminEmail, isUserAdmin } from '@/lib/authorization';
 
 interface Profile {
   id: string;
@@ -75,8 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const targetUser = currentUser || user;
       const userEmail = (targetUser?.email || '').toLowerCase().trim();
-      const adminEmails = ['admin@foundarly.com', 'lokesh.naivaidya@gmail.com', 'poosala15@gmail.com', 'starkcloudie@gmail.com'];
-      const isAdminEmail = adminEmails.includes(userEmail) || targetUser?.user_metadata?.role === 'admin';
+      const isAllowlistedAdmin = isAllowedAdminEmail(userEmail);
 
       // Query profile row from public.profiles table
       const { data, error } = await supabase
@@ -87,11 +87,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (data) {
         let profileData = data as Profile;
-        if (isAdminEmail && profileData.role !== 'admin') {
+
+        // Security Defense:
+        // 1. If profile has role 'admin' in database but the user's verified email is NOT in the admin allowlist,
+        // demote/sanitize the profile back to 'client' immediately to neutralize historical accidental escalation.
+        if (profileData.role === 'admin' && !isAllowlistedAdmin) {
+          secureLog.warn(`[Security] Revoking unauthorized admin role for non-allowlist email (${userEmail}). Reverting to client role.`);
+          profileData = { ...profileData, role: 'client' };
+          // Persist sanitized role to database
+          supabase.from('profiles').update({ role: 'client' }).eq('id', userId).then();
+        }
+        // 2. If the user is on the legitimate admin allowlist and their profile has not yet been marked admin, sync it.
+        else if (isAllowlistedAdmin && profileData.role !== 'admin') {
           profileData = { ...profileData, role: 'admin' };
-          // Sync with database asynchronously
           supabase.from('profiles').update({ role: 'admin' }).eq('id', userId).then();
         }
+
         setProfile(profileData);
         console.log("[AuthContext] Profile loaded from public.profiles:", profileData);
         return profileData;
@@ -101,9 +112,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         secureLog.error('Unable to fetch profile from public.profiles:', error);
       }
 
-      // If profile does not exist in DB, construct a fallback and attempt creation
+      // If profile does not exist in DB, construct a fallback.
+      // Default to 'client'. ONLY assign 'admin' if verified email is in the explicit admin allowlist.
       const fallbackName = targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'User';
-      const fallbackRole = isAdminEmail ? 'admin' : 'client';
+      const fallbackRole: 'admin' | 'client' = isAllowlistedAdmin ? 'admin' : 'client';
       const fallbackProfile: Profile = {
         id: userId,
         role: fallbackRole,
@@ -249,8 +261,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const hasRole = (role: 'admin' | 'client' | 'consultant') => {
-    return profile?.role === role;
+    if (role === 'admin') return isUserAdmin(user, profile);
+    if (role === 'client') return profile?.role === 'client' || (!isUserAdmin(user, profile) && !profile?.is_consultant);
+    return profile?.role === 'consultant' || profile?.is_consultant === true;
   };
+
+  const isCurrentAdmin = isUserAdmin(user, profile);
 
   const value = {
     user,
@@ -261,9 +277,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signIn,
     signInWithGoogle,
     signOut,
-    isAdmin: profile?.role === 'admin',
-    isClient: profile?.role === 'client',
-    isConsultant: profile?.role === 'consultant' || profile?.is_consultant === true,
+    isAdmin: isCurrentAdmin,
+    isClient: profile?.role === 'client' || (!isCurrentAdmin && !profile?.is_consultant),
+    isConsultant: !isCurrentAdmin && (profile?.role === 'consultant' || profile?.is_consultant === true),
     hasRole,
   };
 

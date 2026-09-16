@@ -7,6 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { isUserAdmin } from "@/lib/authorization";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 
@@ -29,7 +30,7 @@ export default function LoginPage() {
 
       const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from;
 
-      if (profile?.role === 'admin') {
+      if (isUserAdmin(user, profile)) {
         const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
         navigate(validAdminFrom, { replace: true });
       } else if (profile?.role === 'consultant' || profile?.is_consultant) {
@@ -66,7 +67,7 @@ export default function LoginPage() {
 
         const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from;
 
-        if (activeProfile?.role === 'admin') {
+        if (isUserAdmin(user, activeProfile)) {
           const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
           navigate(validAdminFrom, { replace: true });
         } else if (activeProfile?.role === 'consultant' || activeProfile?.is_consultant) {

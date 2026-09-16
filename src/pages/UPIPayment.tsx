@@ -47,7 +47,7 @@ export default function UPIPaymentPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, profile, isAdmin, loading: authLoading } = useAuth();
   const { formatPrice } = useCurrency();
 
   const [booking, setBooking] = useState<any>(null);
@@ -309,7 +309,7 @@ export default function UPIPaymentPage() {
               </div>
 
               <div className="flex gap-3 justify-center">
-                <Button onClick={() => navigate(profile?.role === 'admin' ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings')} className="glow-gold-sm">
+                <Button onClick={() => navigate(isAdmin ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings')} className="glow-gold-sm">
                   View My Bookings
                 </Button>
               </div>

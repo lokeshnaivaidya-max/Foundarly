@@ -115,7 +115,7 @@ export default function Header() {
     return "U";
   };
 
-  const isAdminRole = isAdmin || profile?.role === "admin";
+  const isAdminRole = Boolean(isAdmin);
   const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
   const isClientRole = !isAdminRole && !isConsultantRole;
 

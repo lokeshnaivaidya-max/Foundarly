@@ -48,7 +48,7 @@ export default function ConsultantProfile() {
     enabled: !!id,
   });
 
-  const isAdminRole = isAdmin || profile?.role === "admin";
+  const isAdminRole = Boolean(isAdmin);
   const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
   const isClientRole = !isAdminRole && !isConsultantRole;
 

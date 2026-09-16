@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar, Clock, User, MessageSquare, CreditCard, Video, Star, AlertCircle, Trash2, LogIn, CheckCircle, RefreshCw } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { isUserAdmin } from "@/lib/authorization";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { bookingsService } from "@/services/bookings";
 import { consultantDashboardService } from "@/services/consultantDashboard";
@@ -284,7 +285,7 @@ export default function MyBookingsPage() {
 
   useEffect(() => {
     if (!authLoading && !user) { navigate("/login"); return; }
-    if (!authLoading && profile?.role === 'admin') { navigate("/admin", { replace: true }); return; }
+    if (!authLoading && isUserAdmin(user, profile)) { navigate("/admin", { replace: true }); return; }
     if (!authLoading && (profile?.role === 'consultant' || profile?.is_consultant)) { navigate("/consultant/dashboard", { replace: true }); return; }
     if (user) loadBookings();
   }, [user, profile, authLoading, navigate]);

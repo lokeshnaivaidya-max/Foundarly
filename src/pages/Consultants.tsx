@@ -39,7 +39,7 @@ function ConsultantCard({ c, index }: { c: any; index: number }) {
   const { profile, isAdmin } = useAuth();
   const navigate = useNavigate();
 
-  const isAdminRole = isAdmin || profile?.role === "admin";
+  const isAdminRole = Boolean(isAdmin);
   const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
   const isClientRole = !isAdminRole && !isConsultantRole;
 

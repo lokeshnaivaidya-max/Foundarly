@@ -161,9 +161,15 @@ export const emailService = {
       let lastServerError: string | undefined;
 
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+
         const apiResponse = await fetch('/api/send-application-email', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             type: 'approved',
             applicationData: payload,
@@ -229,9 +235,15 @@ export const emailService = {
       let lastServerError: string | undefined;
 
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+
         const apiResponse = await fetch('/api/send-application-email', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             type: 'rejected',
             applicationData: payload,

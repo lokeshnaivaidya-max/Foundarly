@@ -14,6 +14,7 @@ import { consultantsService } from "@/services/consultants";
 import { bookingsService } from "@/services/bookings";
 import { referralsService } from "@/services/referrals";
 import { useAuth } from "@/contexts/AuthContext";
+import { isUserAdmin } from "@/lib/authorization";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { initiateRazorpayPayment } from "@/services/razorpay";
 import { emailService } from "@/services/email";
@@ -55,7 +56,7 @@ export default function BookingPage() {
   const [isValidatingReferral, setIsValidatingReferral] = useState(false);
   const [discountAmount, setDiscountAmount] = useState(0);
 
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, profile, isAdmin, loading: authLoading } = useAuth();
   const { formatPrice } = useCurrency();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -69,7 +70,7 @@ export default function BookingPage() {
 
   useEffect(() => {
     if (!authLoading && user) {
-      if (profile?.role === "admin") {
+      if (isUserAdmin(user, profile)) {
         navigate("/admin", { replace: true });
         return;
       }
@@ -353,7 +354,7 @@ export default function BookingPage() {
                   <span className="text-foreground font-medium">{formData.email}</span>
                 </p>
                 <div className="flex gap-3 justify-center">
-                  <Button onClick={() => navigate(profile?.role === 'admin' ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings')} className="glow-gold-sm">View My Bookings</Button>
+                  <Button onClick={() => navigate(isAdmin ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings')} className="glow-gold-sm">View My Bookings</Button>
                   <Button variant="outline" onClick={() => { setSubmitted(false); setFormData({ name: "", email: "", consultant_id: "", date: "", message: "", session_duration: 60 }); }}>
                     Book Another
                   </Button>

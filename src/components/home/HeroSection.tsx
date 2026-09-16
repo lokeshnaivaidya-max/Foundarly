@@ -41,7 +41,7 @@ function HeroSection() {
   }, []);
 
   const { profile, isAdmin } = useAuth();
-  const isAdminRole = isAdmin || profile?.role === "admin";
+  const isAdminRole = Boolean(isAdmin);
   const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
 
   const handleMouseMove = (e: React.MouseEvent) => {

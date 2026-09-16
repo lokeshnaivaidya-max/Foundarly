@@ -11,7 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 export default function ConsultantsSection() {
   const { formatPrice } = useCurrency();
   const { profile, isAdmin } = useAuth();
-  const isAdminRole = isAdmin || profile?.role === "admin";
+  const isAdminRole = Boolean(isAdmin);
   const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
   const isClientRole = !isAdminRole && !isConsultantRole;
   const { data: consultants, isLoading } = useQuery({

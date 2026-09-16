@@ -250,9 +250,9 @@ const STATUS_LABELS = { upcoming: "Upcoming", live: "Live Now", completed: "Comp
 export default function MeetingPage() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, profile, isAdmin, loading: authLoading } = useAuth();
 
-  const dashboardPath = profile?.role === 'admin' ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings';
+  const dashboardPath = isAdmin ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings';
 
   const webrtcServiceRef = useRef<WebRTCService | null>(null);
   const meetingContainerRef = useRef<HTMLDivElement | null>(null);

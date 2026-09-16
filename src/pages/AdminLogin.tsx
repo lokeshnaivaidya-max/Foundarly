@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
+import { isUserAdmin, isAllowedAdminEmail } from "@/lib/authorization";
 import { toast } from "sonner";
 import { ArrowLeft, Eye, EyeOff, Lock, Mail } from "lucide-react";
 
@@ -20,7 +21,7 @@ export default function AdminLoginPage() {
   useEffect(() => {
     if (!authLoading && user) {
       const fromPath = (location.state as any)?.from?.pathname;
-      if (profile?.role === 'admin') {
+      if (isUserAdmin(user, profile)) {
         const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
         navigate(validAdminFrom, { replace: true });
       } else if (profile?.role === 'consultant' || profile?.is_consultant) {
@@ -45,27 +46,32 @@ export default function AdminLoginPage() {
     setLoading(true);
 
     try {
-      const { error: signInError, profile: userProfile } = await signIn(email, password);
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!isAllowedAdminEmail(normalizedEmail)) {
+        setError("Access denied: This email is not authorized for administrator access.");
+        setLoading(false);
+        return;
+      }
+
+      const { error: signInError, profile: userProfile } = await signIn(normalizedEmail, password);
 
       if (signInError) {
         setError(signInError.message || "Invalid email or password.");
         return;
       }
 
-      toast.success("Successfully authenticated as Admin");
-      
       const activeProfile = userProfile || profile;
 
-      const fromPath = (location.state as any)?.from?.pathname;
-
-      if (activeProfile?.role === 'admin') {
-        const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
-        navigate(validAdminFrom, { replace: true });
-      } else if (activeProfile?.role === 'consultant' || activeProfile?.is_consultant) {
-        navigate("/consultant/dashboard", { replace: true });
-      } else {
-        navigate("/my-bookings", { replace: true });
+      if (!isUserAdmin(user, activeProfile)) {
+        setError("Access denied: You do not possess verified administrator privileges.");
+        return;
       }
+
+      toast.success("Successfully authenticated as Admin");
+
+      const fromPath = (location.state as any)?.from?.pathname;
+      const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
+      navigate(validAdminFrom, { replace: true });
     } catch (err: any) {
       setError(err?.message || "An error occurred during authentication.");
     } finally {

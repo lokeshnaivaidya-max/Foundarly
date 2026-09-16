@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 export default function ClosingCTASection() {
   const { profile, isAdmin } = useAuth();
-  const isAdminRole = isAdmin || profile?.role === "admin";
+  const isAdminRole = Boolean(isAdmin);
   const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
 
   return (

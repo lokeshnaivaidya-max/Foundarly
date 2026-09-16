@@ -4,7 +4,7 @@ import { Youtube, Instagram, PlayCircle, Sparkles } from "lucide-react";
 
 export default function Footer() {
   const { profile, isAdmin } = useAuth();
-  const isAdminRole = isAdmin || profile?.role === "admin";
+  const isAdminRole = Boolean(isAdmin);
   const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
 
   return (

@@ -20,8 +20,98 @@ import {
   EmailApplicationRejectedData,
 } from "./src/utils/emailTemplates.js";
 import { sendEmail, verifySmtpConnection, getSmtpConfig, getSmtpAuditInfo } from "./src/server/mailer.js";
+import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
+
+function getAdminAllowlist(): string[] {
+  const envList =
+    process.env.ADMIN_EMAILS ||
+    process.env.VITE_ADMIN_EMAILS ||
+    process.env.ADMIN_EMAIL ||
+    process.env.VITE_ADMIN_EMAIL;
+
+  if (envList && envList.trim()) {
+    return envList
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+  }
+  return ["admin@foundarly.com"];
+}
+
+function isAllowedAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return getAdminAllowlist().includes(email.trim().toLowerCase());
+}
+
+const supabaseAdminClient = createClient(
+  process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd"
+);
+
+// Admin Authorization Middleware for secure server-side admin endpoints
+async function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized: Missing or invalid Authorization header.",
+    });
+  }
+
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized: Authentication token is missing.",
+    });
+  }
+
+  try {
+    const { data: { user }, error: userError } = await supabaseAdminClient.auth.getUser(token);
+    if (userError || !user) {
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized: Invalid or expired authentication session.",
+      });
+    }
+
+    const userEmail = (user.email || "").toLowerCase().trim();
+    if (!isAllowedAdminEmail(userEmail)) {
+      console.warn(`[Security Alert] Non-admin user (${userEmail}) attempted to access protected admin endpoint: ${req.originalUrl}`);
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: User account does not possess administrator privileges.",
+      });
+    }
+
+    // Verify role in profiles table
+    const { data: profile } = await supabaseAdminClient
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (!profile || profile.role !== "admin") {
+      console.warn(`[Security Alert] User (${userEmail}) lacks database admin role for endpoint: ${req.originalUrl}`);
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: Administrator role not assigned in database.",
+      });
+    }
+
+    (req as any).adminUser = user;
+    (req as any).adminProfile = profile;
+    next();
+  } catch (err: any) {
+    console.error("[Security] Error during admin authorization:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error during authorization verification.",
+    });
+  }
+}
 
 const currentDir = typeof __dirname !== "undefined" ? __dirname : process.cwd();
 
@@ -45,6 +135,21 @@ async function startServer() {
       fromEmail: config.fromEmail,
       replyTo: config.replyTo,
       timestamp: new Date().toISOString(),
+    });
+  });
+
+  // Protected Admin API: Verify admin authorization status
+  app.get("/api/admin/verify-access", requireAdminAuth, (req, res) => {
+    const adminUser = (req as any).adminUser;
+    const adminProfile = (req as any).adminProfile;
+    res.json({
+      success: true,
+      authorized: true,
+      user: {
+        id: adminUser.id,
+        email: adminUser.email,
+        role: adminProfile.role,
+      },
     });
   });
 
@@ -421,8 +526,8 @@ async function startServer() {
     }
   });
 
-  // API Route: Send Consultant Application Status Notification (Approved / Rejected)
-  app.post("/api/send-application-email", async (req, res) => {
+  // API Route: Send Consultant Application Status Notification (Approved / Rejected) - Admin Protected
+  app.post("/api/send-application-email", requireAdminAuth, async (req, res) => {
     try {
       const { type, applicationData } = req.body || {};
 

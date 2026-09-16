@@ -186,8 +186,8 @@ export interface Database {
           date: string
           time: string
           message: string | null
-          status: 'pending' | 'confirmed' | 'completed' | 'cancelled'
-          payment_status: 'pending' | 'paid' | 'refunded'
+          status: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'rejected' | 'missed'
+          payment_status: 'pending' | 'paid' | 'refunded' | 'rejected' | 'failed'
           session_duration: number | null
           session_price: number | null
           meeting_room_id: string | null
@@ -202,8 +202,8 @@ export interface Database {
           date: string
           time: string
           message?: string | null
-          status?: 'pending' | 'confirmed' | 'completed' | 'cancelled'
-          payment_status?: 'pending' | 'paid' | 'refunded'
+          status?: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'rejected' | 'missed'
+          payment_status?: 'pending' | 'paid' | 'refunded' | 'rejected' | 'failed'
           session_duration?: number | null
           session_price?: number | null
           meeting_room_id?: string | null
@@ -218,8 +218,8 @@ export interface Database {
           date?: string
           time?: string
           message?: string | null
-          status?: 'pending' | 'confirmed' | 'completed' | 'cancelled'
-          payment_status?: 'pending' | 'paid' | 'refunded'
+          status?: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'rejected' | 'missed'
+          payment_status?: 'pending' | 'paid' | 'refunded' | 'rejected' | 'failed'
           session_duration?: number | null
           session_price?: number | null
           meeting_room_id?: string | null

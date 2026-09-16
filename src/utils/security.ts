@@ -64,14 +64,14 @@ export function validateSessionDuration(duration: number): boolean {
 
 // Validate booking status
 export function validateBookingStatus(status: string): boolean {
-  const validStatuses = ['pending', 'confirmed', 'completed', 'cancelled', 'missed'];
-  return validStatuses.includes(status);
+  const validStatuses = ['pending', 'confirmed', 'completed', 'cancelled', 'rejected', 'missed'];
+  return validStatuses.includes(status.toLowerCase().trim());
 }
 
 // Validate payment status
 export function validatePaymentStatus(status: string): boolean {
-  const validStatuses = ['pending', 'paid', 'failed', 'refunded'];
-  return validStatuses.includes(status);
+  const validStatuses = ['pending', 'paid', 'failed', 'refunded', 'rejected'];
+  return validStatuses.includes(status.toLowerCase().trim());
 }
 
 /**

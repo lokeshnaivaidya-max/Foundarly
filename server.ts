@@ -12,11 +12,14 @@ import {
   generateApplicationApprovedEmailText,
   generateApplicationRejectedEmailHTML,
   generateApplicationRejectedEmailText,
+  generateBookingRejectedEmailHTML,
+  generateBookingRejectedEmailText,
   EmailBookingData,
+  EmailBookingRejectedData,
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
 } from "./src/utils/emailTemplates.js";
-import { sendEmail, verifySmtpConnection } from "./src/server/mailer.js";
+import { sendEmail, verifySmtpConnection, getSmtpConfig } from "./src/server/mailer.js";
 
 dotenv.config();
 
@@ -30,38 +33,37 @@ async function startServer() {
 
   // API Health Check
   app.get("/api/health", (req, res) => {
-    const hasSmtp = Boolean(process.env.SMTP_PASS);
+    const config = getSmtpConfig();
     res.json({
       status: "ok",
       service: "Foundarly Server",
       emailService: "Titan SMTP (Nodemailer)",
-      emailConfigured: hasSmtp,
-      smtpHost: process.env.SMTP_HOST || "smtp.titan.email",
-      smtpPort: parseInt(process.env.SMTP_PORT || "465", 10),
-      smtpUser: process.env.SMTP_USER || "hello@foundarlybusinessworld.in",
-      fromEmail: process.env.FROM_EMAIL || "hello@foundarlybusinessworld.in",
-      replyTo: process.env.EMAIL_REPLY_TO || "hello@foundarlybusinessworld.in",
+      emailConfigured: Boolean(config.pass),
+      smtpHost: config.host,
+      smtpPort: config.port,
+      smtpUser: config.user,
+      fromEmail: config.fromEmail,
+      replyTo: config.replyTo,
       timestamp: new Date().toISOString(),
     });
   });
 
   // API: Verify SMTP Credentials & Handshake
   app.get("/api/verify-smtp", async (req, res) => {
-    const host = process.env.SMTP_HOST || "smtp.titan.email";
-    const port = parseInt(process.env.SMTP_PORT || "465", 10);
-    const user = process.env.SMTP_USER || "hello@foundarlybusinessworld.in";
-    const hasPass = Boolean(process.env.SMTP_PASS);
-    const passLength = process.env.SMTP_PASS ? process.env.SMTP_PASS.trim().replace(/\s+/g, "").length : 0;
+    const config = getSmtpConfig();
+    const passLength = config.pass ? config.pass.length : 0;
 
-    if (!hasPass) {
+    if (!config.pass) {
       return res.status(400).json({
         success: false,
-        error: "SMTP_PASS environment variable is not configured. Please set SMTP_PASS in environment variables.",
+        error: "SMTP_PASS environment variable is not configured. Please set SMTP_PASS in server environment variables.",
+        diagnostic: "Missing SMTP_PASS environment variable in server environment.",
         config: {
-          smtpHost: host,
-          smtpPort: port,
-          smtpUser: user,
-          encryption: "SSL",
+          smtpHost: config.host,
+          smtpPort: config.port,
+          smtpUser: config.user,
+          fromEmail: config.fromEmail,
+          encryption: config.port === 465 ? "SSL" : "STARTTLS",
           hasSmtpPass: false,
         },
       });
@@ -72,12 +74,14 @@ async function startServer() {
       if (result.success) {
         return res.json({
           success: true,
-          message: "Titan SMTP authentication and connection verified successfully!",
+          message: result.message || "Titan SMTP authentication and connection verified successfully!",
+          portVerified: result.portVerified,
           config: {
-            smtpHost: host,
-            smtpPort: port,
-            smtpUser: user,
-            encryption: "SSL",
+            smtpHost: config.host,
+            smtpPort: config.port,
+            smtpUser: config.user,
+            fromEmail: config.fromEmail,
+            encryption: (result.portVerified === 465 || config.port === 465) ? "SSL" : "STARTTLS",
             hasSmtpPass: true,
             passLength,
           },
@@ -86,11 +90,13 @@ async function startServer() {
         return res.status(500).json({
           success: false,
           error: result.error || "Failed to authenticate with Titan SMTP server",
+          diagnostic: result.diagnostic,
           config: {
-            smtpHost: host,
-            smtpPort: port,
-            smtpUser: user,
-            encryption: "SSL",
+            smtpHost: config.host,
+            smtpPort: config.port,
+            smtpUser: config.user,
+            fromEmail: config.fromEmail,
+            encryption: config.port === 465 ? "SSL" : "STARTTLS",
             hasSmtpPass: true,
             passLength,
           },
@@ -104,10 +110,10 @@ async function startServer() {
     }
   });
 
-  // API Route: Send Booking Confirmation Email (to User & Consultant)
+  // API Route: Send Booking Confirmation or Rejection Email (to User & Consultant)
   app.post("/api/send-booking-email", async (req, res) => {
     try {
-      const { bookingId, emailData } = req.body || {};
+      const { type, bookingId, emailData, reason } = req.body || {};
 
       if (!bookingId && !emailData) {
         return res.status(400).json({
@@ -116,11 +122,10 @@ async function startServer() {
         });
       }
 
-      const fromEmail = (process.env.EMAIL_FROM || "Foundarly <hello@foundarlybusinessworld.in>").trim();
-      const replyTo = (process.env.EMAIL_REPLY_TO || "hello@foundarlybusinessworld.in").trim();
+      const smtpConfig = getSmtpConfig();
       const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`).trim();
 
-      if (!process.env.SMTP_PASS) {
+      if (!smtpConfig.pass) {
         console.warn("[Server Email] SMTP_PASS is not configured.");
         return res.status(400).json({
           success: false,
@@ -129,6 +134,83 @@ async function startServer() {
         });
       }
 
+      // ── A. REJECTION FLOW ──
+      if (type === "rejected") {
+        let rejectData: EmailBookingRejectedData = emailData;
+
+        if (!rejectData || !rejectData.userEmail) {
+          const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co";
+          const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd";
+
+          const fetchRes = await fetch(`${supabaseUrl}/rest/v1/bookings?id=eq.${bookingId}&select=*,consultants(name,email,title)`, {
+            headers: {
+              "apikey": supabaseKey,
+              "Authorization": `Bearer ${supabaseKey}`,
+              "Content-Type": "application/json",
+            },
+          });
+
+          if (!fetchRes.ok) {
+            const errText = await fetchRes.text();
+            throw new Error(`Failed to fetch booking for rejection: ${errText}`);
+          }
+
+          const records = (await fetchRes.json()) as any[];
+          const booking = records?.[0];
+          if (!booking) {
+            return res.status(404).json({ success: false, error: `Booking record ${bookingId} not found` });
+          }
+
+          const consultantObj = Array.isArray(booking.consultants) ? booking.consultants[0] : booking.consultants;
+          rejectData = {
+            bookingId: booking.id,
+            userName: booking.name || "Client",
+            userEmail: booking.email,
+            consultantName: consultantObj?.name || "Consultant",
+            date: booking.date,
+            time: booking.time || "Flexible",
+            reason: reason || booking.rejection_reason || "Unable to confirm consultation booking at this time.",
+          };
+        }
+
+        if (!rejectData.userEmail || !rejectData.userEmail.includes("@")) {
+          return res.status(400).json({
+            success: false,
+            error: "Recipient email address is invalid or missing.",
+          });
+        }
+
+        const rejectHtml = generateBookingRejectedEmailHTML(rejectData);
+        const rejectText = generateBookingRejectedEmailText(rejectData);
+        const rejectSubject = `Consultation Booking Update: ${rejectData.consultantName} | Foundarly`;
+
+        const mailResult = await sendEmail({
+          from: smtpConfig.defaultFrom,
+          to: rejectData.userEmail,
+          replyTo: smtpConfig.replyTo,
+          subject: rejectSubject,
+          html: rejectHtml,
+          text: rejectText,
+        });
+
+        if (!mailResult.success) {
+          return res.status(500).json({
+            success: false,
+            error: mailResult.error || "Failed to send rejection email via Titan SMTP",
+            diagnostic: mailResult.diagnostic,
+            details: mailResult.details,
+          });
+        }
+
+        return res.json({
+          success: true,
+          message: "Rejection email sent successfully",
+          userEmailId: mailResult.messageId,
+          recipient: rejectData.userEmail,
+        });
+      }
+
+      // ── B. CONFIRMATION FLOW (CLIENT + CONSULTANT) ──
       let dataToSend: EmailBookingData = emailData;
 
       if (!dataToSend || !dataToSend.userEmail) {
@@ -200,9 +282,9 @@ async function startServer() {
 
       // Send to user via Titan SMTP
       const mailResult = await sendEmail({
-        from: fromEmail,
+        from: smtpConfig.defaultFrom,
         to: dataToSend.userEmail,
-        replyTo: replyTo,
+        replyTo: smtpConfig.replyTo,
         subject: clientSubject,
         html: userHtml,
         text: userText,
@@ -212,6 +294,7 @@ async function startServer() {
         return res.status(500).json({
           success: false,
           error: mailResult.error || "Failed to send booking confirmation email via Titan SMTP",
+          diagnostic: mailResult.diagnostic,
           details: mailResult.details,
         });
       }
@@ -220,6 +303,7 @@ async function startServer() {
 
       // Optionally send to consultant if email is present
       let consultantEmailId = null;
+      let consultantError = null;
       if (dataToSend.consultantEmail && dataToSend.consultantEmail.includes("@") && dataToSend.consultantEmail !== dataToSend.userEmail) {
         try {
           const consultantHtml = generateConsultantEmailHTML(dataToSend);
@@ -227,9 +311,9 @@ async function startServer() {
           const consultantSubject = `New Consultation Booked: ${dataToSend.userName} | Foundarly`;
 
           const consultantMailRes = await sendEmail({
-            from: fromEmail,
+            from: smtpConfig.defaultFrom,
             to: dataToSend.consultantEmail,
-            replyTo: replyTo,
+            replyTo: smtpConfig.replyTo,
             subject: consultantSubject,
             html: consultantHtml,
             text: consultantText,
@@ -237,9 +321,12 @@ async function startServer() {
           if (consultantMailRes.success) {
             consultantEmailId = consultantMailRes.messageId;
             console.log(`[Server Email] Consultant email sent successfully! Message ID: ${consultantEmailId}`);
+          } else {
+            consultantError = consultantMailRes.error;
           }
-        } catch (consErr) {
+        } catch (consErr: any) {
           console.warn("[Server Email] Consultant email error (non-fatal):", consErr);
+          consultantError = consErr?.message;
         }
       }
 
@@ -248,6 +335,8 @@ async function startServer() {
         message: "Booking confirmation email sent successfully",
         userEmailId: mailResult.messageId,
         consultantEmailId: consultantEmailId,
+        consultantError: consultantError || undefined,
+        portUsed: mailResult.portUsed,
         recipient: dataToSend.userEmail,
       });
     } catch (error: any) {

@@ -35,6 +35,17 @@ export interface EmailApplicationRejectedData {
   supportUrl?: string;
 }
 
+export interface EmailBookingRejectedData {
+  bookingId: string;
+  userName: string;
+  userEmail: string;
+  consultantName: string;
+  date: string;
+  time: string;
+  reason?: string | null;
+  supportUrl?: string;
+}
+
 export function formatSessionDate(dateStr: string): string {
   try {
     const d = new Date(dateStr);
@@ -595,3 +606,113 @@ ${data.reason ? `Feedback from review team: ${data.reason}\n\n` : ''}We encourag
 Foundarly Consultation Platform
 Contact: hello@foundarlybusinessworld.in`;
 }
+
+/* ==========================================================================
+   5. BOOKING REJECTED / CANCELLED EMAIL
+   ========================================================================== */
+
+export function generateBookingRejectedEmailHTML(data: EmailBookingRejectedData): string {
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+  <title>Booking Update - Foundarly</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b; -webkit-font-smoothing: antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 580px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+          
+          <!-- Header Banner -->
+          <tr>
+            <td style="background-color: #0f172a; padding: 28px 28px; text-align: center;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 700;">Consultation Booking Update</h1>
+              <p style="margin: 6px 0 0; color: #94a3b8; font-size: 14px;">Foundarly Consultation Platform</p>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 32px 28px;">
+              <p style="margin: 0 0 16px; font-size: 16px; line-height: 1.6; color: #1e293b;">
+                Dear <strong>${escapeHTML(data.userName)}</strong>,
+              </p>
+              <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #334155;">
+                We are writing to notify you that your consultation booking with <strong>${escapeHTML(data.consultantName)}</strong> could not be confirmed and has been cancelled.
+              </p>
+
+              <!-- Session Details Card -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin: 20px 0; padding: 16px;">
+                <tr>
+                  <td style="padding: 6px 0; font-size: 13px; color: #64748b; width: 120px;">Booking ID:</td>
+                  <td style="padding: 6px 0; font-size: 13px; font-weight: 600; font-family: monospace; color: #334155;">${escapeHTML(data.bookingId)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Scheduled Date:</td>
+                  <td style="padding: 6px 0; font-size: 13px; font-weight: 600; color: #334155;">${escapeHTML(formatSessionDate(data.date))}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Time:</td>
+                  <td style="padding: 6px 0; font-size: 13px; font-weight: 600; color: #334155;">${escapeHTML(data.time)}</td>
+                </tr>
+              </table>
+
+              ${data.reason ? `
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #fef2f2; border-radius: 6px; border: 1px solid #fecaca; margin: 16px 0; padding: 12px;">
+                <tr>
+                  <td>
+                    <p style="margin: 0 0 4px; color: #991b1b; font-size: 11px; font-weight: 600; text-transform: uppercase;">Cancellation / Rejection Reason:</p>
+                    <p style="margin: 0; color: #b91c1c; font-size: 13px; line-height: 1.5;">${escapeHTML(data.reason)}</p>
+                  </td>
+                </tr>
+              </table>` : ''}
+
+              <p style="margin: 20px 0 16px; color: #475569; font-size: 14px; line-height: 1.6;">
+                If you made a payment that requires a refund or if you would like to reschedule with an alternative date, please reach out to our team.
+              </p>
+
+              <p style="margin: 24px 0 0; color: #64748b; font-size: 14px; line-height: 1.5;">
+                For assistance, reply directly to this email or reach us at <a href="mailto:hello@foundarlybusinessworld.in" style="color: #b45309; text-decoration: underline;">hello@foundarlybusinessworld.in</a>.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 20px 28px; text-align: center; border-top: 1px solid #e2e8f0;">
+              <p style="margin: 0 0 4px; color: #475569; font-size: 12px; font-weight: 600;">Foundarly Consultation Platform</p>
+              <p style="margin: 0 0 4px; color: #94a3b8; font-size: 11px;">You received this notification regarding your booking on foundarly.com.</p>
+              <p style="margin: 0; color: #94a3b8; font-size: 11px;">© ${new Date().getFullYear()} Foundarly. All rights reserved.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export function generateBookingRejectedEmailText(data: EmailBookingRejectedData): string {
+  return `Consultation Booking Update - Foundarly
+
+Dear ${data.userName},
+
+We are writing to notify you that your consultation booking with ${data.consultantName} could not be confirmed and has been cancelled.
+
+Booking ID: ${data.bookingId}
+Date: ${formatSessionDate(data.date)}
+Time: ${data.time}
+
+${data.reason ? `Reason: ${data.reason}\n\n` : ''}If you made a payment or need to reschedule, please contact us.
+
+---
+Foundarly Consultation Platform
+Support: hello@foundarlybusinessworld.in`;
+}
+

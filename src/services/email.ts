@@ -276,4 +276,91 @@ export const emailService = {
       return { success: false, error: error?.message || 'Error sending rejection email' };
     }
   },
+
+  /**
+   * Send booking rejection/cancellation notification email to attendee
+   */
+  async sendBookingRejection(bookingId: string, reason?: string): Promise<EmailSendResult> {
+    try {
+      console.log(`[EmailService] Preparing booking rejection email for booking: ${bookingId}`);
+
+      const { data: booking, error: fetchError } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          consultants (
+            name,
+            email,
+            title
+          )
+        `)
+        .eq('id', bookingId)
+        .maybeSingle();
+
+      if (fetchError || !booking) {
+        const errorMsg = fetchError?.message || `Booking record ${bookingId} not found in database.`;
+        return { success: false, error: errorMsg };
+      }
+
+      if (!booking.email || !validateEmail(booking.email)) {
+        return { success: false, error: 'Recipient email address is invalid in booking record.' };
+      }
+
+      const consultantObj = Array.isArray(booking.consultants) ? booking.consultants[0] : booking.consultants;
+
+      const rejectionData = {
+        bookingId: booking.id,
+        userName: booking.name || 'Client',
+        userEmail: booking.email.toLowerCase().trim(),
+        consultantName: consultantObj?.name || 'Consultant',
+        date: booking.date,
+        time: booking.time || 'Flexible',
+        reason: reason || booking.rejection_reason || 'Unable to confirm consultation booking at this time.',
+      };
+
+      try {
+        const apiResponse = await fetch('/api/send-booking-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'rejected',
+            bookingId: booking.id,
+            emailData: rejectionData,
+            reason: rejectionData.reason,
+          }),
+        });
+
+        if (apiResponse.ok) {
+          const apiResult = await apiResponse.json();
+          if (apiResult?.success) {
+            return {
+              success: true,
+              message: 'Booking rejection email sent successfully',
+              userEmailId: apiResult.userEmailId,
+              recipient: rejectionData.userEmail,
+            };
+          } else {
+            return { success: false, error: apiResult?.error || 'Failed to send rejection email' };
+          }
+        } else {
+          let errMessage: string | undefined;
+          try {
+            const errJson = await apiResponse.json();
+            errMessage = errJson?.error || errJson?.message;
+          } catch {
+            const errText = await apiResponse.text();
+            if (errText && errText.length < 200 && !errText.includes('<!doctype')) {
+              errMessage = errText;
+            }
+          }
+          return { success: false, error: errMessage || `Server returned ${apiResponse.status}` };
+        }
+      } catch (networkErr: any) {
+        return { success: false, error: networkErr?.message || 'Network error reaching email server' };
+      }
+    } catch (error: any) {
+      console.error('[EmailService] Fatal error in sendBookingRejection:', error);
+      return { success: false, error: error?.message || 'Unexpected error sending rejection email' };
+    }
+  },
 };

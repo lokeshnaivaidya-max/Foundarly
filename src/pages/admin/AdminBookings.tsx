@@ -812,7 +812,7 @@ export default function AdminBookings() {
                 <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">Payment</TableHead>
                 <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">Status</TableHead>
                 <TableHead className="text-xs px-3 py-3.5 text-center whitespace-nowrap">Email</TableHead>
-                <TableHead className="text-xs px-3 py-3.5 text-right whitespace-nowrap">Actions</TableHead>
+                <TableHead className="sticky right-0 z-30 bg-card text-xs px-3 py-3.5 text-right whitespace-nowrap border-l border-b border-border shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.06)] dark:shadow-[-4px_0_12px_-2px_rgba(0,0,0,0.3)] min-w-[270px] w-[270px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -822,7 +822,7 @@ export default function AdminBookings() {
                 const isRejected = isBookingRejected(b);
 
                 return (
-                  <TableRow key={b.id}>
+                  <TableRow key={b.id} className="group">
                     <TableCell className="font-mono text-xs text-muted-foreground px-3 py-3 whitespace-nowrap">
                       {b.id.slice(0, 8)}
                     </TableCell>
@@ -960,7 +960,7 @@ export default function AdminBookings() {
                         </div>
                       )}
                     </TableCell>
-                    <TableCell className="text-right px-3 py-3 whitespace-nowrap">
+                    <TableCell className="sticky right-0 z-20 bg-card group-hover:bg-[color-mix(in_srgb,hsl(var(--muted))_50%,hsl(var(--card)))] transition-colors text-right px-3 py-3 whitespace-nowrap border-l border-b border-border group-last:border-b-0 shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.06)] dark:shadow-[-4px_0_12px_-2px_rgba(0,0,0,0.3)] min-w-[270px] w-[270px]">
                       <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                         {/* Pending actions */}
                         {isPending && (

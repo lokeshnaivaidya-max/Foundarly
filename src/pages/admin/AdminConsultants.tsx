@@ -322,7 +322,7 @@ export default function AdminConsultants() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full min-w-0 max-w-full">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-display font-bold text-foreground">Manage Consultants</h1>
@@ -354,88 +354,90 @@ export default function AdminConsultants() {
       </div>
 
       {view === "table" ? (
-        <div className="bg-card border border-border rounded-lg">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="text-xs">Name</TableHead>
-                <TableHead className="text-xs">Title</TableHead>
-                <TableHead className="text-xs">Email</TableHead>
-                <TableHead className="text-xs">Role</TableHead>
-                <TableHead className="text-xs">30 min</TableHead>
-                <TableHead className="text-xs">60 min</TableHead>
-                <TableHead className="text-xs">Status</TableHead>
-                <TableHead className="text-xs text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((c) => (
-                <TableRow key={c.id}>
-                <TableCell className="font-medium text-sm">
-                  <div className="flex items-center gap-2">
-                    <img
-                      src={c.image_url || getDefaultAvatar(c.gender)}
-                      alt={c.name}
-                      className="w-8 h-8 rounded-full object-cover border border-border shrink-0"
-                    />
-                    {c.name}
-                  </div>
-                </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{c.title}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {c.email || <span className="text-muted-foreground/50">No email</span>}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      {c.user_id ? (
-                        <Badge variant="outline" className="text-xs bg-green-500/15 text-green-400 border-green-500/30">
-                          Linked
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs bg-yellow-500/15 text-yellow-400 border-yellow-500/30">
-                          No Account
-                        </Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-sm">{formatPrice(c.pricing_30)}</TableCell>
-                  <TableCell className="text-sm">{formatPrice(c.pricing_60)}</TableCell>
-                  <TableCell>
-                    <button
-                      type="button"
-                      onClick={() => toggleActiveStatus(c)}
-                      className="cursor-pointer hover:opacity-80 transition-opacity"
-                      title="Click to toggle active status"
-                    >
-                      <Badge variant="outline" className={`text-xs ${c.is_active ? "bg-green-500/15 text-green-400 border-green-500/30" : "bg-muted text-muted-foreground"}`}>
-                        {c.is_active ? "Active" : "Inactive"}
-                      </Badge>
-                    </button>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="text-xs h-7"
-                        onClick={() => openEdit(c)}
-                      >
-                        Edit
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="text-xs h-7 text-destructive hover:text-destructive"
-                        onClick={() => handleDelete(c.id)}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </TableCell>
+        <div className="bg-card border border-border rounded-lg overflow-hidden w-full max-w-full">
+          <div className="overflow-x-auto w-full">
+            <Table className="w-full min-w-[850px]">
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Name</TableHead>
+                  <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Title</TableHead>
+                  <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Email</TableHead>
+                  <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Role</TableHead>
+                  <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">30 min</TableHead>
+                  <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">60 min</TableHead>
+                  <TableHead className="text-xs px-4 py-3.5 whitespace-nowrap">Status</TableHead>
+                  <TableHead className="text-xs px-4 py-3.5 text-right whitespace-nowrap">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell className="font-medium text-sm px-4 py-3 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={c.image_url || getDefaultAvatar(c.gender)}
+                          alt={c.name}
+                          className="w-8 h-8 rounded-full object-cover border border-border shrink-0"
+                        />
+                        {c.name}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground px-4 py-3 whitespace-nowrap">{c.title}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground px-4 py-3 whitespace-nowrap">
+                      {c.email || <span className="text-muted-foreground/50">No email</span>}
+                    </TableCell>
+                    <TableCell className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        {c.user_id ? (
+                          <Badge variant="outline" className="text-xs bg-green-500/15 text-green-400 border-green-500/30">
+                            Linked
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs bg-yellow-500/15 text-yellow-400 border-yellow-500/30">
+                            No Account
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm px-4 py-3 whitespace-nowrap">{formatPrice(c.pricing_30)}</TableCell>
+                    <TableCell className="text-sm px-4 py-3 whitespace-nowrap">{formatPrice(c.pricing_60)}</TableCell>
+                    <TableCell className="px-4 py-3 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => toggleActiveStatus(c)}
+                        className="cursor-pointer hover:opacity-80 transition-opacity"
+                        title="Click to toggle active status"
+                      >
+                        <Badge variant="outline" className={`text-xs ${c.is_active ? "bg-green-500/15 text-green-400 border-green-500/30" : "bg-muted text-muted-foreground"}`}>
+                          {c.is_active ? "Active" : "Inactive"}
+                        </Badge>
+                      </button>
+                    </TableCell>
+                    <TableCell className="text-right px-4 py-3 whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="text-xs h-7"
+                          onClick={() => openEdit(c)}
+                        >
+                          Edit
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-xs h-7 text-destructive hover:text-destructive"
+                          onClick={() => handleDelete(c.id)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

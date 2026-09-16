@@ -443,7 +443,7 @@ export default function AdminBookings() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full min-w-0 max-w-full">
       {/* Header with stats */}
       <div>
         <div className="flex items-center justify-between mb-4">
@@ -520,165 +520,174 @@ export default function AdminBookings() {
         </Select>
       </div>
 
-      <div className="bg-card border border-border rounded-lg">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="text-xs">ID</TableHead>
-              <TableHead className="text-xs">Client</TableHead>
-              <TableHead className="text-xs">Consultant</TableHead>
-              <TableHead className="text-xs">Date</TableHead>
-              <TableHead className="text-xs">Time</TableHead>
-              <TableHead className="text-xs">Duration</TableHead>
-              <TableHead className="text-xs">Price</TableHead>
-              <TableHead className="text-xs">Meeting Room</TableHead>
-              <TableHead className="text-xs">Payment</TableHead>
-              <TableHead className="text-xs">Status</TableHead>
-              <TableHead className="text-xs text-center">Email</TableHead>
-              <TableHead className="text-xs text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.map((b) => (
-              <TableRow key={b.id}>
-                <TableCell className="font-mono text-xs text-muted-foreground">{b.id.slice(0, 8)}</TableCell>
-                <TableCell className="text-sm">{b.name}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">{b.consultants?.name || 'N/A'}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">{new Date(b.date).toLocaleDateString()}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">{b.time}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">{b.session_duration ? `${b.session_duration} min` : 'N/A'}</TableCell>
-                <TableCell className="text-sm font-medium text-primary">{b.session_price ? formatPrice(b.session_price) : 'N/A'}</TableCell>
-                <TableCell className="text-xs">
-                  {b.meeting_room_id ? (
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1 text-primary">
-                        <Video className="h-3 w-3" />
-                        <span className="font-mono text-xs">{b.meeting_room_id.slice(0, 15)}...</span>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={() => copyMeetingLink(b.meeting_room_id)}
-                        title="Copy meeting link"
-                      >
-                        {copiedId === b.meeting_room_id ? (
-                          <Check className="h-3 w-3 text-green-500" />
-                        ) : (
-                          <Copy className="h-3 w-3" />
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={() => window.open(`/meeting/${b.meeting_room_id}`, '_blank')}
-                        title="Open meeting"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground">Not set</span>
-                  )}
-                </TableCell>
-                <TableCell className={`text-xs font-medium ${paymentColor(b.payment_status)}`}>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span>{b.payment_status.charAt(0).toUpperCase() + b.payment_status.slice(1)}</span>
-                      {b.payment_status === "pending" && b.upi_payment && (
-                        <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 border-amber-500/30">
-                          Needs Verification
-                        </Badge>
-                      )}
-                    </div>
-                    {/* Verify Payment Button under Payment column */}
-                    {b.payment_status === "pending" && b.upi_payment && (
-                      <Button 
-                        variant="default"
-                        size="sm" 
-                        className="text-xs bg-amber-600 hover:bg-amber-700 text-white w-full"
-                        onClick={() => openPaymentDialog(b)}
-                        title="View and verify payment"
-                      >
-                        <CreditCard className="h-3.5 w-3.5 mr-1" />
-                        <span className="text-xs font-semibold">Verify Payment</span>
-                      </Button>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className={`text-xs ${statusColor(b.status)}`}>
-                    {b.status.charAt(0).toUpperCase() + b.status.slice(1)}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-center">
-                  {b.status === "confirmed" && b.meeting_room_id && (
-                    <div className="flex flex-col items-center gap-1">
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="text-xs text-green-600 hover:text-green-700 hover:bg-green-50 h-8 w-8 p-0"
-                        onClick={() => sendBookingEmail(b.id)}
-                        disabled={sendingEmailId === b.id}
-                        title="Send confirmation emails"
-                      >
-                        {sendingEmailId === b.id ? (
-                          <span className="w-3 h-3 border-2 border-green-600/30 border-t-green-600 rounded-full animate-spin" />
-                        ) : (
-                          <Mail className="h-4 w-4" />
-                        )}
-                      </Button>
-                      {/* Checkmark if email was sent */}
-                      {b.email_sent && (
-                        <CheckCircle className="h-3 w-3 text-green-500" title="Email sent" />
-                      )}
-                    </div>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    {b.status === "pending" && !b.upi_payment && (
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                        onClick={() => approveBooking(b)}
-                        disabled={approvingId === b.id}
-                        title="Approve booking and create meeting room"
-                      >
-                        {approvingId === b.id ? (
-                          <span className="text-xs">Approving...</span>
-                        ) : (
-                          <>
-                            <CheckCircle className="h-3.5 w-3.5 mr-1" />
-                            <span className="text-xs">Approve</span>
-                          </>
-                        )}
-                      </Button>
-                    )}
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="text-xs text-primary hover:text-primary/80"
-                      onClick={() => openEdit(b)}
-                    >
-                      Edit
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="text-xs text-destructive hover:text-destructive/80"
-                      onClick={() => openDelete(b)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </TableCell>
+      <div className="bg-card border border-border rounded-lg overflow-hidden w-full max-w-full">
+        <div className="overflow-x-auto w-full">
+          <Table className="w-full min-w-[1000px]">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">ID</TableHead>
+                <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">Client</TableHead>
+                <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">Consultant</TableHead>
+                <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">Date</TableHead>
+                <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">Time</TableHead>
+                <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">Duration</TableHead>
+                <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">Price</TableHead>
+                <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">Meeting Room</TableHead>
+                <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">Payment</TableHead>
+                <TableHead className="text-xs px-3 py-3.5 whitespace-nowrap">Status</TableHead>
+                <TableHead className="text-xs px-3 py-3.5 text-center whitespace-nowrap">Email</TableHead>
+                <TableHead className="text-xs px-3 py-3.5 text-right whitespace-nowrap">Actions</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {filtered.map((b) => (
+                <TableRow key={b.id}>
+                  <TableCell className="font-mono text-xs text-muted-foreground px-3 py-3 whitespace-nowrap">{b.id.slice(0, 8)}</TableCell>
+                  <TableCell className="text-sm px-3 py-3 whitespace-nowrap font-medium">{b.name}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground px-3 py-3 whitespace-nowrap">{b.consultants?.name || 'N/A'}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground px-3 py-3 whitespace-nowrap">{new Date(b.date).toLocaleDateString()}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground px-3 py-3 whitespace-nowrap">{b.time}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground px-3 py-3 whitespace-nowrap">{b.session_duration ? `${b.session_duration} min` : 'N/A'}</TableCell>
+                  <TableCell className="text-sm font-medium text-primary px-3 py-3 whitespace-nowrap">{b.session_price ? formatPrice(b.session_price) : 'N/A'}</TableCell>
+                  <TableCell className="text-xs px-3 py-3 whitespace-nowrap">
+                    {b.meeting_room_id ? (
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
+                        <div className="flex items-center gap-1 text-primary">
+                          <Video className="h-3 w-3 shrink-0" />
+                          <span className="font-mono text-xs">{b.meeting_room_id.slice(0, 15)}...</span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 shrink-0"
+                          onClick={() => copyMeetingLink(b.meeting_room_id)}
+                          title="Copy meeting link"
+                        >
+                          {copiedId === b.meeting_room_id ? (
+                            <Check className="h-3 w-3 text-green-500" />
+                          ) : (
+                            <Copy className="h-3 w-3" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 shrink-0"
+                          onClick={() => window.open(`/meeting/${b.meeting_room_id}`, '_blank')}
+                          title="Open meeting"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">Not set</span>
+                    )}
+                  </TableCell>
+                  <TableCell className={`text-xs font-medium px-3 py-3 whitespace-nowrap ${paymentColor(b.payment_status)}`}>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        <span>{b.payment_status.charAt(0).toUpperCase() + b.payment_status.slice(1)}</span>
+                        {b.payment_status === "pending" && b.upi_payment && (
+                          <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 border-amber-500/30 whitespace-nowrap">
+                            Needs Verification
+                          </Badge>
+                        )}
+                      </div>
+                      {/* Verify Payment Button under Payment column */}
+                      {b.payment_status === "pending" && b.upi_payment && (
+                        <Button 
+                          variant="default"
+                          size="sm" 
+                          className="text-xs bg-amber-600 hover:bg-amber-700 text-white w-full whitespace-nowrap"
+                          onClick={() => openPaymentDialog(b)}
+                          title="View and verify payment"
+                        >
+                          <CreditCard className="h-3.5 w-3.5 mr-1" />
+                          <span className="text-xs font-semibold">Verify Payment</span>
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="px-3 py-3 whitespace-nowrap">
+                    <Badge variant="outline" className={`text-xs ${statusColor(b.status)}`}>
+                      {b.status.charAt(0).toUpperCase() + b.status.slice(1)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-center px-3 py-3 whitespace-nowrap">
+                    {b.status === "confirmed" && b.meeting_room_id && (
+                      <div className="flex flex-col items-center gap-1">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-xs text-green-600 hover:text-green-700 hover:bg-green-50 h-8 w-8 p-0"
+                          onClick={() => sendBookingEmail(b.id)}
+                          disabled={sendingEmailId === b.id}
+                          title="Send confirmation emails"
+                        >
+                          {sendingEmailId === b.id ? (
+                            <span className="w-3 h-3 border-2 border-green-600/30 border-t-green-600 rounded-full animate-spin" />
+                          ) : (
+                            <Mail className="h-4 w-4" />
+                          )}
+                        </Button>
+                        {/* Checkmark if email was sent */}
+                        {b.email_sent && (
+                          <CheckCircle className="h-3 w-3 text-green-500" title="Email sent" />
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right px-3 py-3 whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                      {b.status === "pending" && !b.upi_payment && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          onClick={() => approveBooking(b)}
+                          disabled={approvingId === b.id}
+                          title="Approve booking and create meeting room"
+                        >
+                          {approvingId === b.id ? (
+                            <span className="text-xs">Approving...</span>
+                          ) : (
+                            <>
+                              <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                              <span className="text-xs">Approve</span>
+                            </>
+                          )}
+                        </Button>
+                      )}
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-xs text-primary hover:text-primary/80"
+                        onClick={() => openEdit(b)}
+                      >
+                        Edit
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-xs text-destructive hover:text-destructive/80"
+                        onClick={() => openDelete(b)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {filtered.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
+                    No bookings found
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       {/* Edit Dialog */}

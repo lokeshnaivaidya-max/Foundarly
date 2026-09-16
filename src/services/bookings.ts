@@ -15,27 +15,46 @@ type BookingInsert = Database['public']['Tables']['bookings']['Insert'];
 type BookingUpdate = Database['public']['Tables']['bookings']['Update'];
 
 export const bookingsService = {
-  async getAll() {
-    console.log('[BookingsService.getAll] Fetching all bookings from Supabase...');
+  async getAll(statusFilter?: 'all' | 'pending' | 'confirmed' | 'rejected' | string) {
+    console.log(`[BookingsService.getAll] Fetching bookings from Supabase with filter: ${statusFilter || 'all'}...`);
     let rawBookings: any[] = [];
     
-    const response = await supabase
+    let query = supabase
       .from('bookings')
       .select(`
         *,
         consultants (
           name,
-          title
+          title,
+          email
         )
-      `, { count: 'exact' })
-      .order('created_at', { ascending: false });
+      `, { count: 'exact' });
+
+    if (statusFilter === 'pending') {
+      query = query.eq('status', 'pending').neq('payment_status', 'rejected');
+    } else if (statusFilter === 'confirmed') {
+      query = query.in('status', ['confirmed', 'completed']).neq('payment_status', 'rejected');
+    } else if (statusFilter === 'rejected') {
+      query = query.or('status.in.(rejected,cancelled),payment_status.eq.rejected');
+    }
+    
+    const response = await query.order('created_at', { ascending: false });
     
     if (response.error) {
       console.warn('[BookingsService.getAll] Joined query failed, attempting flat select fallback:', response.error);
-      const fallbackResponse = await supabase
+      let fallbackQuery = supabase
         .from('bookings')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('*');
+
+      if (statusFilter === 'pending') {
+        fallbackQuery = fallbackQuery.eq('status', 'pending').neq('payment_status', 'rejected');
+      } else if (statusFilter === 'confirmed') {
+        fallbackQuery = fallbackQuery.in('status', ['confirmed', 'completed']).neq('payment_status', 'rejected');
+      } else if (statusFilter === 'rejected') {
+        fallbackQuery = fallbackQuery.or('status.in.(rejected,cancelled),payment_status.eq.rejected');
+      }
+
+      const fallbackResponse = await fallbackQuery.order('created_at', { ascending: false });
 
       if (fallbackResponse.error) {
         console.error('[BookingsService.getAll] Flat select fallback also failed:', fallbackResponse.error);

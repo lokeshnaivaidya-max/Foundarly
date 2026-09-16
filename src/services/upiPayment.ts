@@ -187,23 +187,21 @@ export const upiPaymentService = {
    */
   async verifyPayment(
     paymentId: string,
-    adminId: string,
+    adminId?: string | null,
     adminNotes?: string
   ): Promise<UPIPayment> {
     if (!validateUUID(paymentId)) {
       throw new Error('Invalid payment ID');
     }
-    if (!validateUUID(adminId)) {
-      throw new Error('Invalid admin ID');
-    }
+    const validAdminId = (adminId && validateUUID(adminId)) ? adminId : null;
 
     const { data, error } = await (supabase
       .from('upi_payments')
       .update({
         status: 'verified',
-        verified_by: adminId,
+        verified_by: validAdminId,
         verified_at: new Date().toISOString(),
-        admin_notes: adminNotes ? sanitizeString(adminNotes) : null,
+        admin_notes: adminNotes ? sanitizeString(adminNotes) : 'Payment verified by administrator',
       } as any) as any)
       .eq('id', paymentId)
       .select()
@@ -218,26 +216,21 @@ export const upiPaymentService = {
    */
   async rejectPayment(
     paymentId: string,
-    adminId: string,
-    reason: string
+    adminId?: string | null,
+    reason: string = 'Payment rejected by administrator'
   ): Promise<UPIPayment> {
     if (!validateUUID(paymentId)) {
       throw new Error('Invalid payment ID');
     }
-    if (!validateUUID(adminId)) {
-      throw new Error('Invalid admin ID');
-    }
-    if (!reason || reason.trim().length < 5) {
-      throw new Error('Rejection reason is required');
-    }
+    const validAdminId = (adminId && validateUUID(adminId)) ? adminId : null;
 
     const { data, error } = await (supabase
       .from('upi_payments')
       .update({
         status: 'rejected',
-        verified_by: adminId,
+        verified_by: validAdminId,
         verified_at: new Date().toISOString(),
-        admin_notes: sanitizeString(reason),
+        admin_notes: sanitizeString(reason || 'Payment rejected by administrator'),
       } as any) as any)
       .eq('id', paymentId)
       .select()

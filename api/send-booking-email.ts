@@ -1,3 +1,4 @@
+import dotenv from 'dotenv';
 import {
   generateUserEmailHTML,
   generateUserEmailText,
@@ -9,6 +10,8 @@ import {
   EmailBookingRejectedData,
 } from '../src/utils/emailTemplates.js';
 import { sendEmail, getSmtpConfig } from '../src/server/mailer.js';
+
+dotenv.config();
 
 interface RequestLike {
   method?: string;

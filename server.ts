@@ -19,7 +19,7 @@ import {
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
 } from "./src/utils/emailTemplates.js";
-import { sendEmail, verifySmtpConnection, getSmtpConfig } from "./src/server/mailer.js";
+import { sendEmail, verifySmtpConnection, getSmtpConfig, getSmtpAuditInfo } from "./src/server/mailer.js";
 
 dotenv.config();
 
@@ -51,6 +51,7 @@ async function startServer() {
   // API: Verify SMTP Credentials & Handshake
   app.get("/api/verify-smtp", async (req, res) => {
     const config = getSmtpConfig();
+    const audit = getSmtpAuditInfo();
     const passLength = config.pass ? config.pass.length : 0;
 
     if (!config.pass) {
@@ -58,12 +59,13 @@ async function startServer() {
         success: false,
         error: "SMTP_PASS environment variable is not configured. Please set SMTP_PASS in server environment variables.",
         diagnostic: "Missing SMTP_PASS environment variable in server environment.",
+        audit,
         config: {
           smtpHost: config.host,
           smtpPort: config.port,
           smtpUser: config.user,
           fromEmail: config.fromEmail,
-          encryption: config.port === 465 ? "SSL" : "STARTTLS",
+          encryption: config.secure ? "SSL" : "STARTTLS",
           hasSmtpPass: false,
         },
       });
@@ -74,38 +76,109 @@ async function startServer() {
       if (result.success) {
         return res.json({
           success: true,
-          message: result.message || "Titan SMTP authentication and connection verified successfully!",
+          message: result.message || "SMTP authentication and connection verified successfully!",
           portVerified: result.portVerified,
+          targetVerified: result.targetVerified,
+          audit: result.audit || audit,
           config: {
-            smtpHost: config.host,
-            smtpPort: config.port,
+            smtpHost: result.configSummary?.activeHost || config.host,
+            smtpPort: result.configSummary?.activePort || config.port,
             smtpUser: config.user,
             fromEmail: config.fromEmail,
-            encryption: (result.portVerified === 465 || config.port === 465) ? "SSL" : "STARTTLS",
+            encryption: result.configSummary?.activeEncryption || (config.secure ? "SSL" : "STARTTLS"),
             hasSmtpPass: true,
             passLength,
           },
+          attempts: result.attempts,
         });
       } else {
         return res.status(500).json({
           success: false,
-          error: result.error || "Failed to authenticate with Titan SMTP server",
+          error: result.error || "Failed to authenticate with SMTP server",
           diagnostic: result.diagnostic,
+          audit: result.audit || audit,
           config: {
             smtpHost: config.host,
             smtpPort: config.port,
             smtpUser: config.user,
             fromEmail: config.fromEmail,
-            encryption: config.port === 465 ? "SSL" : "STARTTLS",
+            encryption: config.secure ? "SSL" : "STARTTLS",
             hasSmtpPass: true,
             passLength,
           },
+          attempts: result.attempts,
         });
       }
     } catch (error: any) {
       return res.status(500).json({
         success: false,
         error: error?.message || "Unexpected error during SMTP verification",
+        audit,
+      });
+    }
+  });
+
+  // API Route: Send Test Booking Confirmation Email
+  app.post("/api/send-test-email", async (req, res) => {
+    try {
+      const { recipient } = req.body || {};
+      const targetRecipient = (recipient || "hello@foundarlybusinessworld.in").trim();
+
+      const smtpConfig = getSmtpConfig();
+      if (!smtpConfig.pass) {
+        return res.status(400).json({
+          success: false,
+          error: "SMTP_PASS environment variable is not configured.",
+          diagnostic: "Missing SMTP_PASS environment variable in server environment.",
+        });
+      }
+
+      const testData: EmailBookingData = {
+        bookingId: "test-" + Date.now(),
+        userName: "Test User",
+        userEmail: targetRecipient,
+        consultantName: "Foundarly Team",
+        consultantEmail: smtpConfig.fromEmail,
+        date: new Date().toISOString().split("T")[0],
+        time: "10:00 AM",
+        duration: 45,
+        meetingLink: `https://foundarly.com/meeting/test-${Date.now()}`,
+        meetingRoomId: `test-${Date.now()}`,
+        price: 0,
+        message: "This is a verification test of the Foundarly booking confirmation email system.",
+      };
+
+      const html = generateUserEmailHTML(testData);
+      const text = generateUserEmailText(testData);
+
+      const result = await sendEmail({
+        from: smtpConfig.defaultFrom,
+        to: targetRecipient,
+        replyTo: smtpConfig.replyTo,
+        subject: "✓ Test Booking Confirmation | Foundarly SMTP Verification",
+        html,
+        text,
+      });
+
+      if (result.success) {
+        return res.json({
+          success: true,
+          message: `Test booking confirmation email sent successfully to ${targetRecipient}!`,
+          messageId: result.messageId,
+          details: result.details,
+        });
+      } else {
+        return res.status(500).json({
+          success: false,
+          error: result.error,
+          diagnostic: result.diagnostic,
+          details: result.details,
+        });
+      }
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: err?.message || "Internal server error sending test email",
       });
     }
   });

@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { 
   Search, Download, Video, Trash2, Copy, Check, ExternalLink, 
-  Mail, CheckCircle, X, CreditCard, FileText, XCircle 
+  Mail, CheckCircle, X, CreditCard, FileText, XCircle,
+  Clock, RefreshCw, AlertTriangle
 } from "lucide-react";
+import { validateUUID } from "@/utils/security";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,36 +31,30 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
-const isBookingRejected = (b: any) => {
-  const st = (b?.status || "").toLowerCase().trim();
-  const pst = (b?.payment_status || "").toLowerCase().trim();
-  return st === "rejected" || st === "cancelled" || pst === "rejected";
-};
+import {
+  BookingLifecycleState,
+  getBookingState,
+  isBookingConfirmed,
+  isBookingPending,
+  isBookingRejected,
+} from "@/utils/bookingLifecycle";
 
-const isBookingConfirmed = (b: any) => {
-  const st = (b?.status || "").toLowerCase().trim();
-  return (st === "confirmed" || st === "completed") && !isBookingRejected(b);
-};
+export type { BookingLifecycleState };
+export { getBookingState, isBookingConfirmed, isBookingPending, isBookingRejected };
 
-const isBookingPending = (b: any) => {
-  return !isBookingConfirmed(b) && !isBookingRejected(b);
-};
-
-const statusColor = (s?: string) => {
-  const st = (s || "").toLowerCase().trim();
-  if (st === "confirmed") return "bg-primary/15 text-primary border-primary/30";
-  if (st === "completed") return "bg-green-500/15 text-green-400 border-green-500/30";
-  if (st === "pending") return "bg-yellow-500/15 text-yellow-400 border-yellow-500/30";
-  if (st === "rejected" || st === "cancelled") return "bg-destructive/15 text-destructive border-destructive/30";
-  return "bg-muted text-muted-foreground border-border";
+const statusColor = (b: any) => {
+  const state = typeof b === 'string' ? b : getBookingState(b);
+  if (state === "confirmed" || state === "completed") return "bg-green-500/15 text-green-500 border-green-500/30";
+  if (state === "rejected" || state === "cancelled") return "bg-destructive/15 text-destructive border-destructive/30";
+  return "bg-yellow-500/15 text-yellow-600 border-yellow-500/30";
 };
 
 const paymentColor = (s?: string) => {
   const st = (s || "").toLowerCase().trim();
-  if (st === "paid") return "text-green-400";
-  if (st === "pending") return "text-yellow-400";
+  if (st === "paid") return "text-green-500";
+  if (st === "pending") return "text-yellow-600";
   if (st === "rejected" || st === "failed") return "text-destructive";
-  return "text-destructive";
+  return "text-muted-foreground";
 };
 
 const getConsultantName = (b: any): string => {
@@ -93,6 +89,69 @@ export default function AdminBookings() {
   const [bookingToReject, setBookingToReject] = useState<any | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [isRejecting, setIsRejecting] = useState(false);
+
+  // SMTP test state
+  const [smtpDialogOpen, setSmtpDialogOpen] = useState(false);
+  const [testingSmtp, setTestingSmtp] = useState(false);
+  const [smtpResult, setSmtpResult] = useState<any | null>(null);
+  const [testEmailRecipient, setTestEmailRecipient] = useState("lumora.verify@gmail.com");
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
+  const [testEmailResult, setTestEmailResult] = useState<any | null>(null);
+
+  const runSmtpTest = async () => {
+    setTestingSmtp(true);
+    setSmtpDialogOpen(true);
+    setTestEmailResult(null);
+    try {
+      const res = await fetch('/api/verify-smtp');
+      const data = await res.json();
+      setSmtpResult(data);
+      if (data.success) {
+        toast.success(data.message || "SMTP server authenticated and connected successfully!");
+      } else {
+        toast.warning(data.error || "SMTP authentication verification failed.");
+      }
+    } catch (err: any) {
+      setSmtpResult({
+        success: false,
+        error: err.message || "Failed to reach /api/verify-smtp endpoint",
+      });
+      toast.error("Error communicating with SMTP diagnostic endpoint");
+    } finally {
+      setTestingSmtp(false);
+    }
+  };
+
+  const handleSendTestEmail = async () => {
+    if (!testEmailRecipient || !testEmailRecipient.includes("@")) {
+      toast.error("Please enter a valid recipient email address.");
+      return;
+    }
+    setSendingTestEmail(true);
+    setTestEmailResult(null);
+    try {
+      const res = await fetch('/api/send-test-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipient: testEmailRecipient }),
+      });
+      const data = await res.json();
+      setTestEmailResult(data);
+      if (data.success) {
+        toast.success(`Test confirmation email sent to ${testEmailRecipient}!`);
+      } else {
+        toast.error(data.error || "Failed to send test email.");
+      }
+    } catch (err: any) {
+      setTestEmailResult({
+        success: false,
+        error: err?.message || "Failed to communicate with test email endpoint.",
+      });
+      toast.error("Failed to dispatch test email.");
+    } finally {
+      setSendingTestEmail(false);
+    }
+  };
 
   // Form state
   const [form, setForm] = useState({
@@ -269,37 +328,46 @@ export default function AdminBookings() {
         meeting_room_id: meetingRoomId,
       };
 
+      // 1. Persist status and meeting room to database first
       await bookingsService.update(booking.id, updates);
       
-      // If there's a UPI payment, mark as verified
+      // 2. If there's an associated UPI payment, mark as verified
       if (booking.upi_payment && booking.upi_payment.id) {
         try {
-          await upiPaymentService.verifyPayment(booking.upi_payment.id, user?.id || 'admin', "Approved by administrator");
+          const validAdminId = (user?.id && validateUUID(user.id)) ? user.id : null;
+          await upiPaymentService.verifyPayment(booking.upi_payment.id, validAdminId, "Approved by administrator");
         } catch (upiErr) {
-          console.warn("UPI payment verify error:", upiErr);
+          console.warn("UPI payment verify warning:", upiErr);
         }
       }
 
-      // Update local state immediately so user sees Confirmed status right away
+      // 3. Update local state immediately so user sees Confirmed status right away without Needs Verification
       setBookings(prev => prev.map(b => 
-        b.id === booking.id ? { ...b, status: "confirmed", payment_status: "paid", meeting_room_id: meetingRoomId } : b
+        b.id === booking.id ? { 
+          ...b, 
+          status: "confirmed", 
+          payment_status: "paid", 
+          meeting_room_id: meetingRoomId,
+          upi_payment: b.upi_payment ? { ...b.upi_payment, status: "verified" } : null 
+        } : b
       ));
 
+      // 4. Send confirmation emails
       toast.loading("Sending confirmation emails...", { id: toastId });
       const emailRes = await emailService.sendBookingConfirmation(booking.id);
       if (emailRes.success) {
-        toast.success("Booking confirmed and confirmation emails sent!", { id: toastId });
+        toast.success("Booking confirmed! Confirmation emails dispatched to attendee and consultant.", { id: toastId });
         setBookings(prev => prev.map(b => 
           b.id === booking.id ? { ...b, email_sent: true } : b
         ));
       } else {
         toast.warning(
-          `Booking confirmed in database! Note: Email delivery returned: ${emailRes.error}`,
-          { id: toastId, duration: 9000 }
+          `Booking confirmed in database! Email notice: ${emailRes.error || "Email delivery failed"}`,
+          { id: toastId, duration: 10000 }
         );
       }
 
-      loadBookings();
+      await loadBookings();
     } catch (error: any) {
       console.error('Error approving booking:', error);
       toast.error(error.message || "Failed to approve booking", { id: toastId });
@@ -314,13 +382,13 @@ export default function AdminBookings() {
     const toastId = toast.loading("Rejecting booking...");
 
     try {
-      const adminId = user?.id || 'admin';
+      const validAdminId = (user?.id && validateUUID(user.id)) ? user.id : null;
       const reason = rejectionReason.trim() || "Booking cancelled by administrator";
 
       // 1. If there's an associated UPI payment record, reject it too
       if (bookingToReject.upi_payment && bookingToReject.upi_payment.id) {
         try {
-          await upiPaymentService.rejectPayment(bookingToReject.upi_payment.id, adminId, reason);
+          await upiPaymentService.rejectPayment(bookingToReject.upi_payment.id, validAdminId, reason);
         } catch (upiErr) {
           console.warn("UPI payment reject error:", upiErr);
         }
@@ -332,6 +400,7 @@ export default function AdminBookings() {
         await bookingsService.update(bookingToReject.id, {
           status: 'rejected' as any,
           payment_status: 'rejected',
+          reschedule_reason: reason,
         });
       } catch (err: any) {
         console.warn("Retrying status update with 'cancelled' due to DB constraint:", err);
@@ -339,13 +408,21 @@ export default function AdminBookings() {
         await bookingsService.update(bookingToReject.id, {
           status: 'cancelled',
           payment_status: 'rejected',
+          reschedule_reason: reason,
         });
       }
 
       // 3. Immediately update local state
       setBookings(prev => prev.map(b => 
         b.id === bookingToReject.id 
-          ? { ...b, status: finalStatus, payment_status: 'rejected', rejection_reason: reason }
+          ? { 
+              ...b, 
+              status: finalStatus, 
+              payment_status: 'rejected', 
+              rejection_reason: reason,
+              reschedule_reason: reason,
+              upi_payment: b.upi_payment ? { ...b.upi_payment, status: 'rejected' } : null 
+            }
           : b
       ));
 
@@ -360,12 +437,12 @@ export default function AdminBookings() {
         toast.success("Booking rejected and cancellation email delivered.", { id: toastId });
       } else {
         toast.warning(
-          `Booking marked as rejected in database. Email service message: ${emailRes.error}`,
-          { id: toastId, duration: 9000 }
+          `Booking marked as rejected in database. Email notice: ${emailRes.error || "Email delivery failed"}`,
+          { id: toastId, duration: 10000 }
         );
       }
 
-      loadBookings();
+      await loadBookings();
     } catch (error: any) {
       console.error("Error rejecting booking:", error);
       toast.error(error.message || "Failed to reject booking", { id: toastId });
@@ -406,18 +483,18 @@ export default function AdminBookings() {
     const toastId = toast.loading("Verifying payment & confirming booking...");
 
     try {
-      const adminId = user?.id || 'admin';
+      const validAdminId = (user?.id && validateUUID(user.id)) ? user.id : null;
       
-      // If actual UPI payment record exists, verify it
+      // 1. If actual UPI payment record exists, verify it
       if (!selectedPayment.is_direct && selectedPayment.id) {
         try {
-          await upiPaymentService.verifyPayment(selectedPayment.id, adminId, adminNotes || "Payment verified by administrator");
+          await upiPaymentService.verifyPayment(selectedPayment.id, validAdminId, adminNotes || "Payment verified by administrator");
         } catch (upiErr) {
           console.warn("UPI payment verify error:", upiErr);
         }
       }
 
-      // Persist confirmed booking in database
+      // 2. Persist confirmed booking and meeting room in database
       const meetingRoomId = targetBooking.meeting_room_id || `foundarly-${targetBooking.id}`;
       await bookingsService.update(targetBooking.id, {
         status: "confirmed",
@@ -425,10 +502,16 @@ export default function AdminBookings() {
         meeting_room_id: meetingRoomId,
       });
 
-      // Update local state immediately
+      // 3. Update local state immediately
       setBookings(prev => prev.map(b => 
         b.id === targetBooking.id 
-          ? { ...b, status: "confirmed", payment_status: "paid", meeting_room_id: meetingRoomId }
+          ? { 
+              ...b, 
+              status: "confirmed", 
+              payment_status: "paid", 
+              meeting_room_id: meetingRoomId,
+              upi_payment: b.upi_payment ? { ...b.upi_payment, status: "verified" } : null 
+            }
           : b
       ));
 
@@ -437,7 +520,7 @@ export default function AdminBookings() {
       setSelectedBooking(null);
       setAdminNotes("");
 
-      // Send confirmation emails in background
+      // 4. Send confirmation emails in background
       toast.loading("Sending confirmation emails...", { id: toastId });
       const emailRes = await emailService.sendBookingConfirmation(targetBooking.id);
       
@@ -448,12 +531,12 @@ export default function AdminBookings() {
         ));
       } else {
         toast.warning(
-          `Booking confirmed in database! Confirmation email notice: ${emailRes.error}`,
-          { id: toastId, duration: 9000 }
+          `Booking confirmed in database! Confirmation email notice: ${emailRes.error || "Email delivery failed"}`,
+          { id: toastId, duration: 10000 }
         );
       }
 
-      loadBookings();
+      await loadBookings();
     } catch (error: any) {
       console.error("Payment verification error:", error);
       toast.error(error.message || "Failed to verify payment", { id: toastId });
@@ -594,9 +677,21 @@ export default function AdminBookings() {
             <h1 className="text-2xl font-display font-bold text-foreground">Manage Bookings</h1>
             <p className="text-sm text-muted-foreground mt-1">{stats.total} total bookings</p>
           </div>
-          <Button variant="outline" size="sm" onClick={exportToCSV}>
-            <Download className="h-4 w-4 mr-1" /> Export CSV
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={runSmtpTest} 
+              disabled={testingSmtp}
+              className="text-xs border-primary/30 hover:bg-primary/10 text-foreground"
+            >
+              <Mail className={`h-4 w-4 mr-1.5 text-primary ${testingSmtp ? 'animate-spin' : ''}`} />
+              {testingSmtp ? "Testing SMTP..." : "Test SMTP Connection"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={exportToCSV}>
+              <Download className="h-4 w-4 mr-1" /> Export CSV
+            </Button>
+          </div>
         </div>
 
         {/* Stats cards */}
@@ -786,19 +881,45 @@ export default function AdminBookings() {
                         <span className="text-muted-foreground text-xs">Not generated</span>
                       )}
                     </TableCell>
-                    <TableCell className={`text-xs font-medium px-3 py-3 whitespace-nowrap ${paymentColor(b.payment_status)}`}>
+                    <TableCell className="text-xs font-medium px-3 py-3 whitespace-nowrap">
                       <div className="space-y-1.5">
                         <div className="flex items-center gap-2 whitespace-nowrap">
-                          <span>{((b.payment_status || "pending")).charAt(0).toUpperCase() + (b.payment_status || "pending").slice(1)}</span>
-                          {(isPending || b.upi_payment) && !isRejected && (
+                          {isConfirmed ? (
+                            <span className="inline-flex items-center gap-1 font-semibold text-green-500">
+                              <CheckCircle className="h-3.5 w-3.5 shrink-0" />
+                              <span>Paid</span>
+                            </span>
+                          ) : isRejected ? (
+                            <span className="inline-flex items-center gap-1 font-semibold text-destructive">
+                              <XCircle className="h-3.5 w-3.5 shrink-0" />
+                              <span>Payment Rejected</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 font-semibold text-yellow-600">
+                              <Clock className="h-3.5 w-3.5 shrink-0" />
+                              <span>{b.payment_status === 'paid' ? 'Paid' : 'Pending'}</span>
+                            </span>
+                          )}
+
+                          {/* Show Needs Verification badge ONLY when booking is strictly pending */}
+                          {isPending && (
                             <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 border-amber-500/30 whitespace-nowrap">
                               {b.upi_payment ? "Needs Verification" : "Payment Pending"}
                             </Badge>
                           )}
                         </div>
-                        {/* Quick Payment Verification Button */}
-                        {(isPending || b.upi_payment) && !isRejected && (
+
+                        {/* Transaction Reference when available */}
+                        {b.upi_payment?.transaction_id && (
+                          <div className="text-[11px] font-mono text-muted-foreground truncate max-w-[140px]" title={`UPI Transaction: ${b.upi_payment.transaction_id}`}>
+                            Ref: {b.upi_payment.transaction_id}
+                          </div>
+                        )}
+
+                        {/* Quick Payment Verification Button - ONLY on strictly pending bookings */}
+                        {isPending && (
                           <Button 
+                            id={`verify-payment-btn-${b.id}`}
                             variant="default"
                             size="sm" 
                             className="text-xs bg-amber-600 hover:bg-amber-700 text-white w-full whitespace-nowrap h-7"
@@ -812,7 +933,7 @@ export default function AdminBookings() {
                       </div>
                     </TableCell>
                     <TableCell className="px-3 py-3 whitespace-nowrap">
-                      <Badge variant="outline" className={`text-xs font-semibold ${statusColor(b.status)}`}>
+                      <Badge variant="outline" className={`text-xs font-semibold ${statusColor(b)}`}>
                         {isRejected ? "Rejected" : isConfirmed ? "Confirmed" : "Pending"}
                       </Badge>
                     </TableCell>
@@ -1258,6 +1379,183 @@ export default function AdminBookings() {
               disabled={verifyingPayment}
             >
               {verifyingPayment ? "Processing..." : "Verify & Confirm"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* SMTP Connection Diagnostic Dialog */}
+      <Dialog open={smtpDialogOpen} onOpenChange={setSmtpDialogOpen}>
+        <DialogContent className="sm:max-w-[580px] bg-card border-border max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <Mail className="h-5 w-5 text-primary" />
+              <span>SMTP Connection & Email Diagnostic</span>
+            </DialogTitle>
+            <DialogDescription>
+              Test live SMTP authentication and delivery across Titan Email and GoDaddy fallback targets.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2 space-y-4">
+            {testingSmtp ? (
+              <div className="flex flex-col items-center justify-center py-8 space-y-3">
+                <RefreshCw className="h-8 w-8 text-primary animate-spin" />
+                <p className="text-sm font-medium text-foreground">Testing SMTP server authentication & connection...</p>
+                <p className="text-xs text-muted-foreground">Probing Titan Port 587 (STARTTLS), Port 465 (SSL), and GoDaddy fallback</p>
+              </div>
+            ) : smtpResult ? (
+              <div className="space-y-3">
+                <div className={`p-3.5 rounded-lg border ${
+                  smtpResult.success 
+                    ? "bg-green-500/10 border-green-500/30 text-green-500" 
+                    : "bg-destructive/10 border-destructive/30 text-destructive"
+                }`}>
+                  <div className="flex items-center gap-2 font-semibold">
+                    {smtpResult.success ? (
+                      <>
+                        <CheckCircle className="h-5 w-5 text-green-500 shrink-0" />
+                        <span>SMTP Connection & Authentication Verified</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle className="h-5 w-5 text-destructive shrink-0" />
+                        <span>SMTP Authentication Error</span>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-xs mt-1.5 opacity-90 break-words font-mono text-[11px] whitespace-pre-line">
+                    {smtpResult.message || smtpResult.error}
+                  </p>
+                </div>
+
+                {/* Configuration details */}
+                <div className="bg-muted/40 rounded-lg p-3 text-xs space-y-1.5 border border-border">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Primary Host:</span>
+                    <span className="font-mono font-medium">{smtpResult.config?.smtpHost || 'smtp.titan.email'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Port & Security:</span>
+                    <span className="font-mono font-medium">
+                      Port {smtpResult.portVerified || smtpResult.config?.smtpPort || 587} ({smtpResult.config?.encryption || 'STARTTLS'})
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">SMTP Username:</span>
+                    <span className="font-mono font-medium">{smtpResult.config?.smtpUser || 'hello@foundarlybusinessworld.in'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">From Address:</span>
+                    <span className="font-mono font-medium">{smtpResult.config?.fromEmail || 'hello@foundarlybusinessworld.in'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Password Configured:</span>
+                    <span className="font-medium">
+                      {smtpResult.config?.hasSmtpPass ? 'Yes (configured in env)' : 'No (missing in env)'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Candidate attempts breakdown if any */}
+                {Array.isArray(smtpResult.attempts) && smtpResult.attempts.length > 0 && (
+                  <div className="bg-muted/20 rounded-lg p-2.5 text-[11px] border border-border space-y-1">
+                    <span className="font-semibold text-muted-foreground block">Tested Candidates:</span>
+                    {smtpResult.attempts.map((att: any, idx: number) => (
+                      <div key={idx} className="flex flex-col text-muted-foreground">
+                        <span className="font-medium text-foreground">• {att.name}:</span>
+                        <span className="text-xs text-destructive/90 pl-3">{att.error}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!smtpResult.success && (
+                  <div className="text-xs text-muted-foreground bg-amber-500/5 border border-amber-500/20 p-3 rounded-lg space-y-1.5">
+                    <p className="font-semibold text-amber-600">How to resolve 535 Authentication Failed:</p>
+                    <ul className="list-disc list-inside space-y-0.5 text-[11px]">
+                      <li>Ensure <code>SMTP_PASS</code> in Vercel environment variables is the exact mailbox password for <code>hello@foundarlybusinessworld.in</code>.</li>
+                      <li>If 2FA is active on the Titan or GoDaddy mailbox, create an <strong>Application Password</strong> in webmail settings instead of using the primary password.</li>
+                      <li>Check that there are no accidental leading/trailing spaces or quotes in <code>SMTP_PASS</code>.</li>
+                    </ul>
+                  </div>
+                )}
+
+                {/* Real Email Delivery Test Section */}
+                <div className="mt-4 pt-4 border-t border-border space-y-2.5">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                    <Send className="h-3.5 w-3.5 text-primary" />
+                    Test Live Booking Confirmation Email Delivery
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground">
+                    Send a real booking confirmation email to verify end-to-end inbox delivery.
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      type="email"
+                      placeholder="Enter recipient email (e.g. your email)"
+                      value={testEmailRecipient}
+                      onChange={(e) => setTestEmailRecipient(e.target.value)}
+                      className="text-xs h-9"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={handleSendTestEmail}
+                      disabled={sendingTestEmail || !testEmailRecipient}
+                      className="shrink-0 h-9"
+                    >
+                      {sendingTestEmail ? (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1" />
+                      ) : (
+                        <Send className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      Send Test Email
+                    </Button>
+                  </div>
+
+                  {testEmailResult && (
+                    <div className={`p-2.5 rounded text-xs border ${
+                      testEmailResult.success
+                        ? "bg-green-500/10 border-green-500/30 text-green-600"
+                        : "bg-destructive/10 border-destructive/30 text-destructive"
+                    }`}>
+                      <div className="font-medium flex items-center gap-1.5">
+                        {testEmailResult.success ? (
+                          <>
+                            <CheckCircle className="h-4 w-4 shrink-0" />
+                            <span>{testEmailResult.message}</span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="h-4 w-4 shrink-0" />
+                            <span>{testEmailResult.error}</span>
+                          </>
+                        )}
+                      </div>
+                      {testEmailResult.messageId && (
+                        <p className="text-[11px] font-mono mt-1 opacity-80">
+                          Message ID: {testEmailResult.messageId}
+                        </p>
+                      )}
+                      {testEmailResult.diagnostic && (
+                        <p className="text-[10px] mt-1 opacity-90 whitespace-pre-line font-mono">
+                          {testEmailResult.diagnostic}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setSmtpDialogOpen(false)}>
+              Close
+            </Button>
+            <Button size="sm" onClick={runSmtpTest} disabled={testingSmtp}>
+              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${testingSmtp ? 'animate-spin' : ''}`} />
+              Re-test Connection
             </Button>
           </DialogFooter>
         </DialogContent>

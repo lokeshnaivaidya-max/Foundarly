@@ -54,6 +54,12 @@ function cleanCredential(val?: string): string {
   ) {
     cleaned = cleaned.slice(2, -2).trim();
   }
+  // Strip accidental outer brackets [password] or leading bracket [password from user copy-paste
+  if (cleaned.startsWith('[') && cleaned.endsWith(']')) {
+    cleaned = cleaned.slice(1, -1).trim();
+  } else if (cleaned.startsWith('[') && !cleaned.includes(']')) {
+    cleaned = cleaned.slice(1).trim();
+  }
   return cleaned;
 }
 
@@ -76,6 +82,8 @@ export interface SmtpAuditInfo {
   username: string;
   fromEmail: string;
   hasPassword: boolean;
+  runtimeEnvironment: string;
+  smtpResponseCode?: string;
   passwordMeta: {
     length: number;
     hasSurroundingQuotes: boolean;
@@ -139,6 +147,8 @@ export function getSmtpAuditInfo(): SmtpAuditInfo {
   const hasWhitespace = rawVal.length > 0 && (rawVal !== rawVal.trim());
   const hasNewlines = rawVal.includes('\n') || rawVal.includes('\r');
 
+  const runtimeEnvironment = process.env.VERCEL_ENV || process.env.NODE_ENV || 'production';
+
   return {
     host: config.host,
     port: config.port,
@@ -146,6 +156,7 @@ export function getSmtpAuditInfo(): SmtpAuditInfo {
     username: config.user,
     fromEmail: config.fromEmail,
     hasPassword: Boolean(config.pass),
+    runtimeEnvironment,
     passwordMeta: {
       length: config.pass ? config.pass.length : 0,
       hasSurroundingQuotes,
@@ -221,22 +232,47 @@ export function getSmtpConfig(portOverride?: number): SmtpConfig {
  */
 export function getSmtpCandidates(): SmtpServerTarget[] {
   const config = getSmtpConfig();
-  return [
+  const configuredHost = config.host || 'smtp.titan.email';
+
+  const targets: SmtpServerTarget[] = [
     {
-      name: 'Titan Port 587 (STARTTLS)',
-      host: config.host || 'smtp.titan.email',
+      name: configuredHost.includes('titan') ? 'Titan Port 587 (STARTTLS)' : `${configuredHost} Port 587`,
+      host: configuredHost,
       port: 587,
       secure: false,
       requireTLS: true,
     },
     {
-      name: 'Titan Port 465 (SSL)',
-      host: config.host || 'smtp.titan.email',
+      name: configuredHost.includes('titan') ? 'Titan Port 465 (SSL)' : `${configuredHost} Port 465`,
+      host: configuredHost,
       port: 465,
       secure: true,
       requireTLS: false,
     },
   ];
+
+  // If configured host is Titan, also include GoDaddy / Secureserver targets as fallback
+  // because DNS records for foundarlybusinessworld.in have MX records pointing to secureserver.net
+  if (configuredHost !== 'smtpout.secureserver.net') {
+    targets.push(
+      {
+        name: 'GoDaddy / Secureserver Port 465 (SSL)',
+        host: 'smtpout.secureserver.net',
+        port: 465,
+        secure: true,
+        requireTLS: false,
+      },
+      {
+        name: 'GoDaddy / Secureserver Port 587 (STARTTLS)',
+        host: 'smtpout.secureserver.net',
+        port: 587,
+        secure: false,
+        requireTLS: true,
+      }
+    );
+  }
+
+  return targets;
 }
 
 /**
@@ -479,6 +515,8 @@ export async function verifySmtpConnection(): Promise<{
         success: true,
       });
 
+      audit.smtpResponseCode = '250 Authentication Successful';
+
       return {
         success: true,
         message: `SMTP authentication verified successfully on ${candidate.name}!`,
@@ -511,11 +549,13 @@ export async function verifySmtpConnection(): Promise<{
     }
   }
 
+  audit.smtpResponseCode = (lastError?.response || lastError?.code || '535 5.7.8 Error: authentication failed').trim();
+
   const allAuthFailed = attempts.every(a => a.code === 'EAUTH' || a.response.includes('535'));
   let diagnostic = buildDiagnostic(lastError, config, attempts.map(a => ({ name: a.name, error: `${a.code}: ${a.response}` })));
   
   if (allAuthFailed) {
-    diagnostic += `\n\nCONCLUSION: The Titan SMTP servers (${config.host}:587 STARTTLS and ${config.host}:465 SSL) were reached successfully over the network, but rejected the credentials with 535 Authentication Failed. This indicates network routing and TLS handshakes are functioning, but the mailbox password in Vercel (SMTP_PASS) must match the newly reset mailbox password.`;
+    diagnostic += `\n\nDIAGNOSTIC FINDING: Titan SMTP (${config.host}:587) returned 535 Authentication Failed. Note that domain foundarlybusinessworld.in DNS MX records point to secureserver.net (GoDaddy). If the mailbox was hosted via GoDaddy/Secureserver instead of Titan, set SMTP_HOST=smtpout.secureserver.net in Vercel. Also ensure SMTP_PASS has no accidental leading bracket '[' or quotes.`;
   }
 
   return {

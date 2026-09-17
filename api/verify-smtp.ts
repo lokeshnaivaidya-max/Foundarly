@@ -61,6 +61,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           encryption: result.configSummary?.activeEncryption || (config.secure ? 'SSL' : 'STARTTLS'),
           hasSmtpPass: true,
           passLength,
+          runtimeEnvironment: audit.runtimeEnvironment,
         },
         attempts: result.attempts,
       });
@@ -78,6 +79,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           encryption: config.secure ? 'SSL' : 'STARTTLS',
           hasSmtpPass: true,
           passLength,
+          runtimeEnvironment: audit.runtimeEnvironment,
         },
         attempts: result.attempts,
       });

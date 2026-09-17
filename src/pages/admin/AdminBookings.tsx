@@ -1452,9 +1452,23 @@ export default function AdminBookings() {
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Password Configured:</span>
                     <span className="font-medium">
-                      {smtpResult.config?.hasSmtpPass ? 'Yes (configured in env)' : 'No (missing in env)'}
+                      {smtpResult.config?.hasSmtpPass ? `Yes (${smtpResult.config?.passLength ?? smtpResult.audit?.passwordMeta?.length ?? 0} chars)` : 'No (missing in env)'}
                     </span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Runtime Environment:</span>
+                    <span className="font-mono font-medium capitalize">
+                      {smtpResult.config?.runtimeEnvironment || smtpResult.audit?.runtimeEnvironment || 'production'}
+                    </span>
+                  </div>
+                  {(smtpResult.audit?.smtpResponseCode || smtpResult.attempts?.[0]?.response) && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Server Response:</span>
+                      <span className="font-mono text-[10px] text-muted-foreground truncate max-w-[220px]" title={smtpResult.audit?.smtpResponseCode || smtpResult.attempts?.[0]?.response}>
+                        {smtpResult.audit?.smtpResponseCode || smtpResult.attempts?.[0]?.response}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Candidate attempts breakdown if any */}

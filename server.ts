@@ -193,6 +193,7 @@ async function startServer() {
             encryption: result.configSummary?.activeEncryption || (config.secure ? "SSL" : "STARTTLS"),
             hasSmtpPass: true,
             passLength,
+            runtimeEnvironment: audit.runtimeEnvironment,
           },
           attempts: result.attempts,
         });
@@ -210,6 +211,7 @@ async function startServer() {
             encryption: config.secure ? "SSL" : "STARTTLS",
             hasSmtpPass: true,
             passLength,
+            runtimeEnvironment: audit.runtimeEnvironment,
           },
           attempts: result.attempts,
         });

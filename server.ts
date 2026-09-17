@@ -538,11 +538,12 @@ async function startServer() {
         });
       }
 
-      const fromEmail = (process.env.EMAIL_FROM || "Foundarly <hello@foundarlybusinessworld.in>").trim();
-      const replyTo = (process.env.EMAIL_REPLY_TO || "hello@foundarlybusinessworld.in").trim();
+      const smtpConfig = getSmtpConfig();
+      const fromEmail = smtpConfig.defaultFrom; // hello@foundarlybusinessworld.in
+      const replyTo = smtpConfig.replyTo;
       const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || req.headers.origin || `http://localhost:${PORT}`).trim();
 
-      if (!process.env.SMTP_PASS) {
+      if (!smtpConfig.pass) {
         console.warn("[Server Email] SMTP_PASS is not configured.");
         return res.status(400).json({
           success: false,

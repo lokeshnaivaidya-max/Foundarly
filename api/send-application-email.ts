@@ -6,7 +6,7 @@ import {
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
 } from '../src/utils/emailTemplates.js';
-import { sendEmail } from '../src/server/mailer.js';
+import { sendEmail, getSmtpConfig } from '../src/server/mailer.js';
 
 interface RequestLike {
   method?: string;
@@ -54,11 +54,12 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       });
     }
 
-    const fromEmail = (process.env.EMAIL_FROM || 'Foundarly <hello@foundarlybusinessworld.in>').trim();
-    const replyTo = (process.env.EMAIL_REPLY_TO || 'hello@foundarlybusinessworld.in').trim();
+    const smtpConfig = getSmtpConfig();
+    const fromEmail = smtpConfig.defaultFrom; // hello@foundarlybusinessworld.in
+    const replyTo = smtpConfig.replyTo;
     const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || 'https://foundarly.com').trim();
 
-    if (!process.env.SMTP_PASS) {
+    if (!smtpConfig.pass) {
       return res.status(400).json({
         success: false,
         error: 'SMTP_PASS is not configured on the server. Please set the SMTP_PASS environment variable (Titan mailbox password).',

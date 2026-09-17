@@ -195,11 +195,11 @@ export function getSmtpConfig(portOverride?: number): SmtpConfig {
   ) || '';
 
   const fromName = cleanCredential(process.env.FROM_NAME) || 'Foundarly';
-  const fromEmail = cleanCredential(process.env.FROM_EMAIL || process.env.SMTP_FROM || process.env.EMAIL_FROM) || user;
+  const fromEmail = (cleanCredential(process.env.FROM_EMAIL || process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.SMTP_USER) || 'hello@foundarlybusinessworld.in').replace(/.*<([^>]+)>.*/, '$1').trim();
   
-  // Format as: "Foundarly <hello@foundarlybusinessworld.in>"
-  const defaultFrom = fromEmail.includes('<') ? fromEmail : `${fromName} <${fromEmail}>`;
-  const replyTo = cleanCredential(process.env.EMAIL_REPLY_TO || process.env.REPLY_TO_EMAIL) || fromEmail.replace(/.*<([^>]+)>.*/, '$1');
+  // Exactly "hello@foundarlybusinessworld.in"
+  const defaultFrom = fromEmail || 'hello@foundarlybusinessworld.in';
+  const replyTo = (cleanCredential(process.env.EMAIL_REPLY_TO || process.env.REPLY_TO_EMAIL) || fromEmail).replace(/.*<([^>]+)>.*/, '$1').trim() || fromEmail;
 
   return {
     host,
@@ -208,48 +208,33 @@ export function getSmtpConfig(portOverride?: number): SmtpConfig {
     user,
     pass,
     fromName,
-    fromEmail: fromEmail.replace(/.*<([^>]+)>.*/, '$1'),
+    fromEmail,
     defaultFrom,
     replyTo,
   };
 }
 
 /**
- * Returns prioritized SMTP targets to test per specifications:
- * 1. Titan Port 587 (STARTTLS, secure: false, requireTLS: true)
- * 2. Titan Port 465 (SSL, secure: true, requireTLS: false)
- * 3. GoDaddy Port 465 (smtpout.secureserver.net, secure: true)
- * 4. GoDaddy Port 587 (smtpout.secureserver.net, secure: false, requireTLS: true)
+ * Returns prioritized Titan SMTP targets:
+ * 1. Titan Port 587 (STARTTLS, secure: false, requireTLS: true) [Primary]
+ * 2. Titan Port 465 (SSL, secure: true, requireTLS: false) [Fallback]
  */
 export function getSmtpCandidates(): SmtpServerTarget[] {
+  const config = getSmtpConfig();
   return [
     {
       name: 'Titan Port 587 (STARTTLS)',
-      host: 'smtp.titan.email',
+      host: config.host || 'smtp.titan.email',
       port: 587,
       secure: false,
       requireTLS: true,
     },
     {
       name: 'Titan Port 465 (SSL)',
-      host: 'smtp.titan.email',
+      host: config.host || 'smtp.titan.email',
       port: 465,
       secure: true,
       requireTLS: false,
-    },
-    {
-      name: 'GoDaddy Port 465 (SSL)',
-      host: 'smtpout.secureserver.net',
-      port: 465,
-      secure: true,
-      requireTLS: false,
-    },
-    {
-      name: 'GoDaddy Port 587 (STARTTLS)',
-      host: 'smtpout.secureserver.net',
-      port: 587,
-      secure: false,
-      requireTLS: true,
     },
   ];
 }
@@ -263,22 +248,24 @@ function buildDiagnostic(error: any, config: SmtpConfig, attempts: Array<{ name:
   const hasPass = Boolean(config.pass);
   const passLength = config.pass ? config.pass.length : 0;
 
-  let attemptSummary = attempts.length > 0
+  const attemptSummary = attempts.length > 0
     ? `\nCandidate attempts:\n` + attempts.map(a => `• ${a.name}: ${a.error}`).join('\n')
     : '';
 
   if (code === 'EAUTH' || response.includes('535') || response.includes('authentication failed')) {
-    return `SMTP Authentication Failed (535 5.7.8): Mail server rejected credentials for user "${config.user}". ` +
+    return `SMTP Authentication Failed (535 5.7.8): Mail server rejected credentials for user "${config.user}" on ${config.host}:${config.port}. ` +
       `Password configured: ${hasPass ? `Yes (${passLength} chars)` : 'No'}. ` +
-      `Common causes: ` +
-      `1) If Two-Factor Authentication (2FA) is active on the mailbox, you MUST generate and use an "Application Password" in webmail preferences instead of your primary account password. ` +
-      `2) In webmail settings, verify third-party SMTP access is enabled. ` +
-      `3) Ensure SMTP_PASS in Vercel environment variables does not contain accidental leading/trailing spaces or quotes.${attemptSummary}`;
+      `Response: ${response}. ` +
+      `Resolution: ` +
+      `1) Ensure the Vercel environment variable SMTP_PASS is set to the newly reset mailbox password. ` +
+      `2) Confirm Two-Factor Authentication (2FA) is disabled. ` +
+      `3) Ensure there are no accidental leading/trailing spaces or quotes in SMTP_PASS in Vercel. ` +
+      `4) Trigger a fresh redeployment on Vercel after updating environment variables.${attemptSummary}`;
   }
 
   if (code === 'ETIMEDOUT' || code === 'ECONNREFUSED' || code === 'ESOCKET') {
-    return `SMTP Connection Failed (${code}): Unable to establish socket connection to host. ` +
-      `Check outbound firewall or host availability.${attemptSummary}`;
+    return `SMTP Connection Failed (${code}): Unable to establish socket connection to ${config.host}:${config.port}. ` +
+      `Check outbound network connectivity.${attemptSummary}`;
   }
 
   return `SMTP Error (${code}): ${response}.${attemptSummary}`;
@@ -528,7 +515,7 @@ export async function verifySmtpConnection(): Promise<{
   let diagnostic = buildDiagnostic(lastError, config, attempts.map(a => ({ name: a.name, error: `${a.code}: ${a.response}` })));
   
   if (allAuthFailed) {
-    diagnostic += '\n\nIMPORTANT CONCLUSION: All four candidate SMTP configurations (Titan 587 STARTTLS, Titan 465 SSL, GoDaddy 465 SSL, GoDaddy 587 STARTTLS) were reached successfully over the network, but the remote mail servers rejected the credentials with 535 Authentication Failed. This indicates network routing, TLS handshakes, and port connectivity are fully functional, but the mailbox password/credentials configured in the environment are not accepted by the mail server, or third-party SMTP/App Passwords must be configured on the mailbox.';
+    diagnostic += `\n\nCONCLUSION: The Titan SMTP servers (${config.host}:587 STARTTLS and ${config.host}:465 SSL) were reached successfully over the network, but rejected the credentials with 535 Authentication Failed. This indicates network routing and TLS handshakes are functioning, but the mailbox password in Vercel (SMTP_PASS) must match the newly reset mailbox password.`;
   }
 
   return {

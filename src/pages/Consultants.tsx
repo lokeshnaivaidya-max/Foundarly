@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useMemo } from "react";
 import { motion, useInView, useMotionValue, useTransform } from "framer-motion";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -10,9 +10,24 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { consultantsService } from "@/services/consultants";
-import { OFFICIAL_CATEGORIES, categoriesService } from "@/services/categories";
+import { OFFICIAL_CATEGORIES, categoriesService, Category } from "@/services/categories";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { BadgeCheck, Zap, Star, Search, Tag, MapPin, Briefcase, ArrowRight, User } from "lucide-react";
+import { 
+  BadgeCheck, 
+  Zap, 
+  Star, 
+  Search, 
+  Tag, 
+  MapPin, 
+  Briefcase, 
+  ArrowRight, 
+  User,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+  Layers,
+  X
+} from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 function Particle({ x, y, size, delay, dur }: { x: string; y: string; size: number; delay: number; dur: number }) {
@@ -175,10 +190,34 @@ export default function ConsultantsPage() {
     queryFn: () => categoriesService.getAll(),
   });
 
+  const categoryMap = useMemo(() => {
+    const map = new Map<string, Category>();
+    if (dbCategories) {
+      for (const c of dbCategories) {
+        map.set(c.name.toLowerCase(), c);
+      }
+    }
+    return map;
+  }, [dbCategories]);
+
   const categories = ["All", ...Array.from(new Set([
     ...(dbCategories?.map(c => c.name) || []),
     ...OFFICIAL_CATEGORIES
   ]))];
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const scrollLeft = () => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollBy({ left: -320, behavior: "smooth" });
+    }
+  };
+
+  const scrollRight = () => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollBy({ left: 320, behavior: "smooth" });
+    }
+  };
 
   const filtered = consultants?.filter((c) => {
     const query = searchQuery.trim().toLowerCase();
@@ -289,25 +328,161 @@ export default function ConsultantsPage() {
       <section className="py-12 bg-background relative">
         <div className="container mx-auto px-4 sm:px-6 relative z-10 max-w-7xl">
 
-          {/* Category Filter Pills (Scrollable) */}
-          <motion.div ref={headerRef} className="flex items-center gap-2 overflow-x-auto pb-4 mb-8 no-scrollbar scroll-smooth"
-            initial={{ opacity: 0, y: 20 }} animate={headerInView ? { opacity: 1, y: 0 } : {}} transition={{ duration: 0.5 }}>
-            <span className="text-xs font-semibold text-muted-foreground shrink-0 uppercase tracking-wider mr-2">
-              Filter Industry:
-            </span>
-            {categories.map((cat, i) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-4 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all border shrink-0 ${
-                  selectedCategory === cat
-                    ? "bg-primary text-primary-foreground border-primary shadow-sm glow-gold-sm font-semibold"
-                    : "bg-secondary border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                }`}
+          {/* Enhanced Instagram-Style Circular "FILTER INDUSTRY" Bar */}
+          <motion.div
+            ref={headerRef}
+            className="mb-10"
+            initial={{ opacity: 0, y: 20 }}
+            animate={headerInView ? { opacity: 1, y: 0 } : {}}
+            transition={{ duration: 0.5 }}
+          >
+            {/* Filter Industry Header & Controls */}
+            <div className="flex items-center justify-between mb-4 px-1">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-primary" /> Filter Industry:
+                </span>
+                {selectedCategory !== "All" && (
+                  <span className="inline-flex items-center gap-1.5 bg-primary/10 text-primary border border-primary/25 text-xs px-2.5 py-0.5 rounded-full font-medium shadow-xs">
+                    <span>{selectedCategory}</span>
+                    <button
+                      onClick={() => setSelectedCategory("All")}
+                      className="hover:text-primary-foreground hover:bg-primary rounded-full p-0.5 transition-colors"
+                      title="Clear industry filter"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+              </div>
+
+              {/* Scroll Navigation Chevrons for Desktop */}
+              <div className="hidden sm:flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7 rounded-full border-border/80 hover:border-primary/50 text-muted-foreground hover:text-foreground"
+                  onClick={scrollLeft}
+                  title="Scroll left"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7 rounded-full border-border/80 hover:border-primary/50 text-muted-foreground hover:text-foreground"
+                  onClick={scrollRight}
+                  title="Scroll right"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Horizontally Scrollable Instagram-Style Circular Category Track */}
+            <div className="relative">
+              <div
+                ref={scrollContainerRef}
+                className="flex items-start gap-4 sm:gap-5 overflow-x-auto pb-4 pt-1 px-1 no-scrollbar scroll-smooth"
+                style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
               >
-                {cat}
-              </button>
-            ))}
+                {categories.map((cat) => {
+                  const isSelected = selectedCategory === cat;
+                  const isAll = cat === "All";
+                  const catData = categoryMap.get(cat.toLowerCase());
+                  const imageUrl = catData?.image_url;
+
+                  // Initials for clean placeholder circle
+                  const initials = isAll
+                    ? "ALL"
+                    : cat
+                        .split(/[\s&/]+/)
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .map((w) => w[0])
+                        .join("")
+                        .toUpperCase();
+
+                  return (
+                    <button
+                      key={cat}
+                      id={`filter-industry-${cat.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                      onClick={() => setSelectedCategory(cat)}
+                      className="group flex flex-col items-center gap-2 shrink-0 w-[78px] sm:w-[86px] text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-xl p-1 transition-transform active:scale-95 cursor-pointer"
+                      title={`Filter by ${cat}`}
+                    >
+                      {/* Instagram-style Story Circular Ring */}
+                      <div
+                        className={`p-[2.5px] rounded-full transition-all duration-300 ${
+                          isSelected
+                            ? "bg-gradient-to-tr from-amber-500 via-yellow-400 to-amber-600 shadow-md shadow-primary/25 scale-105"
+                            : "bg-transparent group-hover:bg-gradient-to-tr group-hover:from-border group-hover:to-primary/40"
+                        }`}
+                      >
+                        <div
+                          className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full overflow-hidden bg-secondary border-2 ${
+                            isSelected
+                              ? "border-background"
+                              : "border-border/70 group-hover:border-primary/50"
+                          } flex items-center justify-center relative shadow-sm transition-all`}
+                        >
+                          {isAll ? (
+                            <div
+                              className={`w-full h-full flex flex-col items-center justify-center transition-colors ${
+                                isSelected
+                                  ? "bg-primary text-primary-foreground font-bold"
+                                  : "bg-secondary text-muted-foreground group-hover:text-foreground"
+                              }`}
+                            >
+                              <Sparkles className="w-5 h-5 mb-0.5" />
+                              <span className="text-[10px] font-bold tracking-wider">ALL</span>
+                            </div>
+                          ) : imageUrl ? (
+                            <img
+                              src={imageUrl}
+                              alt={cat}
+                              className="w-full h-full object-cover rounded-full group-hover:scale-110 transition-transform duration-300"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).style.display = "none";
+                                const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                                if (fallback) fallback.style.display = "flex";
+                              }}
+                            />
+                          ) : null}
+
+                          {/* Clean Placeholder Circle (shown if no image or if image load fails) */}
+                          {!isAll && (
+                            <div
+                              style={{ display: imageUrl ? "none" : "flex" }}
+                              className={`w-full h-full flex flex-col items-center justify-center text-center p-1 select-none transition-colors ${
+                                isSelected
+                                  ? "bg-primary/20 text-primary"
+                                  : "bg-gradient-to-b from-secondary to-muted/80 text-muted-foreground group-hover:text-foreground"
+                              }`}
+                            >
+                              <span className="font-bold text-xs sm:text-sm font-display tracking-tight">
+                                {initials}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Industry Label below circle */}
+                      <span
+                        className={`text-[11px] sm:text-xs leading-tight line-clamp-2 max-w-[76px] sm:max-w-[84px] transition-colors break-words text-center ${
+                          isSelected
+                            ? "text-primary font-bold"
+                            : "text-muted-foreground group-hover:text-foreground font-medium"
+                        }`}
+                      >
+                        {cat}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </motion.div>
 
           {/* Grid or Empty */}

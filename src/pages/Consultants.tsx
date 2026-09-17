@@ -383,7 +383,7 @@ export default function ConsultantsPage() {
             <div className="relative">
               <div
                 ref={scrollContainerRef}
-                className="flex items-start gap-4 sm:gap-5 overflow-x-auto pb-4 pt-1 px-1 no-scrollbar scroll-smooth"
+                className="flex items-start gap-4 sm:gap-5 overflow-x-auto pb-4 pt-2 px-1.5 no-scrollbar scroll-smooth"
                 style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
               >
                 {categories.map((cat) => {
@@ -408,19 +408,19 @@ export default function ConsultantsPage() {
                       key={cat}
                       id={`filter-industry-${cat.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
                       onClick={() => setSelectedCategory(cat)}
-                      className="group flex flex-col items-center gap-2 shrink-0 w-[78px] sm:w-[86px] text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-xl p-1 transition-transform active:scale-95 cursor-pointer"
+                      className="group flex flex-col items-center gap-2 shrink-0 w-[84px] sm:w-[98px] text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-xl p-1 transition-transform active:scale-95 cursor-pointer"
                       title={`Filter by ${cat}`}
                     >
                       {/* Instagram-style Story Circular Ring */}
                       <div
-                        className={`p-[2.5px] rounded-full transition-all duration-300 ${
+                        className={`p-[3px] rounded-full transition-all duration-300 ${
                           isSelected
                             ? "bg-gradient-to-tr from-amber-500 via-yellow-400 to-amber-600 shadow-md shadow-primary/25 scale-105"
                             : "bg-transparent group-hover:bg-gradient-to-tr group-hover:from-border group-hover:to-primary/40"
                         }`}
                       >
                         <div
-                          className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full overflow-hidden bg-secondary border-2 ${
+                          className={`w-[70px] h-[70px] sm:w-[84px] sm:h-[84px] rounded-full overflow-hidden bg-secondary border-2 ${
                             isSelected
                               ? "border-background"
                               : "border-border/70 group-hover:border-primary/50"
@@ -434,8 +434,8 @@ export default function ConsultantsPage() {
                                   : "bg-secondary text-muted-foreground group-hover:text-foreground"
                               }`}
                             >
-                              <Sparkles className="w-5 h-5 mb-0.5" />
-                              <span className="text-[10px] font-bold tracking-wider">ALL</span>
+                              <Sparkles className="w-6 h-6 mb-1" />
+                              <span className="text-[11px] sm:text-xs font-bold tracking-wider">ALL</span>
                             </div>
                           ) : imageUrl ? (
                             <img
@@ -460,7 +460,7 @@ export default function ConsultantsPage() {
                                   : "bg-gradient-to-b from-secondary to-muted/80 text-muted-foreground group-hover:text-foreground"
                               }`}
                             >
-                              <span className="font-bold text-xs sm:text-sm font-display tracking-tight">
+                              <span className="font-bold text-sm sm:text-base font-display tracking-tight">
                                 {initials}
                               </span>
                             </div>
@@ -470,7 +470,7 @@ export default function ConsultantsPage() {
 
                       {/* Industry Label below circle */}
                       <span
-                        className={`text-[11px] sm:text-xs leading-tight line-clamp-2 max-w-[76px] sm:max-w-[84px] transition-colors break-words text-center ${
+                        className={`text-[11px] sm:text-xs leading-tight line-clamp-2 max-w-[82px] sm:max-w-[94px] transition-colors break-words text-center ${
                           isSelected
                             ? "text-primary font-bold"
                             : "text-muted-foreground group-hover:text-foreground font-medium"

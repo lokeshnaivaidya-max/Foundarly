@@ -140,6 +140,7 @@ const App = () => (
                       <Route path="networking/reports" element={<AdminNetworkingReports />} />
                       <Route path="consultant-applications" element={<AdminConsultantApplications />} />
                     </Route>
+                    <Route path="/404" element={<NotFound />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                 </BrowserRouter>

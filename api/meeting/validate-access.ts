@@ -4,6 +4,7 @@ import {
   calculateRejoinEligibility,
   validateParticipantAccess,
 } from '../../src/utils/meetingRejoin.js';
+import { checkDistributedRateLimit, extractClientIp } from '../../src/server/rateLimiter.js';
 
 dotenv.config();
 
@@ -21,23 +22,6 @@ interface ResponseLike {
   setHeader: (name: string, value: string) => void;
 }
 
-// In-memory rate limiter per lambda instance
-const meetingRateLimits = new Map<string, { count: number; resetAt: number }>();
-
-function checkRateLimit(key: string, limit = 60, windowMs = 60000): boolean {
-  const now = Date.now();
-  const record = meetingRateLimits.get(key);
-  if (!record || record.resetAt <= now) {
-    meetingRateLimits.set(key, { count: 1, resetAt: now + windowMs });
-    return true;
-  }
-  if (record.count >= limit) {
-    return false;
-  }
-  record.count += 1;
-  return true;
-}
-
 export default async function handler(req: RequestLike, res: ResponseLike) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -51,13 +35,14 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
-  // Rate Limiting by IP
-  const forwarded = req.headers?.['x-forwarded-for'];
-  const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(',')[0]?.trim() ||
-    req.socket?.remoteAddress ||
-    'client_unknown';
+  // Rate Limiting by IP (Distributed across instances with in-memory fallback)
+  const ip = extractClientIp(req);
+  const rateLimit = await checkDistributedRateLimit(`meeting_rate_${ip}`, 60, 60000);
 
-  if (!checkRateLimit(`meeting_rate_${ip}`, 60, 60000)) {
+  if (!rateLimit.allowed) {
+    if (rateLimit.retryAfter) {
+      res.setHeader('Retry-After', String(rateLimit.retryAfter));
+    }
     return res.status(429).json({
       success: false,
       error: 'Too many requests. Please slow down and try again.',

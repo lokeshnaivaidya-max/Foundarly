@@ -1674,9 +1674,42 @@ async function startServer() {
   } else {
     const distPath = path.join(currentDir, "dist");
     app.use(express.static(distPath));
+
+    const recognizedSpaRoutes = [
+      /^\/$/,
+      /^\/home\/?$/,
+      /^\/consultants(\/.*)?$/,
+      /^\/consultant(\/.*)?$/,
+      /^\/booking\/?$/,
+      /^\/my-bookings\/?$/,
+      /^\/network(\/.*)?$/,
+      /^\/pricing\/?$/,
+      /^\/about\/?$/,
+      /^\/blog(\/.*)?$/,
+      /^\/faqs\/?$/,
+      /^\/apply-consultant\/?$/,
+      /^\/terms\/?$/,
+      /^\/privacy\/?$/,
+      /^\/networking-terms\/?$/,
+      /^\/camera-test\/?$/,
+      /^\/meeting(\/.*)?$/,
+      /^\/review(\/.*)?$/,
+      /^\/upi-payment\/?$/,
+      /^\/login\/?$/,
+      /^\/admin(\/.*)?$/,
+    ];
+
     app.use((req, res, next) => {
       if (req.method === "GET" && !req.path.startsWith("/api")) {
-        return res.sendFile(path.join(distPath, "index.html"));
+        const isRecognized = recognizedSpaRoutes.some((route) => route.test(req.path));
+        if (isRecognized) {
+          return res.sendFile(path.join(distPath, "index.html"));
+        }
+        const notFoundFile = path.join(distPath, "404.html");
+        if (fs.existsSync(notFoundFile)) {
+          return res.status(404).sendFile(notFoundFile);
+        }
+        return res.status(404).sendFile(path.join(distPath, "index.html"));
       }
       next();
     });

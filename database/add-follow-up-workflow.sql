@@ -3,8 +3,26 @@
 -- Consultant-Confirmed Follow-up without Admin Approval
 -- ============================================================================
 
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Non-recursive admin helper
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  ) OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = 'admin@foundarly.com';
+$$;
+
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated, service_role, anon;
+
 CREATE TABLE IF NOT EXISTS public.follow_up_requests (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   booking_id UUID REFERENCES public.bookings(id) ON DELETE CASCADE NOT NULL,
   client_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   client_name TEXT,
@@ -31,6 +49,22 @@ CREATE TABLE IF NOT EXISTS public.follow_up_requests (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Defensive additions for pre-existing tables
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS client_name TEXT;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS client_email TEXT;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS consultant_name TEXT;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS consultant_email TEXT;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS alternative_date DATE;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS alternative_time TEXT;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS consultant_note TEXT;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS confirmed_date DATE;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS confirmed_time TEXT;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS declined_reason TEXT;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS rejoin_deadline TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '7 days');
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS client_notified_at TIMESTAMPTZ;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS consultant_notified_at TIMESTAMPTZ;
+ALTER TABLE public.follow_up_requests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
 -- Unique index to prevent duplicate pending/active follow-up requests per booking
 CREATE UNIQUE INDEX IF NOT EXISTS idx_active_follow_up_per_booking 
 ON public.follow_up_requests(booking_id) 
@@ -44,6 +78,14 @@ CREATE INDEX IF NOT EXISTS idx_follow_up_status ON public.follow_up_requests(sta
 -- Enable RLS
 ALTER TABLE public.follow_up_requests ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Clients can view their follow up requests" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Clients can request follow up" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Clients can update follow up when alternative proposed" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Consultants can view their follow up requests" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Consultants can respond to follow up requests" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Admins can view all follow up requests" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Admins can manage all follow up requests" ON public.follow_up_requests;
+
 -- 1. Client can view their own follow-ups
 CREATE POLICY "Clients can view their follow up requests" 
 ON public.follow_up_requests 
@@ -52,7 +94,7 @@ USING (
   auth.uid() = client_id OR 
   EXISTS (
     SELECT 1 FROM public.bookings b 
-    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR b.email = auth.jwt() ->> 'email')
+    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
   )
 );
 
@@ -64,7 +106,7 @@ WITH CHECK (
   auth.uid() = client_id OR 
   EXISTS (
     SELECT 1 FROM public.bookings b 
-    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR b.email = auth.jwt() ->> 'email')
+    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
   )
 );
 
@@ -76,7 +118,7 @@ USING (
   auth.uid() = client_id OR 
   EXISTS (
     SELECT 1 FROM public.bookings b 
-    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR b.email = auth.jwt() ->> 'email')
+    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
   )
 );
 
@@ -87,7 +129,7 @@ FOR SELECT
 USING (
   EXISTS (
     SELECT 1 FROM public.consultants c 
-    WHERE c.id = follow_up_requests.consultant_id AND (c.user_id = auth.uid() OR c.email = auth.jwt() ->> 'email')
+    WHERE c.id = follow_up_requests.consultant_id AND (c.user_id = auth.uid() OR LOWER(c.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
   )
 );
 
@@ -98,7 +140,7 @@ FOR UPDATE
 USING (
   EXISTS (
     SELECT 1 FROM public.consultants c 
-    WHERE c.id = follow_up_requests.consultant_id AND (c.user_id = auth.uid() OR c.email = auth.jwt() ->> 'email')
+    WHERE c.id = follow_up_requests.consultant_id AND (c.user_id = auth.uid() OR LOWER(c.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
   )
 );
 
@@ -106,25 +148,14 @@ USING (
 CREATE POLICY "Admins can view all follow up requests"
 ON public.follow_up_requests
 FOR SELECT
-USING (
-  EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  )
-  OR LOWER(auth.jwt() ->> 'email') = 'admin@foundarly.com'
-);
+USING (public.is_admin());
 
 -- 7. Admins can manage all follow-up requests
 CREATE POLICY "Admins can manage all follow up requests"
 ON public.follow_up_requests
 FOR ALL
-USING (
-  EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  )
-  OR LOWER(auth.jwt() ->> 'email') = 'admin@foundarly.com'
-);
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
 
 -- 8. Table-level permissions
 GRANT ALL ON TABLE public.follow_up_requests TO authenticated, service_role;

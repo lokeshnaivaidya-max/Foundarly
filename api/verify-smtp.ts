@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import { verifySmtpConnection, getSmtpConfig, getSmtpAuditInfo } from '../src/server/mailer.js';
-import { checkServerlessRateLimit, extractClientIp } from '../src/server/rateLimiter.js';
+import { checkDistributedRateLimit, extractClientIp } from '../src/server/rateLimiter.js';
 
 dotenv.config();
 
@@ -27,7 +27,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
   }
 
   const clientIp = extractClientIp(req);
-  const rateLimit = checkServerlessRateLimit(`verify_smtp_${clientIp}`, 20, 60000);
+  const rateLimit = await checkDistributedRateLimit(`verify_smtp_${clientIp}`, 20, 60000);
   if (!rateLimit.allowed) {
     res.setHeader('Retry-After', String(rateLimit.retryAfter));
     return res.status(429).json({

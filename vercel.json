@@ -43,8 +43,112 @@
       "destination": "/api/:match*"
     },
     {
-      "source": "/(.*)",
+      "source": "/",
       "destination": "/index.html"
+    },
+    {
+      "source": "/home",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/consultants",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/consultants/:match*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/consultant",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/consultant/:match*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/booking",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/my-bookings",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/network",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/network/:match*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/pricing",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/about",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/blog",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/blog/:match*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/faqs",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/apply-consultant",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/terms",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/networking-terms",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/camera-test",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/meeting/:match*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/review/:match*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/upi-payment",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/login",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin/:match*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/404",
+      "destination": "/404.html"
     }
   ]
 }

@@ -1,10 +1,12 @@
 -- ============================================================================
--- Foundarly Follow-up Scheduling Workflow Migration
--- Consultant-Confirmed Follow-up without Admin Approval
+-- FOUNDARLY PRODUCTION DATABASE MIGRATION: FOLLOW-UP WORKFLOW & RLS POLICIES
+-- Execute this script in the Supabase SQL Editor:
+-- https://supabase.com/dashboard/project/rfyxnshvtfswvaogjzwq/sql
 -- ============================================================================
 
+-- 1. Create the follow_up_requests table if it does not exist
 CREATE TABLE IF NOT EXISTS public.follow_up_requests (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   booking_id UUID REFERENCES public.bookings(id) ON DELETE CASCADE NOT NULL,
   client_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   client_name TEXT,
@@ -31,7 +33,7 @@ CREATE TABLE IF NOT EXISTS public.follow_up_requests (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Unique index to prevent duplicate pending/active follow-up requests per booking
+-- 2. Indexes for high performance lookup
 CREATE UNIQUE INDEX IF NOT EXISTS idx_active_follow_up_per_booking 
 ON public.follow_up_requests(booking_id) 
 WHERE status IN ('pending_consultant', 'alternative_proposed', 'confirmed');
@@ -41,10 +43,19 @@ CREATE INDEX IF NOT EXISTS idx_follow_up_client_id ON public.follow_up_requests(
 CREATE INDEX IF NOT EXISTS idx_follow_up_consultant_id ON public.follow_up_requests(consultant_id);
 CREATE INDEX IF NOT EXISTS idx_follow_up_status ON public.follow_up_requests(status);
 
--- Enable RLS
+-- 3. Enable Row Level Security (RLS)
 ALTER TABLE public.follow_up_requests ENABLE ROW LEVEL SECURITY;
 
--- 1. Client can view their own follow-ups
+-- Clean existing policies if re-running
+DROP POLICY IF EXISTS "Clients can view their follow up requests" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Clients can request follow up" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Clients can update follow up when alternative proposed" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Consultants can view their follow up requests" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Consultants can respond to follow up requests" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Admins can view all follow up requests" ON public.follow_up_requests;
+DROP POLICY IF EXISTS "Admins can manage all follow up requests" ON public.follow_up_requests;
+
+-- 4. Client Policies
 CREATE POLICY "Clients can view their follow up requests" 
 ON public.follow_up_requests 
 FOR SELECT 
@@ -52,11 +63,10 @@ USING (
   auth.uid() = client_id OR 
   EXISTS (
     SELECT 1 FROM public.bookings b 
-    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR b.email = auth.jwt() ->> 'email')
+    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(auth.jwt() ->> 'email'))
   )
 );
 
--- 2. Client can insert follow-ups for their own bookings
 CREATE POLICY "Clients can request follow up" 
 ON public.follow_up_requests 
 FOR INSERT 
@@ -64,11 +74,10 @@ WITH CHECK (
   auth.uid() = client_id OR 
   EXISTS (
     SELECT 1 FROM public.bookings b 
-    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR b.email = auth.jwt() ->> 'email')
+    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(auth.jwt() ->> 'email'))
   )
 );
 
--- 3. Client can respond to alternative time proposed by consultant
 CREATE POLICY "Clients can update follow up when alternative proposed" 
 ON public.follow_up_requests 
 FOR UPDATE 
@@ -76,59 +85,60 @@ USING (
   auth.uid() = client_id OR 
   EXISTS (
     SELECT 1 FROM public.bookings b 
-    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR b.email = auth.jwt() ->> 'email')
+    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(auth.jwt() ->> 'email'))
   )
 );
 
--- 4. Assigned Consultants can view follow-up requests assigned to them
+-- 5. Consultant Policies (Direct Consultant Access without Admin bottleneck)
 CREATE POLICY "Consultants can view their follow up requests" 
 ON public.follow_up_requests 
 FOR SELECT 
 USING (
   EXISTS (
     SELECT 1 FROM public.consultants c 
-    WHERE c.id = follow_up_requests.consultant_id AND (c.user_id = auth.uid() OR c.email = auth.jwt() ->> 'email')
+    WHERE c.id = follow_up_requests.consultant_id AND (c.user_id = auth.uid() OR LOWER(c.email) = LOWER(auth.jwt() ->> 'email'))
   )
 );
 
--- 5. Assigned Consultants can respond (accept, propose alternative, decline)
 CREATE POLICY "Consultants can respond to follow up requests" 
 ON public.follow_up_requests 
 FOR UPDATE 
 USING (
   EXISTS (
     SELECT 1 FROM public.consultants c 
-    WHERE c.id = follow_up_requests.consultant_id AND (c.user_id = auth.uid() OR c.email = auth.jwt() ->> 'email')
+    WHERE c.id = follow_up_requests.consultant_id AND (c.user_id = auth.uid() OR LOWER(c.email) = LOWER(auth.jwt() ->> 'email'))
   )
 );
 
--- 6. Admins can view all follow-up requests
-CREATE POLICY "Admins can view all follow up requests"
-ON public.follow_up_requests
-FOR SELECT
+-- 6. Admin Oversight Policies
+CREATE POLICY "Admins can view all follow up requests" 
+ON public.follow_up_requests 
+FOR SELECT 
 USING (
   EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    SELECT 1 FROM public.profiles p 
+    WHERE p.id = auth.uid() AND p.role = 'admin'
   )
   OR LOWER(auth.jwt() ->> 'email') = 'admin@foundarly.com'
 );
 
--- 7. Admins can manage all follow-up requests
-CREATE POLICY "Admins can manage all follow up requests"
-ON public.follow_up_requests
-FOR ALL
+CREATE POLICY "Admins can manage all follow up requests" 
+ON public.follow_up_requests 
+FOR ALL 
 USING (
   EXISTS (
-    SELECT 1 FROM public.profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    SELECT 1 FROM public.profiles p 
+    WHERE p.id = auth.uid() AND p.role = 'admin'
   )
   OR LOWER(auth.jwt() ->> 'email') = 'admin@foundarly.com'
 );
 
--- 8. Table-level permissions
+-- 7. Grant Table Permissions
 GRANT ALL ON TABLE public.follow_up_requests TO authenticated, service_role;
 GRANT SELECT, INSERT ON TABLE public.follow_up_requests TO anon;
 
--- Comments
-COMMENT ON TABLE public.follow_up_requests IS '7-day consultant-confirmed follow-up requests. Direct consultant approval only, no admin intervention required.';
+-- Verification query
+SELECT column_name, data_type 
+FROM information_schema.columns 
+WHERE table_name = 'follow_up_requests'
+ORDER BY ordinal_position;

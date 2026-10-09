@@ -1,10 +1,13 @@
 import dotenv from 'dotenv';
 import { verifySmtpConnection, getSmtpConfig, getSmtpAuditInfo } from '../src/server/mailer.js';
+import { checkServerlessRateLimit, extractClientIp } from '../src/server/rateLimiter.js';
 
 dotenv.config();
 
 interface RequestLike {
   method?: string;
+  headers?: Record<string, string | string[] | undefined>;
+  socket?: { remoteAddress?: string };
 }
 
 interface ResponseLike {
@@ -21,6 +24,17 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
+  }
+
+  const clientIp = extractClientIp(req);
+  const rateLimit = checkServerlessRateLimit(`verify_smtp_${clientIp}`, 20, 60000);
+  if (!rateLimit.allowed) {
+    res.setHeader('Retry-After', String(rateLimit.retryAfter));
+    return res.status(429).json({
+      success: false,
+      error: `Too many SMTP verification requests. Please wait ${rateLimit.retryAfter}s.`,
+      code: 'RATE_LIMITED',
+    });
   }
 
   const config = getSmtpConfig();

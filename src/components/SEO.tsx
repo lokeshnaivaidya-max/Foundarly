@@ -19,8 +19,8 @@ export function SEO({
   title = 'foundarly - Expert Business Consultation & Professional Consulting Services',
   description = 'Connect with top-rated business consultants for personalized 1-on-1 video consultations. Get expert advice on strategy, growth, marketing, finance, and more.',
   keywords = 'business consultation, expert consultants, business advice, professional consulting, business growth, startup consulting',
-  image = 'https://foundarly.in/og-image.jpg',
-  url = 'https://foundarly.in',
+  image = 'https://www.foundarlybusinessworld.in/og-image.jpg',
+  url = 'https://www.foundarlybusinessworld.in',
   type = 'website',
   author = 'foundarly',
   publishedTime,
@@ -89,13 +89,13 @@ export const HomeSEO = () => (
     title="foundarly - Expert Business Consultation & Professional Consulting Services"
     description="Connect with top-rated business consultants for personalized 1-on-1 video consultations. Get expert advice on strategy, growth, marketing, finance, and more. Book 30 or 60-minute sessions with verified industry experts."
     keywords="business consultation, expert consultants, business advice, professional consulting, business growth, startup consulting, business strategy, marketing consultant, financial advisor, 1-on-1 consultation"
-    url="https://foundarly.in"
+    url="https://www.foundarlybusinessworld.in"
     structuredData={{
       "@context": "https://schema.org",
       "@type": "Organization",
       "name": "foundarly",
-      "url": "https://foundarly.in",
-      "logo": "https://foundarly.in/logo.png",
+      "url": "https://www.foundarlybusinessworld.in",
+      "logo": "https://www.foundarlybusinessworld.in/logo.png",
       "description": "Expert business consultation and professional consulting services",
       "sameAs": [
         "https://twitter.com/foundarly",
@@ -111,13 +111,13 @@ export const ConsultantsSEO = () => (
     title="Expert Business Consultants - Find Your Perfect Advisor"
     description="Browse our network of verified business consultants. Filter by expertise, pricing, and availability. Book 1-on-1 video consultations with industry experts in strategy, marketing, finance, and more."
     keywords="business consultants, expert advisors, professional consultants, business experts, consultant directory, find consultant, hire consultant"
-    url="https://foundarly.in/consultants"
+    url="https://www.foundarlybusinessworld.in/consultants"
     structuredData={{
       "@context": "https://schema.org",
       "@type": "ItemList",
       "name": "Business Consultants",
       "description": "List of verified business consultants available for consultation",
-      "url": "https://foundarly.in/consultants"
+      "url": "https://www.foundarlybusinessworld.in/consultants"
     }}
   />
 );
@@ -127,7 +127,7 @@ export const BookingSEO = () => (
     title="Book a Consultation - Schedule Your Expert Session"
     description="Book a personalized 1-on-1 video consultation with our expert business consultants. Choose 30 or 60-minute sessions. Secure payment via Razorpay. Instant confirmation."
     keywords="book consultation, schedule consultation, book expert session, consultation booking, online consultation, video consultation booking"
-    url="https://foundarly.in/booking"
+    url="https://www.foundarlybusinessworld.in/booking"
     structuredData={{
       "@context": "https://schema.org",
       "@type": "Service",
@@ -148,7 +148,7 @@ export const AboutSEO = () => (
     title="About foundarly - Your Trusted Business Consultation Platform"
     description="Learn about foundarly's mission to connect businesses with expert consultants. Discover our platform, values, and commitment to providing quality professional consulting services."
     keywords="about foundarly, business consultation platform, professional consulting, expert network, consultation services"
-    url="https://foundarly.in/about"
+    url="https://www.foundarlybusinessworld.in/about"
   />
 );
 
@@ -157,7 +157,7 @@ export const ContactSEO = () => (
     title="Contact Us - Get in Touch with foundarly"
     description="Have questions about our consultation services? Contact foundarly's support team. We're here to help you connect with the right business consultant for your needs."
     keywords="contact foundarly, customer support, consultation help, get in touch, contact support"
-    url="https://foundarly.in/contact"
+    url="https://www.foundarlybusinessworld.in/contact"
   />
 );
 
@@ -165,7 +165,7 @@ export const LoginSEO = () => (
   <SEO
     title="Login - Access Your foundarly Account"
     description="Login to your foundarly account to manage bookings, view consultation history, and connect with expert business consultants."
-    url="https://foundarly.in/login"
+    url="https://www.foundarlybusinessworld.in/login"
     noindex={true}
   />
 );
@@ -174,7 +174,7 @@ export const SignupSEO = () => (
   <SEO
     title="Sign Up - Create Your foundarly Account"
     description="Create a free foundarly account to book consultations with expert business consultants. Get started in minutes and access personalized professional advice."
-    url="https://foundarly.in/signup"
+    url="https://www.foundarlybusinessworld.in/signup"
     noindex={true}
   />
 );

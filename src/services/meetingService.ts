@@ -95,18 +95,11 @@ export const meetingService = {
         };
       }
 
-      // In case of non-OK response with no JSON
-      return {
-        success: false,
-        authorized: false,
-        canJoin: false,
-        isRejoin: false,
-        sessionStatus: 'expired',
-        error: `Server returned error (${response.status}): ${response.statusText}`,
-        code: 'HTTP_ERROR',
-      };
+      // In case of non-OK response with no JSON (e.g. 404 or 405 from static edge routing), fall back to Supabase
+      console.warn(`[MeetingService] Endpoint returned ${response.status} ${response.statusText}, falling back to direct Supabase verification`);
     } catch (networkErr: unknown) {
       console.warn('[MeetingService] Server endpoint unreachable, verifying via Supabase query:', networkErr);
+    }
 
       // Fallback: Query Supabase directly if Express server API is unreachable
       try {
@@ -202,6 +195,5 @@ export const meetingService = {
           code: 'VERIFICATION_FAILED',
         };
       }
-    }
   },
 };

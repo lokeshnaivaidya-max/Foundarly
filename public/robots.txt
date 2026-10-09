@@ -1,5 +1,5 @@
 # Foundarly Production robots.txt
-# https://foundarly.in/robots.txt
+# https://www.foundarlybusinessworld.in/robots.txt
 
 User-agent: *
 Allow: /
@@ -84,4 +84,4 @@ Disallow: /consultant/
 Disallow: /api/
 
 # XML Sitemap reference
-Sitemap: https://foundarly.in/sitemap.xml
+Sitemap: https://www.foundarlybusinessworld.in/sitemap.xml

@@ -1,40 +1,18 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { ShieldCheck, Cookie, X, Check } from "lucide-react";
+import { Cookie, X, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  getCookiePreferences,
+  saveCookiePreferences,
+} from "@/utils/cookieConsent";
 
-const COOKIE_CONSENT_KEY = "foundarly_cookie_consent_v1";
-
-export interface CookiePreferences {
-  essential: boolean;
-  functional: boolean;
-  analytics: boolean;
-  timestamp: string;
-}
-
-export function getCookiePreferences(): CookiePreferences | null {
-  try {
-    const raw = localStorage.getItem(COOKIE_CONSENT_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-export function saveCookiePreferences(prefs: Omit<CookiePreferences, "timestamp">) {
-  try {
-    const full: CookiePreferences = {
-      ...prefs,
-      essential: true, // Always required for platform operation
-      timestamp: new Date().toISOString(),
-    };
-    localStorage.setItem(COOKIE_CONSENT_KEY, JSON.stringify(full));
-    window.dispatchEvent(new CustomEvent("foundarly_cookie_consent_updated", { detail: full }));
-  } catch (err) {
-    console.error("Failed to save cookie preferences:", err);
-  }
-}
+export {
+  getCookiePreferences,
+  isCookieCategoryAllowed,
+  saveCookiePreferences,
+  type CookiePreferences,
+} from "@/utils/cookieConsent";
 
 export function CookieConsent() {
   const [visible, setVisible] = useState(false);
@@ -92,7 +70,7 @@ export function CookieConsent() {
             <Cookie className="w-5 h-5" />
           </div>
           <div className="flex-1">
-            <h3 className="font-semibold text-sm text-foreground">Privacy & Cookie Preferences</h3>
+            <h3 className="font-semibold text-sm text-foreground">Privacy &amp; Cookie Preferences</h3>
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
               We use necessary cookies for secure authentication and session management. Optional analytics help us enhance consultation reliability. Read our{" "}
               <Link to="/privacy" className="text-primary hover:underline underline-offset-2">

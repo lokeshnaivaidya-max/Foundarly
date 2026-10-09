@@ -3,7 +3,7 @@
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <!-- Homepage / Experts Directory -->
   <url>
-    <loc>https://foundarly.in/</loc>
+    <loc>https://www.foundarlybusinessworld.in/</loc>
     <lastmod>2026-10-09</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
@@ -11,7 +11,7 @@
 
   <!-- Brand Landing Page -->
   <url>
-    <loc>https://foundarly.in/home</loc>
+    <loc>https://www.foundarlybusinessworld.in/home</loc>
     <lastmod>2026-10-09</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
@@ -19,7 +19,7 @@
 
   <!-- Consultants Directory -->
   <url>
-    <loc>https://foundarly.in/consultants</loc>
+    <loc>https://www.foundarlybusinessworld.in/consultants</loc>
     <lastmod>2026-10-09</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
@@ -27,7 +27,7 @@
 
   <!-- Pricing -->
   <url>
-    <loc>https://foundarly.in/pricing</loc>
+    <loc>https://www.foundarlybusinessworld.in/pricing</loc>
     <lastmod>2026-10-09</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -35,7 +35,7 @@
 
   <!-- Our Story / About -->
   <url>
-    <loc>https://foundarly.in/about</loc>
+    <loc>https://www.foundarlybusinessworld.in/about</loc>
     <lastmod>2026-10-09</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
@@ -43,7 +43,7 @@
 
   <!-- Blog Index -->
   <url>
-    <loc>https://foundarly.in/blog</loc>
+    <loc>https://www.foundarlybusinessworld.in/blog</loc>
     <lastmod>2026-10-09</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -51,7 +51,7 @@
 
   <!-- FAQs -->
   <url>
-    <loc>https://foundarly.in/faqs</loc>
+    <loc>https://www.foundarlybusinessworld.in/faqs</loc>
     <lastmod>2026-10-09</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -59,7 +59,7 @@
 
   <!-- Apply as a Consultant -->
   <url>
-    <loc>https://foundarly.in/apply-consultant</loc>
+    <loc>https://www.foundarlybusinessworld.in/apply-consultant</loc>
     <lastmod>2026-10-09</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
@@ -67,7 +67,7 @@
 
   <!-- Legal: Privacy Policy -->
   <url>
-    <loc>https://foundarly.in/privacy</loc>
+    <loc>https://www.foundarlybusinessworld.in/privacy</loc>
     <lastmod>2026-10-09</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
@@ -75,7 +75,7 @@
 
   <!-- Legal: Terms of Service -->
   <url>
-    <loc>https://foundarly.in/terms</loc>
+    <loc>https://www.foundarlybusinessworld.in/terms</loc>
     <lastmod>2026-10-09</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
@@ -83,7 +83,7 @@
 
   <!-- Legal: Networking Terms -->
   <url>
-    <loc>https://foundarly.in/networking-terms</loc>
+    <loc>https://www.foundarlybusinessworld.in/networking-terms</loc>
     <lastmod>2026-10-09</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>

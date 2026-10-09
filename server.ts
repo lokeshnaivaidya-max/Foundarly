@@ -1279,7 +1279,7 @@ async function startServer() {
         date: new Date().toISOString().split("T")[0],
         time: "10:00 AM",
         duration: 45,
-        meetingLink: `https://foundarly.com/meeting/test-${Date.now()}`,
+        meetingLink: `https://www.foundarlybusinessworld.in/meeting/test-${Date.now()}`,
         meetingRoomId: `test-${Date.now()}`,
         price: 0,
         message: "This is a verification test of the Foundarly booking confirmation email system.",
@@ -1653,6 +1653,15 @@ async function startServer() {
         error: error?.message || "Internal server error while sending application email",
       });
     }
+  });
+
+  // Explicit JSON 404 response for unmatched API routes
+  app.all("/api/*", (req, res) => {
+    return res.status(404).json({
+      success: false,
+      error: `API endpoint '${req.method} ${req.path}' not found`,
+      code: "API_ENDPOINT_NOT_FOUND",
+    });
   });
 
   // Vite middleware for development vs static build for production

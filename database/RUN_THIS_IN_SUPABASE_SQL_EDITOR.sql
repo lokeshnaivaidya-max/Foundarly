@@ -1,11 +1,12 @@
 -- ============================================================================
--- FOUNDARLY PRODUCTION DATABASE MIGRATION: FOLLOW-UP WORKFLOW & RLS POLICIES
+-- FOUNDARLY PRODUCTION DATABASE MIGRATION: 
+-- FOLLOW-UP WORKFLOW, FIELD PROTECTION, TIGHTENED RLS & DISTRIBUTED RATE LIMITER
 -- Execute this script in the Supabase SQL Editor:
 -- https://supabase.com/dashboard/project/rfyxnshvtfswvaogjzwq/sql
 -- (Or your configured Supabase project SQL Editor)
 -- ============================================================================
 
--- 0. Ensure uuid extension is available
+-- 0. Ensure uuid and pgcrypto extensions are available
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
@@ -100,7 +101,96 @@ CREATE INDEX IF NOT EXISTS idx_follow_up_status ON public.follow_up_requests(sta
 CREATE INDEX IF NOT EXISTS idx_follow_up_deadline ON public.follow_up_requests(rejoin_deadline);
 
 -- ============================================================================
--- 4. ROW LEVEL SECURITY (RLS) FOR follow_up_requests
+-- 4. FIELD PROTECTION TRIGGER: IMMUTABLE & UNAUTHORIZED FIELD ENFORCEMENT
+-- Strictly prevents clients and consultants from modifying protected fields
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.protect_follow_up_request_fields()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- Admins and internal service_role can perform administrative updates
+  IF public.is_admin() OR current_setting('role', true) = 'service_role' THEN
+    RETURN NEW;
+  END IF;
+
+  -- 1. Core structural fields are IMMUTABLE for non-admins
+  IF NEW.id IS DISTINCT FROM OLD.id THEN
+    RAISE EXCEPTION 'Field "id" is immutable.';
+  END IF;
+
+  IF NEW.booking_id IS DISTINCT FROM OLD.booking_id THEN
+    RAISE EXCEPTION 'Field "booking_id" is immutable.';
+  END IF;
+
+  IF NEW.client_id IS DISTINCT FROM OLD.client_id THEN
+    RAISE EXCEPTION 'Field "client_id" is immutable.';
+  END IF;
+
+  IF NEW.consultant_id IS DISTINCT FROM OLD.consultant_id THEN
+    RAISE EXCEPTION 'Field "consultant_id" is immutable.';
+  END IF;
+
+  IF NEW.meeting_room_id IS DISTINCT FROM OLD.meeting_room_id THEN
+    RAISE EXCEPTION 'Field "meeting_room_id" is immutable.';
+  END IF;
+
+  IF NEW.rejoin_deadline IS DISTINCT FROM OLD.rejoin_deadline THEN
+    RAISE EXCEPTION 'Field "rejoin_deadline" is immutable.';
+  END IF;
+
+  IF NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'Field "created_at" is immutable.';
+  END IF;
+
+  -- 2. Client role protection:
+  -- Clients cannot modify consultant fields, initial request reason, or preferred dates
+  IF NOT EXISTS (
+    SELECT 1 FROM public.consultants c 
+    WHERE c.id = OLD.consultant_id 
+      AND (c.user_id = auth.uid() OR LOWER(c.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
+  ) THEN
+    IF NEW.reason IS DISTINCT FROM OLD.reason OR
+       NEW.preferred_date IS DISTINCT FROM OLD.preferred_date OR
+       NEW.preferred_time IS DISTINCT FROM OLD.preferred_time OR
+       NEW.alternative_date IS DISTINCT FROM OLD.alternative_date OR
+       NEW.alternative_time IS DISTINCT FROM OLD.alternative_time OR
+       NEW.consultant_note IS DISTINCT FROM OLD.consultant_note THEN
+      RAISE EXCEPTION 'Clients cannot modify consultant proposal fields or initial request details.';
+    END IF;
+  END IF;
+
+  -- 3. Consultant role protection:
+  -- Consultants cannot modify client request details or client identity
+  IF EXISTS (
+    SELECT 1 FROM public.consultants c 
+    WHERE c.id = OLD.consultant_id 
+      AND (c.user_id = auth.uid() OR LOWER(c.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
+  ) THEN
+    IF NEW.reason IS DISTINCT FROM OLD.reason OR
+       NEW.preferred_date IS DISTINCT FROM OLD.preferred_date OR
+       NEW.preferred_time IS DISTINCT FROM OLD.preferred_time OR
+       NEW.client_name IS DISTINCT FROM OLD.client_name OR
+       NEW.client_email IS DISTINCT FROM OLD.client_email THEN
+      RAISE EXCEPTION 'Consultants cannot modify client request details.';
+    END IF;
+  END IF;
+
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_follow_up_request_fields ON public.follow_up_requests;
+CREATE TRIGGER trg_protect_follow_up_request_fields
+BEFORE UPDATE ON public.follow_up_requests
+FOR EACH ROW
+EXECUTE FUNCTION public.protect_follow_up_request_fields();
+
+-- ============================================================================
+-- 5. ROW LEVEL SECURITY (RLS) FOR follow_up_requests (TIGHTENED)
 -- ============================================================================
 ALTER TABLE public.follow_up_requests ENABLE ROW LEVEL SECURITY;
 
@@ -113,7 +203,8 @@ DROP POLICY IF EXISTS "Consultants can respond to follow up requests" ON public.
 DROP POLICY IF EXISTS "Admins can view all follow up requests" ON public.follow_up_requests;
 DROP POLICY IF EXISTS "Admins can manage all follow up requests" ON public.follow_up_requests;
 
--- Client Policies (Supports both authenticated UID and verified booking email)
+-- 5a. Client Policies
+-- SELECT: Clients can view follow-ups belonging to their user ID or email
 CREATE POLICY "Clients can view their follow up requests" 
 ON public.follow_up_requests 
 FOR SELECT 
@@ -121,54 +212,89 @@ USING (
   auth.uid() = client_id OR 
   EXISTS (
     SELECT 1 FROM public.bookings b 
-    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
+    WHERE b.id = follow_up_requests.booking_id 
+      AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
   )
 );
 
+-- INSERT: Clients can only create follow-ups for their own bookings with initial 'pending_consultant' status
 CREATE POLICY "Clients can request follow up" 
 ON public.follow_up_requests 
 FOR INSERT 
 WITH CHECK (
-  auth.uid() = client_id OR 
-  EXISTS (
-    SELECT 1 FROM public.bookings b 
-    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
+  (
+    auth.uid() = client_id OR 
+    EXISTS (
+      SELECT 1 FROM public.bookings b 
+      WHERE b.id = follow_up_requests.booking_id 
+        AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
+    )
   )
+  AND status = 'pending_consultant'
 );
 
+-- UPDATE: Clients can ONLY update when alternative proposed, transitioning to 'confirmed' or 'declined'
 CREATE POLICY "Clients can update follow up when alternative proposed" 
 ON public.follow_up_requests 
 FOR UPDATE 
 USING (
-  auth.uid() = client_id OR 
-  EXISTS (
-    SELECT 1 FROM public.bookings b 
-    WHERE b.id = follow_up_requests.booking_id AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
+  (
+    auth.uid() = client_id OR 
+    EXISTS (
+      SELECT 1 FROM public.bookings b 
+      WHERE b.id = follow_up_requests.booking_id 
+        AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
+    )
   )
+  AND status = 'alternative_proposed'
+)
+WITH CHECK (
+  (
+    auth.uid() = client_id OR 
+    EXISTS (
+      SELECT 1 FROM public.bookings b 
+      WHERE b.id = follow_up_requests.booking_id 
+        AND (b.user_id = auth.uid() OR LOWER(b.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
+    )
+  )
+  AND status IN ('confirmed', 'declined')
 );
 
--- Consultant Policies (Direct consultant authorization without admin bottleneck)
+-- 5b. Consultant Policies (Direct consultant authorization without admin bottleneck)
+-- SELECT: Consultants can view follow-ups assigned to their profile ID or email
 CREATE POLICY "Consultants can view their follow up requests" 
 ON public.follow_up_requests 
 FOR SELECT 
 USING (
   EXISTS (
     SELECT 1 FROM public.consultants c 
-    WHERE c.id = follow_up_requests.consultant_id AND (c.user_id = auth.uid() OR LOWER(c.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
+    WHERE c.id = follow_up_requests.consultant_id 
+      AND (c.user_id = auth.uid() OR LOWER(c.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
   )
 );
 
+-- UPDATE: Consultants can only respond when pending or proposing alternative
 CREATE POLICY "Consultants can respond to follow up requests" 
 ON public.follow_up_requests 
 FOR UPDATE 
 USING (
   EXISTS (
     SELECT 1 FROM public.consultants c 
-    WHERE c.id = follow_up_requests.consultant_id AND (c.user_id = auth.uid() OR LOWER(c.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
+    WHERE c.id = follow_up_requests.consultant_id 
+      AND (c.user_id = auth.uid() OR LOWER(c.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
   )
+  AND status IN ('pending_consultant', 'alternative_proposed')
+)
+WITH CHECK (
+  EXISTS (
+    SELECT 1 FROM public.consultants c 
+    WHERE c.id = follow_up_requests.consultant_id 
+      AND (c.user_id = auth.uid() OR LOWER(c.email) = LOWER(COALESCE(auth.jwt() ->> 'email', '')))
+  )
+  AND status IN ('confirmed', 'alternative_proposed', 'declined')
 );
 
--- Admin Oversight Policies (Uses non-recursive is_admin() helper)
+-- 5c. Admin Oversight Policies (Uses non-recursive is_admin() helper)
 CREATE POLICY "Admins can view all follow up requests" 
 ON public.follow_up_requests 
 FOR SELECT 
@@ -185,8 +311,8 @@ GRANT ALL ON TABLE public.follow_up_requests TO authenticated, service_role;
 GRANT SELECT, INSERT ON TABLE public.follow_up_requests TO anon;
 
 -- ============================================================================
--- 5. DISTRIBUTED SERVERLESS RATE LIMITING (NO PAID SERVICES REQUIRED)
--- Enables atomic rate tracking shared across all serverless lambda instances
+-- 6. DISTRIBUTED SERVERLESS RATE LIMITING (NO PAID SERVICES REQUIRED)
+-- Table and atomic RPC function expected by src/server/rateLimiter.ts
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS public.rate_limit_entries (
   key TEXT PRIMARY KEY,
@@ -208,6 +334,7 @@ WITH CHECK (true);
 GRANT ALL ON TABLE public.rate_limit_entries TO authenticated, service_role, anon;
 
 -- Atomic RPC function for distributed rate limiting
+-- Parameter names and return schema exactly match src/server/rateLimiter.ts
 CREATE OR REPLACE FUNCTION public.check_rate_limit(
   p_key TEXT,
   p_limit INT,
@@ -256,10 +383,14 @@ $$;
 GRANT EXECUTE ON FUNCTION public.check_rate_limit(TEXT, INT, INT) TO authenticated, service_role, anon;
 
 -- ============================================================================
--- 6. VERIFICATION QUERY
--- Shows created table columns and security status
+-- 7. VERIFICATION QUERIES
+-- Run to confirm tables, columns, functions, and triggers exist
 -- ============================================================================
 SELECT column_name, data_type, is_nullable 
 FROM information_schema.columns 
 WHERE table_name = 'follow_up_requests'
 ORDER BY ordinal_position;
+
+SELECT routine_name, routine_type 
+FROM information_schema.routines 
+WHERE routine_schema = 'public' AND routine_name IN ('is_admin', 'check_rate_limit', 'protect_follow_up_request_fields');

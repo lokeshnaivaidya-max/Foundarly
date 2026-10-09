@@ -93,16 +93,24 @@ export function checkServerlessRateLimit(
 }
 
 let cachedSupabaseClient: SupabaseClient | null = null;
+
+/**
+ * Test helper to inject or reset Supabase client for testing
+ */
+export function setSupabaseClientForTesting(client: SupabaseClient | null) {
+  cachedSupabaseClient = client;
+}
+
 function getSupabaseClient(): SupabaseClient | null {
   if (cachedSupabaseClient) return cachedSupabaseClient;
 
   const url =
     process.env.SUPABASE_URL ||
     process.env.VITE_SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY;
+
+  // Strictly require the trusted server-side service_role key.
+  // anon / authenticated roles have no permission on check_rate_limit().
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !key) return null;
 

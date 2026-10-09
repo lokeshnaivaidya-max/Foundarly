@@ -3,6 +3,7 @@ import {
   MeetingSessionStatus,
   calculateRejoinEligibility,
   validateParticipantAccess,
+  FollowUpRequest,
 } from '@/utils/meetingRejoin';
 
 export interface MeetingAccessResponse {
@@ -15,6 +16,7 @@ export interface MeetingAccessResponse {
   error?: string;
   code?: string;
   booking?: Record<string, unknown>;
+  followUp?: FollowUpRequest | null;
   timing?: {
     scheduledStart: string;
     scheduledEnd: string;

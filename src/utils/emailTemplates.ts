@@ -716,3 +716,370 @@ Foundarly Consultation Platform
 Support: hello@foundarlybusinessworld.in`;
 }
 
+/* ==========================================================================
+   FOLLOW-UP WORKFLOW EMAIL TEMPLATES
+   ========================================================================== */
+
+export interface EmailFollowUpRequestedData {
+  bookingId: string;
+  clientName: string;
+  clientEmail: string;
+  consultantName: string;
+  consultantEmail: string;
+  reason: string;
+  preferredDate: string;
+  preferredTime: string;
+  originalDate: string;
+  originalTime: string;
+  rejoinDeadline: string;
+  dashboardUrl: string;
+}
+
+export interface EmailFollowUpAlternativeData {
+  bookingId: string;
+  clientName: string;
+  clientEmail: string;
+  consultantName: string;
+  alternativeDate: string;
+  alternativeTime: string;
+  consultantNote?: string | null;
+  reason: string;
+  rejoinDeadline: string;
+  dashboardUrl: string;
+}
+
+export interface EmailFollowUpConfirmedData {
+  bookingId: string;
+  clientName: string;
+  clientEmail: string;
+  consultantName: string;
+  consultantEmail?: string | null;
+  confirmedDate: string;
+  confirmedTime: string;
+  reason: string;
+  meetingLink: string;
+  meetingRoomId: string;
+  rejoinDeadline: string;
+}
+
+export interface EmailFollowUpDeclinedData {
+  bookingId: string;
+  clientName: string;
+  clientEmail: string;
+  consultantName: string;
+  reason?: string | null;
+  declinedReason?: string | null;
+  rejoinDeadline: string;
+  supportUrl?: string;
+}
+
+/**
+ * 1. Consultant Notification: Client requested a follow-up session
+ */
+export function generateFollowUpRequestedEmailHTML(data: EmailFollowUpRequestedData): string {
+  const formattedReqDate = formatSessionDate(data.preferredDate);
+  const formattedOrigDate = formatSessionDate(data.originalDate);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Follow-up Request - Foundarly</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 580px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding: 32px 28px; text-align: center;">
+              <h1 style="margin: 0 0 6px 0; color: #ffffff; font-size: 22px; font-weight: 700; letter-spacing: -0.5px;">Follow-up Consultation Request</h1>
+              <p style="margin: 0; color: #fef3c7; font-size: 14px;">7-Day Meeting Window Active</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 28px;">
+              <p style="font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">Hello <strong>${escapeHTML(data.consultantName)}</strong>,</p>
+              <p style="font-size: 14px; line-height: 22px; color: #475569; margin: 0 0 24px 0;">
+                Your client <strong>${escapeHTML(data.clientName)}</strong> has requested a follow-up consultation within the 7-day post-meeting eligibility period. Please review the proposed time below and confirm or suggest an alternative in your dashboard.
+              </p>
+
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+                <p style="margin: 0 0 10px 0; font-size: 14px;"><strong>Client:</strong> ${escapeHTML(data.clientName)} (${escapeHTML(data.clientEmail)})</p>
+                <p style="margin: 0 0 10px 0; font-size: 14px;"><strong>Original Session:</strong> ${formattedOrigDate} at ${escapeHTML(data.originalTime)}</p>
+                <p style="margin: 0 0 10px 0; font-size: 14px; color: #b45309;"><strong>Proposed Follow-up:</strong> ${formattedReqDate} at ${escapeHTML(data.preferredTime)}</p>
+                <p style="margin: 0 0 10px 0; font-size: 14px;"><strong>Original Booking Ref:</strong> <code>${escapeHTML(data.bookingId)}</code></p>
+                <p style="margin: 0; font-size: 14px;"><strong>Clarification / Reason:</strong></p>
+                <blockquote style="margin: 8px 0 0 0; padding: 10px 14px; background: #fff; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; color: #334155;">
+                  ${escapeHTML(data.reason)}
+                </blockquote>
+              </div>
+
+              <div style="text-align: center; margin-bottom: 28px;">
+                <a href="${data.dashboardUrl}" style="display: inline-block; background-color: #f59e0b; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 28px; border-radius: 8px; box-shadow: 0 2px 4px rgba(245, 158, 11, 0.2);">
+                  Respond on Consultant Dashboard
+                </a>
+              </div>
+
+              <p style="font-size: 12px; color: #94a3b8; line-height: 18px; margin: 0; text-align: center;">
+                No administrative approval is required. You can accept, propose an alternative time, or decline directly.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export function generateFollowUpRequestedEmailText(data: EmailFollowUpRequestedData): string {
+  return `Follow-up Consultation Request - Foundarly
+
+Hello ${data.consultantName},
+
+Your client ${data.clientName} (${data.clientEmail}) has requested a follow-up consultation.
+
+Original Consultation: ${formatSessionDate(data.originalDate)} at ${data.originalTime}
+Proposed Follow-up Time: ${formatSessionDate(data.preferredDate)} at ${data.preferredTime}
+Original Booking ID: ${data.bookingId}
+
+Reason / Question:
+"${data.reason}"
+
+Please open your consultant dashboard to accept the request, propose an alternative time, or decline:
+${data.dashboardUrl}
+
+Note: No administrative approval is required. You control your schedule directly.
+
+---
+Foundarly Consultation Platform`;
+}
+
+/**
+ * 2. Client Notification: Consultant proposed alternative time
+ */
+export function generateFollowUpAlternativeEmailHTML(data: EmailFollowUpAlternativeData): string {
+  const formattedAltDate = formatSessionDate(data.alternativeDate);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Alternative Follow-up Time Proposed - Foundarly</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 580px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); padding: 32px 28px; text-align: center;">
+              <h1 style="margin: 0 0 6px 0; color: #ffffff; font-size: 22px; font-weight: 700;">Alternative Follow-up Time Proposed</h1>
+              <p style="margin: 0; color: #dbeafe; font-size: 14px;">Consultant Response</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 28px;">
+              <p style="font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">Hello <strong>${escapeHTML(data.clientName)}</strong>,</p>
+              <p style="font-size: 14px; line-height: 22px; color: #475569; margin: 0 0 24px 0;">
+                Your consultant <strong>${escapeHTML(data.consultantName)}</strong> is unavailable at your requested time, but has proposed an alternative time within your 7-day follow-up window.
+              </p>
+
+              <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+                <p style="margin: 0 0 10px 0; font-size: 15px; color: #1e40af; font-weight: 600;">
+                  Proposed Alternative Time: ${formattedAltDate} at ${escapeHTML(data.alternativeTime)}
+                </p>
+                ${data.consultantNote ? `
+                  <p style="margin: 0 0 8px 0; font-size: 13px; color: #1e3a8a;"><strong>Consultant Note:</strong></p>
+                  <blockquote style="margin: 0; padding: 8px 12px; background: #fff; border-left: 3px solid #3b82f6; border-radius: 4px; font-size: 13px; color: #334155;">
+                    ${escapeHTML(data.consultantNote)}
+                  </blockquote>
+                ` : ''}
+              </div>
+
+              <div style="text-align: center; margin-bottom: 28px;">
+                <a href="${data.dashboardUrl}" style="display: inline-block; background-color: #2563eb; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 28px; border-radius: 8px;">
+                  View & Accept Proposed Time
+                </a>
+              </div>
+
+              <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 0;">
+                Once you accept, the follow-up meeting will be confirmed immediately.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export function generateFollowUpAlternativeEmailText(data: EmailFollowUpAlternativeData): string {
+  return `Alternative Follow-up Time Proposed - Foundarly
+
+Hello ${data.clientName},
+
+Your consultant ${data.consultantName} has proposed an alternative time for your follow-up consultation:
+
+Proposed Time: ${formatSessionDate(data.alternativeDate)} at ${data.alternativeTime}
+${data.consultantNote ? `Note: "${data.consultantNote}"\n` : ''}
+
+Please visit your bookings dashboard to accept or decline this proposed time:
+${data.dashboardUrl}
+
+---
+Foundarly Consultation Platform`;
+}
+
+/**
+ * 3. Both Participants: Follow-up session confirmed
+ */
+export function generateFollowUpConfirmedEmailHTML(data: EmailFollowUpConfirmedData): string {
+  const formattedDate = formatSessionDate(data.confirmedDate);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Follow-up Confirmed - Foundarly</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 580px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 32px 28px; text-align: center;">
+              <h1 style="margin: 0 0 6px 0; color: #ffffff; font-size: 22px; font-weight: 700;">Follow-up Consultation Confirmed!</h1>
+              <p style="margin: 0; color: #d1fae5; font-size: 14px;">Rejoining Original Meeting Room</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 28px;">
+              <p style="font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">Hello <strong>${escapeHTML(data.clientName)}</strong> & <strong>${escapeHTML(data.consultantName)}</strong>,</p>
+              <p style="font-size: 14px; line-height: 22px; color: #475569; margin: 0 0 24px 0;">
+                Your follow-up video consultation has been confirmed. You will rejoin using the original meeting room at the agreed time.
+              </p>
+
+              <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+                <p style="margin: 0 0 8px 0; font-size: 15px; color: #065f46; font-weight: 700;">
+                  📅 Date & Time: ${formattedDate} at ${escapeHTML(data.confirmedTime)}
+                </p>
+                <p style="margin: 0 0 8px 0; font-size: 13px; color: #047857;">
+                  <strong>Meeting Room ID:</strong> <code>${escapeHTML(data.meetingRoomId)}</code>
+                </p>
+                <p style="margin: 0 0 8px 0; font-size: 13px; color: #047857;">
+                  <strong>Original Booking Ref:</strong> <code>${escapeHTML(data.bookingId)}</code>
+                </p>
+                <p style="margin: 0; font-size: 13px; color: #065f46;">
+                  <strong>Topic:</strong> ${escapeHTML(data.reason)}
+                </p>
+              </div>
+
+              <div style="text-align: center; margin-bottom: 28px;">
+                <a href="${data.meetingLink}" style="display: inline-block; background-color: #10b981; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 14px 32px; border-radius: 8px; box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);">
+                  Open Meeting Room
+                </a>
+              </div>
+
+              <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 0; line-height: 18px;">
+                Only the scheduled client and assigned consultant have access to this room.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export function generateFollowUpConfirmedEmailText(data: EmailFollowUpConfirmedData): string {
+  return `Follow-up Consultation Confirmed - Foundarly
+
+Dear ${data.clientName} & ${data.consultantName},
+
+Your follow-up consultation is confirmed!
+
+Date: ${formatSessionDate(data.confirmedDate)}
+Time: ${data.confirmedTime}
+Topic: ${data.reason}
+Original Booking Reference: ${data.bookingId}
+
+Access your meeting room here:
+${data.meetingLink}
+
+Note: Rejoin access uses your existing secure meeting room and is authorized only for you two.
+
+---
+Foundarly Consultation Platform`;
+}
+
+/**
+ * 4. Client Notification: Follow-up request declined
+ */
+export function generateFollowUpDeclinedEmailHTML(data: EmailFollowUpDeclinedData): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Follow-up Request Update - Foundarly</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 580px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #64748b 0%, #475569 100%); padding: 32px 28px; text-align: center;">
+              <h1 style="margin: 0 0 6px 0; color: #ffffff; font-size: 22px; font-weight: 700;">Follow-up Request Update</h1>
+              <p style="margin: 0; color: #e2e8f0; font-size: 14px;">Consultation Follow-up</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 28px;">
+              <p style="font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">Hello <strong>${escapeHTML(data.clientName)}</strong>,</p>
+              <p style="font-size: 14px; line-height: 22px; color: #475569; margin: 0 0 24px 0;">
+                Your consultant <strong>${escapeHTML(data.consultantName)}</strong> is unfortunately unable to accommodate this follow-up request at this time.
+              </p>
+
+              ${data.declinedReason ? `
+                <div style="background-color: #f1f5f9; border-left: 3px solid #64748b; padding: 14px 16px; border-radius: 4px; margin-bottom: 24px;">
+                  <p style="margin: 0; font-size: 13px; color: #334155;"><strong>Reason provided:</strong> ${escapeHTML(data.declinedReason)}</p>
+                </div>
+              ` : ''}
+
+              <p style="font-size: 13px; color: #64748b; line-height: 20px;">
+                You may reach out to our support team at <a href="mailto:hello@foundarlybusinessworld.in" style="color: #f59e0b;">hello@foundarlybusinessworld.in</a> if you need further assistance.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export function generateFollowUpDeclinedEmailText(data: EmailFollowUpDeclinedData): string {
+  return `Follow-up Request Update - Foundarly
+
+Dear ${data.clientName},
+
+Your consultant ${data.consultantName} was unable to accommodate your follow-up request.
+${data.declinedReason ? `Reason: "${data.declinedReason}"\n` : ''}
+
+Booking Reference: ${data.bookingId}
+
+If you have questions or require further assistance, please contact us at hello@foundarlybusinessworld.in.
+
+---
+Foundarly Consultation Platform`;
+}
+

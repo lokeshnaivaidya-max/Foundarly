@@ -325,3 +325,200 @@ export function validateParticipantAccess(
     code: 'UNAUTHORIZED_PARTICIPANT',
   };
 }
+
+/* ==========================================================================
+   CONSULTANT-CONFIRMED FOLLOW-UP WORKFLOW UTILITIES
+   ========================================================================== */
+
+export type FollowUpStatus =
+  | 'pending_consultant'
+  | 'alternative_proposed'
+  | 'confirmed'
+  | 'declined'
+  | 'completed'
+  | 'expired';
+
+export const FOLLOW_UP_STATUS_LABELS: Record<FollowUpStatus, string> = {
+  pending_consultant: 'Pending Consultant Response',
+  alternative_proposed: 'Alternative Time Proposed',
+  confirmed: 'Confirmed',
+  declined: 'Declined',
+  completed: 'Completed',
+  expired: 'Expired',
+};
+
+export interface FollowUpRequest {
+  id: string;
+  booking_id: string;
+  client_id?: string | null;
+  client_name?: string | null;
+  client_email?: string | null;
+  consultant_id: string;
+  consultant_name?: string | null;
+  consultant_email?: string | null;
+  meeting_room_id: string;
+  reason: string;
+  preferred_date: string;
+  preferred_time: string;
+  alternative_date?: string | null;
+  alternative_time?: string | null;
+  consultant_note?: string | null;
+  confirmed_date?: string | null;
+  confirmed_time?: string | null;
+  declined_reason?: string | null;
+  status: FollowUpStatus;
+  rejoin_deadline: string;
+  client_notified_at?: string | null;
+  consultant_notified_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Robustly parses a date string and time string into a valid Date object.
+ */
+export function parseFollowUpDateTime(dateStr: string, timeStr?: string | null): Date {
+  const { hours, minutes } = parseTimeString(timeStr);
+  if (!dateStr) return new Date();
+
+  if (dateStr.includes('T')) {
+    const d = new Date(dateStr);
+    d.setHours(hours, minutes, 0, 0);
+    return d;
+  }
+
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    return new Date(Date.UTC(year, month, day, hours, minutes, 0));
+  }
+
+  const fallback = new Date(`${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00Z`);
+  return isNaN(fallback.getTime()) ? new Date() : fallback;
+}
+
+export interface TimingValidationResult {
+  valid: boolean;
+  targetDateTime?: Date;
+  error?: string;
+  code?: 'PAST_TIME' | 'EXCEEDS_DEADLINE' | 'INVALID_DATE' | 'OK';
+}
+
+/**
+ * Validates that a proposed follow-up date and time:
+ * 1. Is valid and not in the past relative to referenceNow.
+ * 2. Strictly falls within the authoritative 7-day rejoin eligibility window (target <= rejoinDeadline).
+ * 3. Never extends or bypasses the deadline.
+ */
+export function validateFollowUpTiming(
+  dateStr: string,
+  timeStr: string,
+  rejoinDeadline: Date,
+  referenceNow: Date = new Date()
+): TimingValidationResult {
+  if (!dateStr || !dateStr.trim()) {
+    return { valid: false, error: 'A valid follow-up date is required.', code: 'INVALID_DATE' };
+  }
+
+  const target = parseFollowUpDateTime(dateStr, timeStr);
+  if (isNaN(target.getTime())) {
+    return { valid: false, error: 'Invalid date or time format provided.', code: 'INVALID_DATE' };
+  }
+
+  const targetMs = target.getTime();
+  const nowMs = referenceNow.getTime();
+  const deadlineMs = rejoinDeadline.getTime();
+
+  // Ensure scheduled follow-up is not in the past (allow a 5-minute buffer for form submission delay)
+  if (targetMs < nowMs - 5 * 60 * 1000) {
+    return {
+      valid: false,
+      targetDateTime: target,
+      error: 'Proposed follow-up date and time cannot be in the past.',
+      code: 'PAST_TIME',
+    };
+  }
+
+  // Ensure target strictly falls within the 7-day window
+  if (targetMs > deadlineMs) {
+    const formattedDeadline = rejoinDeadline.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    return {
+      valid: false,
+      targetDateTime: target,
+      error: `Proposed follow-up date and time must fall within the 7-day eligibility window expiring on ${formattedDeadline}.`,
+      code: 'EXCEEDS_DEADLINE',
+    };
+  }
+
+  return {
+    valid: true,
+    targetDateTime: target,
+    code: 'OK',
+  };
+}
+
+/**
+ * Evaluates whether a booking is currently eligible for a follow-up request.
+ */
+export function checkBookingFollowUpEligibility(
+  booking: {
+    date: string;
+    time?: string | null;
+    session_duration?: number | null;
+    status?: string | null;
+    payment_status?: string | null;
+    meeting_started_at?: string | null;
+    meeting_ended_at?: string | null;
+  },
+  referenceNow: Date = new Date()
+): {
+  eligible: boolean;
+  reason?: string;
+  rejoinDeadline: Date;
+  daysRemaining: number;
+} {
+  const eligibility = calculateRejoinEligibility(booking, referenceNow);
+
+  if (booking.status === 'cancelled' || booking.status === 'rejected' || booking.payment_status === 'rejected') {
+    return {
+      eligible: false,
+      reason: 'This consultation was cancelled or rejected and is ineligible for follow-up.',
+      rejoinDeadline: eligibility.rejoinDeadline,
+      daysRemaining: 0,
+    };
+  }
+
+  if (eligibility.sessionStatus === 'upcoming') {
+    return {
+      eligible: false,
+      reason: 'The original consultation session has not taken place yet.',
+      rejoinDeadline: eligibility.rejoinDeadline,
+      daysRemaining: eligibility.rejoinDaysRemaining,
+    };
+  }
+
+  if (eligibility.sessionStatus === 'expired') {
+    return {
+      eligible: false,
+      reason: 'The 7-day follow-up eligibility window for this consultation has expired.',
+      rejoinDeadline: eligibility.rejoinDeadline,
+      daysRemaining: 0,
+    };
+  }
+
+  // Must be in rejoin_eligible status
+  return {
+    eligible: eligibility.sessionStatus === 'rejoin_eligible' || eligibility.sessionStatus === 'live',
+    reason: undefined,
+    rejoinDeadline: eligibility.rejoinDeadline,
+    daysRemaining: eligibility.rejoinDaysRemaining,
+  };
+}

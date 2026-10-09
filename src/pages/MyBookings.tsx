@@ -14,7 +14,8 @@ import { emailService } from "@/services/email";
 import { useNavigate, Link } from "react-router-dom";
 import { SkeletonList } from "@/components/PageLoader";
 import { toast } from "sonner";
-import { calculateRejoinEligibility } from "@/utils/meetingRejoin";
+import { calculateRejoinEligibility, FollowUpRequest } from "@/utils/meetingRejoin";
+import { followUpService } from "@/services/followUpService";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -64,9 +65,12 @@ const PARTICLES = [
   { x: "8%",  y: "68%", size: 3, delay: 0.7, dur: 5   },
 ];
 
-function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule, retryingId, formatPrice, navigate }: {
+function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule, onRequestFollowUp, onRespondFollowUp, followUp, retryingId, formatPrice, navigate }: {
   booking: Booking; index: number; onRetry: (b: Booking) => void; onCancel: (id: string) => void;
   onRemove: (id: string) => void; onReschedule: (b: Booking) => void;
+  onRequestFollowUp: (b: Booking, maxDate: string) => void;
+  onRespondFollowUp: (followUpId: string, action: 'accept' | 'decline') => void;
+  followUp?: FollowUpRequest;
   retryingId: string | null; formatPrice: (v: number) => string; navigate: any;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -188,6 +192,91 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
         </div>
       )}
 
+      {/* Follow-up Workflow Status Card */}
+      {followUp && (
+        <div className="mx-6 mb-4 pt-3 border-t border-border/60">
+          {followUp.status === 'pending_consultant' && (
+            <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-amber-500 flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5" /> Follow-up Requested (Pending Consultant Response)
+                </span>
+                <span className="text-[11px] text-amber-400 font-medium">Under Review</span>
+              </div>
+              <p className="text-foreground">
+                <strong>Proposed Date & Time:</strong> {followUp.preferred_date} at {followUp.preferred_time}
+              </p>
+              <p className="text-muted-foreground italic">
+                Clarification / Reason: "{followUp.reason}"
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Your assigned consultant will confirm this schedule or propose an alternative time. No admin approval required.
+              </p>
+            </div>
+          )}
+
+          {followUp.status === 'alternative_proposed' && (
+            <div className="p-3.5 bg-blue-500/10 border border-blue-500/30 rounded-xl space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-blue-500 flex items-center gap-1.5">
+                  <RefreshCw className="h-3.5 w-3.5" /> Consultant Proposed Alternative Time
+                </span>
+                <span className="text-[11px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-medium">Response Required</span>
+              </div>
+              <p className="text-foreground text-sm font-semibold">
+                Proposed Time: {followUp.alternative_date} at {followUp.alternative_time}
+              </p>
+              {followUp.consultant_note && (
+                <p className="text-muted-foreground bg-background/50 p-2 rounded border border-border/40">
+                  <span className="font-medium text-foreground">Consultant Note:</span> "{followUp.consultant_note}"
+                </p>
+              )}
+              <div className="flex items-center gap-2 pt-1">
+                <Button
+                  size="sm"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 text-xs h-8"
+                  onClick={() => onRespondFollowUp(followUp.id, "accept")}
+                >
+                  <CheckCircle className="h-3.5 w-3.5" /> Accept Proposed Time
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs h-8 text-destructive hover:bg-destructive/10 border-destructive/30"
+                  onClick={() => onRespondFollowUp(followUp.id, "decline")}
+                >
+                  Decline
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {followUp.status === 'confirmed' && (
+            <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl space-y-1 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-emerald-500 flex items-center gap-1.5">
+                  <CheckCircle className="h-3.5 w-3.5" /> Confirmed Follow-up Consultation
+                </span>
+                <span className="text-[11px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-medium">Confirmed</span>
+              </div>
+              <p className="text-foreground font-semibold">
+                Scheduled: {followUp.confirmed_date} at {followUp.confirmed_time}
+              </p>
+              <p className="text-muted-foreground text-[11px]">
+                Topic: {followUp.reason} • Meeting room: {booking.meeting_room_id}
+              </p>
+            </div>
+          )}
+
+          {followUp.status === 'declined' && (
+            <div className="p-3 bg-secondary/80 border border-border rounded-xl text-xs space-y-1">
+              <span className="font-medium text-muted-foreground">Follow-up Declined</span>
+              {followUp.declined_reason && <p className="text-muted-foreground text-[11px]">Reason: {followUp.declined_reason}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Footer actions */}
       <div className="px-6 py-4 border-t border-border/60 flex items-center justify-between flex-wrap gap-3 bg-secondary/20">
         <p className="text-xs text-muted-foreground">
@@ -222,12 +311,41 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
             }
 
             if (sessionStatus === "rejoin_eligible") {
+              if (followUp && followUp.status === "confirmed") {
+                return (
+                  <Link to={`/meeting/${booking.meeting_room_id}`}>
+                    <Button size="sm" className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium">
+                      <Video className="h-3.5 w-3.5" /> Join Confirmed Follow-up
+                    </Button>
+                  </Link>
+                );
+              }
+
+              if (followUp && (followUp.status === "pending_consultant" || followUp.status === "alternative_proposed")) {
+                return (
+                  <Link to={`/meeting/${booking.meeting_room_id}`}>
+                    <Button size="sm" variant="outline" className="gap-2 text-xs">
+                      <Video className="h-3.5 w-3.5" /> View Meeting Room
+                    </Button>
+                  </Link>
+                );
+              }
+
               return (
-                <Link to={`/meeting/${booking.meeting_room_id}`} title={`Follow-up rejoin active until ${eligibility.rejoinDeadline.toLocaleDateString()}`}>
-                  <Button size="sm" className="gap-2 bg-amber-500/15 text-amber-500 hover:bg-amber-500/25 border border-amber-500/30 text-xs font-medium">
-                    <RotateCcw className="h-3.5 w-3.5 text-amber-500" /> Rejoin Call ({eligibility.rejoinDaysRemaining}d left)
+                <>
+                  <Button
+                    size="sm"
+                    className="gap-2 bg-amber-500/15 text-amber-500 hover:bg-amber-500/25 border border-amber-500/30 text-xs font-medium"
+                    onClick={() => onRequestFollowUp(booking, eligibility.rejoinDeadline.toISOString().split('T')[0])}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 text-amber-500" /> Request Follow-up ({eligibility.rejoinDaysRemaining}d left)
                   </Button>
-                </Link>
+                  <Link to={`/meeting/${booking.meeting_room_id}`}>
+                    <Button size="sm" variant="ghost" className="gap-1.5 text-xs text-muted-foreground hover:bg-secondary">
+                      <Video className="h-3.5 w-3.5" /> Quick Rejoin
+                    </Button>
+                  </Link>
+                </>
               );
             }
 
@@ -299,6 +417,17 @@ export default function MyBookingsPage() {
   const [rescheduleReason, setRescheduleReason] = useState("");
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("");
+
+  // Follow-up workflow states
+  const [followUps, setFollowUps] = useState<Record<string, FollowUpRequest>>({});
+  const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
+  const [selectedFollowUpBooking, setSelectedFollowUpBooking] = useState<Booking | null>(null);
+  const [maxFollowUpDate, setMaxFollowUpDate] = useState("");
+  const [followUpReason, setFollowUpReason] = useState("");
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [followUpTime, setFollowUpTime] = useState("");
+  const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);
@@ -312,10 +441,97 @@ export default function MyBookingsPage() {
     if (user) loadBookings();
   }, [user, profile, authLoading, navigate]);
 
+  const loadFollowUps = async () => {
+    try {
+      const res = await followUpService.listClientFollowUps();
+      if (res.success && res.followUps) {
+        const map: Record<string, FollowUpRequest> = {};
+        res.followUps.forEach((f) => {
+          if (!map[f.booking_id] || ['pending_consultant', 'alternative_proposed', 'confirmed'].includes(f.status)) {
+            map[f.booking_id] = f;
+          }
+        });
+        setFollowUps(map);
+      }
+    } catch (e) {
+      console.warn("Error loading follow-ups:", e);
+    }
+  };
+
   const loadBookings = async () => {
-    try { setBookings(await bookingsService.getByUserId(user!.id, user!.email)); }
+    try {
+      setBookings(await bookingsService.getByUserId(user!.id, user!.email));
+      await loadFollowUps();
+    }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
+  };
+
+  const openFollowUpDialog = (booking: Booking, maxDate: string) => {
+    setSelectedFollowUpBooking(booking);
+    setMaxFollowUpDate(maxDate);
+    setFollowUpReason("");
+    setFollowUpDate("");
+    setFollowUpTime("");
+    setFollowUpDialogOpen(true);
+  };
+
+  const handleSubmitFollowUp = async () => {
+    if (!selectedFollowUpBooking) return;
+    if (!followUpReason.trim()) {
+      toast.error("Please enter a reason or clarification for the follow-up.");
+      return;
+    }
+    if (!followUpDate) {
+      toast.error("Please select a preferred follow-up date.");
+      return;
+    }
+    if (!followUpTime) {
+      toast.error("Please select a preferred follow-up time.");
+      return;
+    }
+
+    setFollowUpSubmitting(true);
+    try {
+      const res = await followUpService.requestFollowUp({
+        bookingId: selectedFollowUpBooking.id,
+        reason: followUpReason.trim(),
+        preferredDate: followUpDate,
+        preferredTime: followUpTime,
+      });
+
+      if (res.success && res.followUp) {
+        toast.success("Follow-up request sent to consultant! They have been notified by email.");
+        setFollowUps(prev => ({
+          ...prev,
+          [selectedFollowUpBooking.id]: res.followUp!,
+        }));
+        setFollowUpDialogOpen(false);
+      } else {
+        toast.error(res.error || "Failed to submit follow-up request.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Error submitting follow-up request.");
+    } finally {
+      setFollowUpSubmitting(false);
+    }
+  };
+
+  const handleRespondFollowUp = async (followUpId: string, action: 'accept' | 'decline') => {
+    try {
+      const res = await followUpService.clientRespond(followUpId, { action });
+      if (res.success && res.followUp) {
+        toast.success(action === 'accept' ? 'Alternative time accepted! Follow-up session confirmed.' : 'Alternative time declined.');
+        setFollowUps(prev => ({
+          ...prev,
+          [res.followUp!.booking_id]: res.followUp!,
+        }));
+      } else {
+        toast.error(res.error || "Failed to update response.");
+      }
+    } catch (err: any) {
+      toast.error("Network error responding to follow-up.");
+    }
   };
 
   const handleRetryPayment = async (booking: Booking) => {
@@ -505,6 +721,9 @@ export default function MyBookingsPage() {
                 <BookingCard key={booking.id} booking={booking} index={i}
                   onRetry={handleRetryPayment} onCancel={setCancelId} onRemove={setRemoveId}
                   onReschedule={openRescheduleDialog}
+                  onRequestFollowUp={openFollowUpDialog}
+                  onRespondFollowUp={handleRespondFollowUp}
+                  followUp={followUps[booking.id]}
                   retryingId={retryingId} formatPrice={formatPrice} navigate={navigate} />
               ))}
             </div>
@@ -638,6 +857,111 @@ export default function MyBookingsPage() {
             <Button onClick={handleRescheduleRequest} className="gap-2">
               <RefreshCw className="h-4 w-4" />
               Send Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Follow-up Request Dialog */}
+      <Dialog open={followUpDialogOpen} onOpenChange={setFollowUpDialogOpen}>
+        <DialogContent className="bg-card border-border max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <RotateCcw className="h-5 w-5 text-amber-500" />
+              Request Follow-up Consultation
+            </DialogTitle>
+            <DialogDescription>
+              Schedule a 1-on-1 follow-up with {selectedFollowUpBooking?.consultants?.name || "your consultant"} within your 7-day post-meeting eligibility period.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {selectedFollowUpBooking && (
+              <div className="p-3 bg-secondary/50 border border-border/60 rounded-xl text-xs space-y-1">
+                <p>
+                  <span className="text-muted-foreground font-medium">Original Session:</span>{" "}
+                  {new Date(selectedFollowUpBooking.date).toLocaleDateString()} at {selectedFollowUpBooking.time}
+                </p>
+                <p>
+                  <span className="text-muted-foreground font-medium">Meeting Room:</span>{" "}
+                  Reuses original secure room ({selectedFollowUpBooking.meeting_room_id})
+                </p>
+                {maxFollowUpDate && (
+                  <p className="text-amber-500 font-medium">
+                    7-Day Rejoin Window: Active until {new Date(maxFollowUpDate).toLocaleDateString()}
+                  </p>
+                )}
+                <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/40">
+                  ⚡ Direct consultant confirmation • No secondary admin approval required
+                </p>
+              </div>
+            )}
+
+            <div>
+              <Label htmlFor="followup-reason">
+                Reason / Clarification <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="followup-reason"
+                placeholder="Briefly describe what you would like to clarify or ask during this follow-up..."
+                value={followUpReason}
+                onChange={(e) => setFollowUpReason(e.target.value)}
+                className="mt-1.5"
+                rows={3}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="followup-date">
+                  Preferred Date <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="followup-date"
+                  type="date"
+                  value={followUpDate}
+                  onChange={(e) => setFollowUpDate(e.target.value)}
+                  className="mt-1.5"
+                  min={new Date().toISOString().split("T")[0]}
+                  max={maxFollowUpDate || undefined}
+                />
+              </div>
+              <div>
+                <Label htmlFor="followup-time">
+                  Preferred Time <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="followup-time"
+                  type="text"
+                  placeholder="e.g. 14:00 or 2:00 PM"
+                  value={followUpTime}
+                  onChange={(e) => setFollowUpTime(e.target.value)}
+                  className="mt-1.5"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setFollowUpDialogOpen(false);
+                setSelectedFollowUpBooking(null);
+                setFollowUpReason("");
+                setFollowUpDate("");
+                setFollowUpTime("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitFollowUp}
+              disabled={followUpSubmitting}
+              className="gap-2 glow-gold"
+            >
+              <RotateCcw className="h-4 w-4" />
+              {followUpSubmitting ? "Submitting..." : "Send Request to Consultant"}
             </Button>
           </DialogFooter>
         </DialogContent>

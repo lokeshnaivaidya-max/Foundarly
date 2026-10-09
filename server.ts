@@ -14,6 +14,14 @@ import {
   generateApplicationRejectedEmailText,
   generateBookingRejectedEmailHTML,
   generateBookingRejectedEmailText,
+  generateFollowUpRequestedEmailHTML,
+  generateFollowUpRequestedEmailText,
+  generateFollowUpAlternativeEmailHTML,
+  generateFollowUpAlternativeEmailText,
+  generateFollowUpConfirmedEmailHTML,
+  generateFollowUpConfirmedEmailText,
+  generateFollowUpDeclinedEmailHTML,
+  generateFollowUpDeclinedEmailText,
   EmailBookingData,
   EmailBookingRejectedData,
   EmailApplicationApprovedData,
@@ -25,7 +33,11 @@ import {
   calculateRejoinEligibility,
   validateParticipantAccess,
   parseSessionTimes,
+  validateFollowUpTiming,
+  checkBookingFollowUpEligibility,
+  FollowUpRequest,
 } from "./src/utils/meetingRejoin.js";
+import { followUpStorage } from "./src/server/followUpStorage.js";
 
 dotenv.config();
 
@@ -295,6 +307,8 @@ async function startServer() {
         });
       }
 
+      const followUp = await followUpStorage.getLatestByBookingId(booking.id);
+
       return res.json({
         success: true,
         authorized: true,
@@ -319,6 +333,7 @@ async function startServer() {
             user_id: consultantObj.user_id,
           } : undefined,
         },
+        followUp: followUp || null,
         timing: {
           scheduledStart: timing.scheduledStart.toISOString(),
           scheduledEnd: timing.scheduledEnd.toISOString(),
@@ -346,6 +361,698 @@ async function startServer() {
 
   app.get("/api/meeting/:roomId/access", (req, res) => {
     handleMeetingAccessValidation(req.params.roomId, req, res);
+  });
+
+  // =========================================================================
+  // FOLLOW-UP SCHEDULING WORKFLOW ENDPOINTS (NO ADMIN APPROVAL REQUIRED)
+  // =========================================================================
+
+  // Helper to resolve site URL
+  const getSiteUrl = (req: express.Request): string => {
+    return (
+      process.env.APP_URL ||
+      process.env.SITE_URL ||
+      process.env.VITE_SITE_URL ||
+      req.headers.origin ||
+      `http://localhost:${PORT}`
+    ).trim();
+  };
+
+  // 1. Client Submits Follow-up Request
+  app.post("/api/follow-ups/request", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        error: auth.error || "Authentication required.",
+        code: "UNAUTHENTICATED",
+      });
+    }
+
+    const { bookingId, reason, preferredDate, preferredTime } = req.body || {};
+
+    if (!bookingId || !reason || !preferredDate || !preferredTime) {
+      return res.status(400).json({
+        success: false,
+        error: "Booking ID, reason, preferred date, and preferred time are all required.",
+        code: "MISSING_FIELDS",
+      });
+    }
+
+    if (reason.trim().length < 3) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a brief reason or clarification for the follow-up.",
+        code: "INVALID_REASON",
+      });
+    }
+
+    try {
+      // Fetch booking from Supabase
+      const { data: booking, error: bookingErr } = await supabaseAdminClient
+        .from("bookings")
+        .select("*, consultants(id, name, title, email, user_id)")
+        .eq("id", bookingId)
+        .maybeSingle();
+
+      if (bookingErr || !booking) {
+        return res.status(404).json({
+          success: false,
+          error: "Original booking not found.",
+          code: "BOOKING_NOT_FOUND",
+        });
+      }
+
+      const user = auth.user;
+      const userEmail = (user.email || "").toLowerCase().trim();
+      const bookingEmail = (booking.email || "").toLowerCase().trim();
+      const isClient = (booking.user_id && booking.user_id === user.id) || (bookingEmail && userEmail === bookingEmail);
+
+      if (!isClient && !isAllowedAdminEmail(userEmail)) {
+        return res.status(403).json({
+          success: false,
+          error: "You are not authorized to request a follow-up for this booking.",
+          code: "UNAUTHORIZED_CLIENT",
+        });
+      }
+
+      // Check lifecycle eligibility
+      const serverNow = new Date();
+      const eligibility = checkBookingFollowUpEligibility(booking, serverNow);
+      if (!eligibility.eligible) {
+        return res.status(400).json({
+          success: false,
+          error: eligibility.reason || "This booking is not currently eligible for follow-up.",
+          code: "INELIGIBLE_BOOKING",
+          rejoinDeadline: eligibility.rejoinDeadline.toISOString(),
+        });
+      }
+
+      // Validate preferred date & time strictly within 7-day window
+      const timingValidation = validateFollowUpTiming(preferredDate, preferredTime, eligibility.rejoinDeadline, serverNow);
+      if (!timingValidation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: timingValidation.error || "Proposed follow-up timing is invalid.",
+          code: timingValidation.code || "TIMING_INVALID",
+          rejoinDeadline: eligibility.rejoinDeadline.toISOString(),
+        });
+      }
+
+      // Prevent duplicate pending or active requests
+      const activeExisting = await followUpStorage.findActiveByBookingId(booking.id);
+      if (activeExisting) {
+        return res.status(409).json({
+          success: false,
+          error: "A follow-up request is already pending or confirmed for this consultation.",
+          code: "DUPLICATE_REQUEST",
+          followUp: activeExisting,
+        });
+      }
+
+      // Resolve consultant details
+      let consultantObj = Array.isArray(booking.consultants) ? booking.consultants[0] : booking.consultants;
+      if (!consultantObj && booking.consultant_id) {
+        const { data: directC } = await supabaseAdminClient
+          .from("consultants")
+          .select("id, name, title, email, user_id")
+          .eq("id", booking.consultant_id)
+          .maybeSingle();
+        if (directC) consultantObj = directC;
+      }
+
+      const meetingRoomId = booking.meeting_room_id || `foundarly-${booking.id}`;
+
+      // Create new follow-up record
+      const followUp = await followUpStorage.create({
+        booking_id: booking.id,
+        client_id: user.id,
+        client_name: booking.name || user.email?.split("@")[0] || "Client",
+        client_email: booking.email || user.email,
+        consultant_id: booking.consultant_id,
+        consultant_name: consultantObj?.name || "Consultant",
+        consultant_email: consultantObj?.email || null,
+        meeting_room_id: meetingRoomId,
+        reason: reason.trim(),
+        preferred_date: preferredDate.trim(),
+        preferred_time: preferredTime.trim(),
+        status: "pending_consultant",
+        rejoin_deadline: eligibility.rejoinDeadline.toISOString(),
+      });
+
+      // Send email notification to consultant (reusing working email infrastructure)
+      const siteUrl = getSiteUrl(req);
+      const smtpConfig = getSmtpConfig();
+      if (smtpConfig.pass && consultantObj?.email) {
+        try {
+          const emailHtml = generateFollowUpRequestedEmailHTML({
+            bookingId: booking.id,
+            clientName: followUp.client_name || "Client",
+            clientEmail: followUp.client_email || "",
+            consultantName: followUp.consultant_name || "Consultant",
+            consultantEmail: consultantObj.email,
+            reason: followUp.reason,
+            preferredDate: followUp.preferred_date,
+            preferredTime: followUp.preferred_time,
+            originalDate: booking.date,
+            originalTime: booking.time || "10:00 AM",
+            rejoinDeadline: eligibility.rejoinDeadline.toISOString(),
+            dashboardUrl: `${siteUrl}/consultant-dashboard`,
+          });
+          const emailText = generateFollowUpRequestedEmailText({
+            bookingId: booking.id,
+            clientName: followUp.client_name || "Client",
+            clientEmail: followUp.client_email || "",
+            consultantName: followUp.consultant_name || "Consultant",
+            consultantEmail: consultantObj.email,
+            reason: followUp.reason,
+            preferredDate: followUp.preferred_date,
+            preferredTime: followUp.preferred_time,
+            originalDate: booking.date,
+            originalTime: booking.time || "10:00 AM",
+            rejoinDeadline: eligibility.rejoinDeadline.toISOString(),
+            dashboardUrl: `${siteUrl}/consultant-dashboard`,
+          });
+
+          const mailRes = await sendEmail({
+            from: smtpConfig.defaultFrom,
+            to: consultantObj.email,
+            replyTo: followUp.client_email || smtpConfig.replyTo,
+            subject: `Follow-up Request: ${followUp.client_name} - Consultation #${booking.id.slice(0, 8)} | Foundarly`,
+            html: emailHtml,
+            text: emailText,
+          });
+
+          if (mailRes.success) {
+            await followUpStorage.update(followUp.id, {
+              consultant_notified_at: new Date().toISOString(),
+            });
+          }
+        } catch (emailErr) {
+          console.warn("[FollowUp Email] Failed to notify consultant:", emailErr);
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: "Follow-up request submitted successfully. The assigned consultant has been notified.",
+        followUp,
+      });
+    } catch (err: any) {
+      console.error("[FollowUp Server] Unexpected error creating request:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Internal server error occurred while creating follow-up request.",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  });
+
+  // 2. Get Follow-up for a specific booking
+  app.get("/api/follow-ups/booking/:bookingId", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({ success: false, error: "Authentication required." });
+    }
+
+    const { bookingId } = req.params;
+    const followUp = await followUpStorage.getLatestByBookingId(bookingId);
+    return res.json({
+      success: true,
+      followUp: followUp || null,
+    });
+  });
+
+  // 3. List Follow-ups for Current Client
+  app.get("/api/follow-ups/client", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({ success: false, error: "Authentication required." });
+    }
+
+    const list = await followUpStorage.listForClient(auth.user.id, auth.user.email);
+    return res.json({
+      success: true,
+      followUps: list,
+    });
+  });
+
+  // 4. List Follow-ups for Current Consultant
+  app.get("/api/follow-ups/consultant", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({ success: false, error: "Authentication required." });
+    }
+
+    const user = auth.user;
+    const userEmail = (user.email || "").toLowerCase().trim();
+
+    // Look up consultant profile
+    const { data: consultants } = await supabaseAdminClient
+      .from("consultants")
+      .select("id, email, user_id")
+      .or(`user_id.eq.${user.id},email.eq.${userEmail}`)
+      .limit(1);
+
+    const consultant = consultants?.[0];
+    const consultantId = consultant?.id;
+
+    const list = await followUpStorage.listForConsultant(consultantId, user.id, userEmail);
+    return res.json({
+      success: true,
+      followUps: list,
+    });
+  });
+
+  // 5. Consultant Responds (Accept, Propose Alternative, Decline) - NO ADMIN APPROVAL
+  app.post("/api/follow-ups/:id/respond", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        error: "Authentication required.",
+        code: "UNAUTHENTICATED",
+      });
+    }
+
+    const { id } = req.params;
+    const { action, alternativeDate, alternativeTime, consultantNote, reason } = req.body || {};
+
+    if (!["accept", "propose_alternative", "decline"].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid action. Must be 'accept', 'propose_alternative', or 'decline'.",
+        code: "INVALID_ACTION",
+      });
+    }
+
+    const followUp = await followUpStorage.getById(id);
+    if (!followUp) {
+      return res.status(404).json({
+        success: false,
+        error: "Follow-up request not found.",
+        code: "REQUEST_NOT_FOUND",
+      });
+    }
+
+    if (followUp.status !== "pending_consultant") {
+      return res.status(400).json({
+        success: false,
+        error: `Cannot respond to a request with status '${followUp.status}'.`,
+        code: "INVALID_STATE",
+      });
+    }
+
+    // Verify authorized consultant
+    const user = auth.user;
+    const userEmail = (user.email || "").toLowerCase().trim();
+    const isConsultantEmail = followUp.consultant_email && followUp.consultant_email.toLowerCase().trim() === userEmail;
+
+    // Check consultant database link
+    let isConsultantById = false;
+    if (followUp.consultant_id) {
+      const { data: cRecord } = await supabaseAdminClient
+        .from("consultants")
+        .select("id, user_id, email")
+        .eq("id", followUp.consultant_id)
+        .maybeSingle();
+
+      if (cRecord) {
+        if (cRecord.user_id === user.id || (cRecord.email && cRecord.email.toLowerCase().trim() === userEmail)) {
+          isConsultantById = true;
+        }
+      }
+    }
+
+    if (!isConsultantEmail && !isConsultantById && !isAllowedAdminEmail(userEmail)) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: Only the assigned consultant can respond to this request.",
+        code: "FORBIDDEN",
+      });
+    }
+
+    const serverNow = new Date();
+    const rejoinDeadline = new Date(followUp.rejoin_deadline);
+
+    // Enforce 7-day expiry
+    if (serverNow.getTime() > rejoinDeadline.getTime()) {
+      await followUpStorage.update(id, { status: "expired" });
+      return res.status(400).json({
+        success: false,
+        error: "The 7-day follow-up window for this consultation has expired.",
+        code: "EXPIRED",
+      });
+    }
+
+    const siteUrl = getSiteUrl(req);
+    const smtpConfig = getSmtpConfig();
+
+    if (action === "accept") {
+      // 1. Consultant accepts proposed date and time -> Confirmed immediately!
+      const confirmedDate = followUp.preferred_date;
+      const confirmedTime = followUp.preferred_time;
+
+      const updated = await followUpStorage.update(id, {
+        status: "confirmed",
+        confirmed_date: confirmedDate,
+        confirmed_time: confirmedTime,
+      });
+
+      // Send email notifications to BOTH client and consultant
+      if (smtpConfig.pass && followUp.client_email) {
+        try {
+          const emailData = {
+            bookingId: followUp.booking_id,
+            clientName: followUp.client_name || "Client",
+            clientEmail: followUp.client_email,
+            consultantName: followUp.consultant_name || "Consultant",
+            consultantEmail: followUp.consultant_email,
+            confirmedDate,
+            confirmedTime,
+            reason: followUp.reason,
+            meetingLink: `${siteUrl}/meeting/${followUp.meeting_room_id}`,
+            meetingRoomId: followUp.meeting_room_id,
+            rejoinDeadline: followUp.rejoin_deadline,
+          };
+
+          const html = generateFollowUpConfirmedEmailHTML(emailData);
+          const text = generateFollowUpConfirmedEmailText(emailData);
+
+          // Client email
+          await sendEmail({
+            from: smtpConfig.defaultFrom,
+            to: followUp.client_email,
+            replyTo: smtpConfig.replyTo,
+            subject: `Follow-up Consultation Confirmed: ${emailData.consultantName} & ${emailData.clientName} | Foundarly`,
+            html,
+            text,
+          });
+
+          // Consultant email
+          if (followUp.consultant_email) {
+            await sendEmail({
+              from: smtpConfig.defaultFrom,
+              to: followUp.consultant_email,
+              replyTo: followUp.client_email || smtpConfig.replyTo,
+              subject: `Follow-up Consultation Confirmed: ${emailData.consultantName} & ${emailData.clientName} | Foundarly`,
+              html,
+              text,
+            });
+          }
+
+          await followUpStorage.update(id, {
+            client_notified_at: new Date().toISOString(),
+            consultant_notified_at: new Date().toISOString(),
+          });
+        } catch (emailErr) {
+          console.warn("[FollowUp Email] Error sending confirmation emails:", emailErr);
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: "Follow-up consultation confirmed. Both participants have been notified.",
+        followUp: updated,
+      });
+    }
+
+    if (action === "propose_alternative") {
+      // 2. Consultant proposes alternative date and time within the 7-day window
+      if (!alternativeDate || !alternativeTime) {
+        return res.status(400).json({
+          success: false,
+          error: "Alternative date and time are required.",
+          code: "MISSING_ALTERNATIVE_TIMING",
+        });
+      }
+
+      const timingCheck = validateFollowUpTiming(alternativeDate, alternativeTime, rejoinDeadline, serverNow);
+      if (!timingCheck.valid) {
+        return res.status(400).json({
+          success: false,
+          error: timingCheck.error || "Proposed alternative time is invalid.",
+          code: timingCheck.code || "TIMING_INVALID",
+        });
+      }
+
+      const updated = await followUpStorage.update(id, {
+        status: "alternative_proposed",
+        alternative_date: alternativeDate.trim(),
+        alternative_time: alternativeTime.trim(),
+        consultant_note: consultantNote ? consultantNote.trim() : null,
+      });
+
+      // Send email to client notifying of alternative proposal
+      if (smtpConfig.pass && followUp.client_email) {
+        try {
+          const html = generateFollowUpAlternativeEmailHTML({
+            bookingId: followUp.booking_id,
+            clientName: followUp.client_name || "Client",
+            clientEmail: followUp.client_email,
+            consultantName: followUp.consultant_name || "Consultant",
+            alternativeDate: alternativeDate.trim(),
+            alternativeTime: alternativeTime.trim(),
+            consultantNote: consultantNote ? consultantNote.trim() : null,
+            reason: followUp.reason,
+            rejoinDeadline: followUp.rejoin_deadline,
+            dashboardUrl: `${siteUrl}/my-bookings`,
+          });
+          const text = generateFollowUpAlternativeEmailText({
+            bookingId: followUp.booking_id,
+            clientName: followUp.client_name || "Client",
+            clientEmail: followUp.client_email,
+            consultantName: followUp.consultant_name || "Consultant",
+            alternativeDate: alternativeDate.trim(),
+            alternativeTime: alternativeTime.trim(),
+            consultantNote: consultantNote ? consultantNote.trim() : null,
+            reason: followUp.reason,
+            rejoinDeadline: followUp.rejoin_deadline,
+            dashboardUrl: `${siteUrl}/my-bookings`,
+          });
+
+          await sendEmail({
+            from: smtpConfig.defaultFrom,
+            to: followUp.client_email,
+            replyTo: followUp.consultant_email || smtpConfig.replyTo,
+            subject: `Alternative Follow-up Time Proposed: ${followUp.consultant_name} | Foundarly`,
+            html,
+            text,
+          });
+
+          await followUpStorage.update(id, {
+            client_notified_at: new Date().toISOString(),
+          });
+        } catch (emailErr) {
+          console.warn("[FollowUp Email] Error sending alternative proposal email:", emailErr);
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: "Alternative time proposed to client. Awaiting client acceptance.",
+        followUp: updated,
+      });
+    }
+
+    if (action === "decline") {
+      // 3. Consultant declines
+      const updated = await followUpStorage.update(id, {
+        status: "declined",
+        declined_reason: reason ? reason.trim() : "Consultant cannot accommodate follow-up at this time.",
+      });
+
+      // Send decline email to client
+      if (smtpConfig.pass && followUp.client_email) {
+        try {
+          const html = generateFollowUpDeclinedEmailHTML({
+            bookingId: followUp.booking_id,
+            clientName: followUp.client_name || "Client",
+            clientEmail: followUp.client_email,
+            consultantName: followUp.consultant_name || "Consultant",
+            declinedReason: updated?.declined_reason,
+            rejoinDeadline: followUp.rejoin_deadline,
+            supportUrl: `${siteUrl}/#contact`,
+          });
+          const text = generateFollowUpDeclinedEmailText({
+            bookingId: followUp.booking_id,
+            clientName: followUp.client_name || "Client",
+            clientEmail: followUp.client_email,
+            consultantName: followUp.consultant_name || "Consultant",
+            declinedReason: updated?.declined_reason,
+            rejoinDeadline: followUp.rejoin_deadline,
+          });
+
+          await sendEmail({
+            from: smtpConfig.defaultFrom,
+            to: followUp.client_email,
+            replyTo: smtpConfig.replyTo,
+            subject: `Follow-up Request Update: ${followUp.consultant_name} | Foundarly`,
+            html,
+            text,
+          });
+
+          await followUpStorage.update(id, {
+            client_notified_at: new Date().toISOString(),
+          });
+        } catch (emailErr) {
+          console.warn("[FollowUp Email] Error sending decline email:", emailErr);
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: "Follow-up request declined.",
+        followUp: updated,
+      });
+    }
+  });
+
+  // 6. Client Responds to Consultant's Proposed Alternative Time
+  app.post("/api/follow-ups/:id/client-respond", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        error: "Authentication required.",
+        code: "UNAUTHENTICATED",
+      });
+    }
+
+    const { id } = req.params;
+    const { action } = req.body || {};
+
+    if (!["accept", "decline"].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        error: "Action must be 'accept' or 'decline'.",
+        code: "INVALID_ACTION",
+      });
+    }
+
+    const followUp = await followUpStorage.getById(id);
+    if (!followUp) {
+      return res.status(404).json({
+        success: false,
+        error: "Follow-up request not found.",
+        code: "REQUEST_NOT_FOUND",
+      });
+    }
+
+    if (followUp.status !== "alternative_proposed") {
+      return res.status(400).json({
+        success: false,
+        error: `Cannot respond to follow-up in state '${followUp.status}'.`,
+        code: "INVALID_STATE",
+      });
+    }
+
+    // Verify authorized client
+    const user = auth.user;
+    const userEmail = (user.email || "").toLowerCase().trim();
+    const isClient = (followUp.client_id && followUp.client_id === user.id) ||
+      (followUp.client_email && followUp.client_email.toLowerCase().trim() === userEmail);
+
+    if (!isClient && !isAllowedAdminEmail(userEmail)) {
+      return res.status(403).json({
+        success: false,
+        error: "Only the requesting client can respond to this proposed time.",
+        code: "FORBIDDEN",
+      });
+    }
+
+    const serverNow = new Date();
+    const rejoinDeadline = new Date(followUp.rejoin_deadline);
+    if (serverNow.getTime() > rejoinDeadline.getTime()) {
+      await followUpStorage.update(id, { status: "expired" });
+      return res.status(400).json({
+        success: false,
+        error: "The 7-day follow-up window for this consultation has expired.",
+        code: "EXPIRED",
+      });
+    }
+
+    const siteUrl = getSiteUrl(req);
+    const smtpConfig = getSmtpConfig();
+
+    if (action === "accept") {
+      const confirmedDate = followUp.alternative_date || followUp.preferred_date;
+      const confirmedTime = followUp.alternative_time || followUp.preferred_time;
+
+      const updated = await followUpStorage.update(id, {
+        status: "confirmed",
+        confirmed_date: confirmedDate,
+        confirmed_time: confirmedTime,
+      });
+
+      // Notify both participants of confirmation
+      if (smtpConfig.pass && followUp.client_email) {
+        try {
+          const emailData = {
+            bookingId: followUp.booking_id,
+            clientName: followUp.client_name || "Client",
+            clientEmail: followUp.client_email,
+            consultantName: followUp.consultant_name || "Consultant",
+            consultantEmail: followUp.consultant_email,
+            confirmedDate,
+            confirmedTime,
+            reason: followUp.reason,
+            meetingLink: `${siteUrl}/meeting/${followUp.meeting_room_id}`,
+            meetingRoomId: followUp.meeting_room_id,
+            rejoinDeadline: followUp.rejoin_deadline,
+          };
+
+          const html = generateFollowUpConfirmedEmailHTML(emailData);
+          const text = generateFollowUpConfirmedEmailText(emailData);
+
+          await sendEmail({
+            from: smtpConfig.defaultFrom,
+            to: followUp.client_email,
+            replyTo: smtpConfig.replyTo,
+            subject: `Follow-up Consultation Confirmed: ${emailData.consultantName} & ${emailData.clientName} | Foundarly`,
+            html,
+            text,
+          });
+
+          if (followUp.consultant_email) {
+            await sendEmail({
+              from: smtpConfig.defaultFrom,
+              to: followUp.consultant_email,
+              replyTo: followUp.client_email || smtpConfig.replyTo,
+              subject: `Follow-up Consultation Confirmed: ${emailData.consultantName} & ${emailData.clientName} | Foundarly`,
+              html,
+              text,
+            });
+          }
+
+          await followUpStorage.update(id, {
+            client_notified_at: new Date().toISOString(),
+            consultant_notified_at: new Date().toISOString(),
+          });
+        } catch (emailErr) {
+          console.warn("[FollowUp Email] Error sending confirmation emails:", emailErr);
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: "Alternative time accepted. Follow-up is now confirmed!",
+        followUp: updated,
+      });
+    }
+
+    if (action === "decline") {
+      const updated = await followUpStorage.update(id, {
+        status: "declined",
+        declined_reason: "Client declined the proposed alternative time.",
+      });
+
+      return res.json({
+        success: true,
+        message: "Proposed alternative time declined.",
+        followUp: updated,
+      });
+    }
   });
 
   // Protected Admin API: Verify admin authorization status

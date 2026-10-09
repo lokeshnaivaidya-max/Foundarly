@@ -14,13 +14,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   DollarSign, Calendar, Star, TrendingUp, Clock, Video, 
-  CreditCard, CheckCircle2, XCircle, RefreshCw, Copy, Check, Shield, RotateCcw
+  CreditCard, CheckCircle2, XCircle, RefreshCw, Copy, Check, Shield, RotateCcw, AlertCircle, MessageSquare
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageLoader } from "@/components/PageLoader";
 import { motion } from "framer-motion";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { calculateRejoinEligibility } from "@/utils/meetingRejoin";
+import { calculateRejoinEligibility, FollowUpRequest } from "@/utils/meetingRejoin";
+import { followUpService } from "@/services/followUpService";
 
 export default function ConsultantDashboard() {
   const { user, profile } = useAuth();
@@ -36,6 +37,17 @@ export default function ConsultantDashboard() {
   const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<ConsultantBooking | null>(null);
   const [linkCopied, setLinkCopied] = useState<string | null>(null);
+
+  // Follow-up workflow state
+  const [followUps, setFollowUps] = useState<FollowUpRequest[]>([]);
+  const [selectedFollowUp, setSelectedFollowUp] = useState<FollowUpRequest | null>(null);
+  const [alternativeDialogOpen, setAlternativeDialogOpen] = useState(false);
+  const [alternativeDate, setAlternativeDate] = useState("");
+  const [alternativeTime, setAlternativeTime] = useState("");
+  const [consultantNote, setConsultantNote] = useState("");
+  const [declineDialogOpen, setDeclineDialogOpen] = useState(false);
+  const [declineReason, setDeclineReason] = useState("");
+  const [submittingAction, setSubmittingAction] = useState(false);
 
   // Payout form
   const [payoutAmount, setPayoutAmount] = useState("");
@@ -134,20 +146,108 @@ export default function ConsultantDashboard() {
 
     setLoading(true);
     try {
-      const [statsData, bookingsData, payoutsData] = await Promise.all([
+      const [statsData, bookingsData, payoutsData, followUpsRes] = await Promise.all([
         consultantDashboardService.getDashboardStats(user.id),
         consultantDashboardService.getConsultantBookings(user.id),
         consultantDashboardService.getPayoutRequests(user.id),
+        followUpService.listConsultantFollowUps(),
       ]);
 
       setStats(statsData);
       setBookings(bookingsData);
       setPayoutRequests(payoutsData);
+      if (followUpsRes.success && followUpsRes.followUps) {
+        setFollowUps(followUpsRes.followUps);
+      }
     } catch (error) {
       console.error("Error loading dashboard:", error);
       toast.error("Failed to load dashboard data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAcceptFollowUp = async (req: FollowUpRequest) => {
+    setSubmittingAction(true);
+    try {
+      const res = await followUpService.consultantRespond(req.id, {
+        action: 'accept',
+      });
+      if (res.success && res.followUp) {
+        toast.success("Follow-up session confirmed! Client has been notified by email.");
+        setFollowUps(prev => prev.map(f => f.id === req.id ? res.followUp! : f));
+      } else {
+        toast.error(res.error || "Failed to accept follow-up request.");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Error accepting follow-up request.");
+    } finally {
+      setSubmittingAction(false);
+    }
+  };
+
+  const openAlternativeDialog = (req: FollowUpRequest) => {
+    setSelectedFollowUp(req);
+    setAlternativeDate("");
+    setAlternativeTime("");
+    setConsultantNote("");
+    setAlternativeDialogOpen(true);
+  };
+
+  const handleProposeAlternative = async () => {
+    if (!selectedFollowUp) return;
+    if (!alternativeDate || !alternativeTime) {
+      toast.error("Please provide both an alternative date and time.");
+      return;
+    }
+
+    setSubmittingAction(true);
+    try {
+      const res = await followUpService.consultantRespond(selectedFollowUp.id, {
+        action: 'propose_alternative',
+        alternativeDate,
+        alternativeTime,
+        consultantNote,
+      });
+      if (res.success && res.followUp) {
+        toast.success("Alternative time proposed to client! They have been notified by email.");
+        setFollowUps(prev => prev.map(f => f.id === selectedFollowUp.id ? res.followUp! : f));
+        setAlternativeDialogOpen(false);
+      } else {
+        toast.error(res.error || "Failed to propose alternative time.");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Error proposing alternative time.");
+    } finally {
+      setSubmittingAction(false);
+    }
+  };
+
+  const openDeclineDialog = (req: FollowUpRequest) => {
+    setSelectedFollowUp(req);
+    setDeclineReason("");
+    setDeclineDialogOpen(true);
+  };
+
+  const handleDeclineFollowUp = async () => {
+    if (!selectedFollowUp) return;
+    setSubmittingAction(true);
+    try {
+      const res = await followUpService.consultantRespond(selectedFollowUp.id, {
+        action: 'decline',
+        reason: declineReason,
+      });
+      if (res.success && res.followUp) {
+        toast.success("Follow-up request declined. Client has been notified.");
+        setFollowUps(prev => prev.map(f => f.id === selectedFollowUp.id ? res.followUp! : f));
+        setDeclineDialogOpen(false);
+      } else {
+        toast.error(res.error || "Failed to decline follow-up.");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Error declining follow-up.");
+    } finally {
+      setSubmittingAction(false);
     }
   };
 
@@ -459,8 +559,16 @@ export default function ConsultantDashboard() {
 
         {/* Tabs */}
         <Tabs defaultValue="bookings" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 max-w-md">
+          <TabsList className="grid w-full grid-cols-4 max-w-xl">
             <TabsTrigger value="bookings">Bookings</TabsTrigger>
+            <TabsTrigger value="follow-ups" className="relative gap-1.5">
+              <span>Follow-ups</span>
+              {followUps.filter(f => f.status === 'pending_consultant').length > 0 && (
+                <span className="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-amber-500 text-black">
+                  {followUps.filter(f => f.status === 'pending_consultant').length}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="payouts">Payouts</TabsTrigger>
             <TabsTrigger value="earnings">Earnings</TabsTrigger>
           </TabsList>
@@ -610,6 +718,186 @@ export default function ConsultantDashboard() {
                     </div>
                   </Card>
                 ))}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Follow-ups Tab */}
+          <TabsContent value="follow-ups" className="space-y-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-2xl font-bold">Client Follow-up Requests</h2>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  7-day post-meeting follow-ups. Confirm, propose an alternative time, or decline directly — no admin approval needed.
+                </p>
+              </div>
+            </div>
+
+            {followUps.length === 0 ? (
+              <Card className="p-12 text-center">
+                <RotateCcw className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="font-bold text-lg mb-2">No follow-up requests</h3>
+                <p className="text-muted-foreground">
+                  Requests from clients within their 7-day follow-up window will appear here.
+                </p>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                {followUps.map((fu) => {
+                  const deadlineDate = new Date(fu.rejoin_deadline);
+                  const isPending = fu.status === "pending_consultant";
+                  const isAlternative = fu.status === "alternative_proposed";
+                  const isConfirmed = fu.status === "confirmed";
+                  const isDeclined = fu.status === "declined";
+
+                  return (
+                    <Card key={fu.id} className="p-6 border-border/80">
+                      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-3">
+                            <Badge
+                              variant="outline"
+                              className={
+                                isPending
+                                  ? "bg-amber-500/15 text-amber-500 border-amber-500/30 font-semibold"
+                                  : isAlternative
+                                  ? "bg-blue-500/15 text-blue-500 border-blue-500/30 font-semibold"
+                                  : isConfirmed
+                                  ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/30 font-semibold"
+                                  : "bg-secondary text-muted-foreground"
+                              }
+                            >
+                              {isPending && <Clock className="h-3 w-3 mr-1" />}
+                              {isConfirmed && <CheckCircle2 className="h-3 w-3 mr-1" />}
+                              {isAlternative && <RefreshCw className="h-3 w-3 mr-1" />}
+                              {isPending
+                                ? "Pending Consultant Response"
+                                : isAlternative
+                                ? "Alternative Time Proposed"
+                                : isConfirmed
+                                ? "Confirmed Follow-up"
+                                : isDeclined
+                                ? "Declined"
+                                : "Expired"}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              Booking Ref: <code className="text-foreground">{fu.booking_id.slice(0, 8)}</code>
+                            </span>
+                          </div>
+
+                          <h3 className="font-bold text-lg text-foreground">{fu.client_name || "Client"}</h3>
+                          <p className="text-xs text-muted-foreground">{fu.client_email}</p>
+
+                          <div className="p-3 bg-secondary/50 rounded-lg text-xs space-y-1.5 border border-border/40">
+                            <p>
+                              <span className="text-muted-foreground font-medium">Requested Follow-up Time:</span>{" "}
+                              <strong className="text-primary">{fu.preferred_date} at {fu.preferred_time}</strong>
+                            </p>
+                            {fu.alternative_date && (
+                              <p>
+                                <span className="text-muted-foreground font-medium">Proposed Alternative:</span>{" "}
+                                <strong className="text-blue-400">{fu.alternative_date} at {fu.alternative_time}</strong>
+                              </p>
+                            )}
+                            {fu.confirmed_date && (
+                              <p>
+                                <span className="text-muted-foreground font-medium">Confirmed Time:</span>{" "}
+                                <strong className="text-emerald-500">{fu.confirmed_date} at {fu.confirmed_time}</strong>
+                              </p>
+                            )}
+                            <p>
+                              <span className="text-muted-foreground font-medium">Question / Clarification:</span>{" "}
+                              <span className="italic text-foreground">"{fu.reason}"</span>
+                            </p>
+                            {fu.consultant_note && (
+                              <p>
+                                <span className="text-muted-foreground font-medium">Your Note to Client:</span>{" "}
+                                <span>"{fu.consultant_note}"</span>
+                              </p>
+                            )}
+                            {fu.declined_reason && (
+                              <p className="text-destructive">
+                                <span className="font-medium">Decline reason:</span> {fu.declined_reason}
+                              </p>
+                            )}
+                            <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/30">
+                              7-day window expires: {deadlineDate.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex flex-col gap-2 shrink-0 md:min-w-[200px]">
+                          {isPending && (
+                            <>
+                              <Button
+                                size="sm"
+                                className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs"
+                                onClick={() => handleAcceptFollowUp(fu)}
+                                disabled={submittingAction}
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                                Accept Proposed Time
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-2 text-xs border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
+                                onClick={() => openAlternativeDialog(fu)}
+                                disabled={submittingAction}
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                Propose Alternative
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="gap-2 text-xs text-destructive hover:bg-destructive/10"
+                                onClick={() => openDeclineDialog(fu)}
+                                disabled={submittingAction}
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                                Decline Request
+                              </Button>
+                            </>
+                          )}
+
+                          {isAlternative && (
+                            <div className="text-xs text-muted-foreground p-2 rounded bg-secondary/30 text-center">
+                              Awaiting client response to your proposed alternative time
+                            </div>
+                          )}
+
+                          {isConfirmed && (
+                            <>
+                              <Button
+                                size="sm"
+                                className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs"
+                                onClick={() => navigate(`/meeting/${fu.meeting_room_id}`)}
+                              >
+                                <Video className="h-3.5 w-3.5" />
+                                Enter Meeting Room
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => copyMeetingLink(fu.meeting_room_id)}
+                                className="gap-2 text-xs"
+                              >
+                                {linkCopied === fu.meeting_room_id ? (
+                                  <Check className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5" />
+                                )}
+                                Copy Room Link
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
               </div>
             )}
           </TabsContent>

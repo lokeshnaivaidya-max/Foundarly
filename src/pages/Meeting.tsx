@@ -291,6 +291,8 @@ export default function MeetingPage() {
   const [canJoin, setCanJoin] = useState(false);
   const [rejoinDaysRemaining, setRejoinDaysRemaining] = useState<number | null>(null);
   const [rejoinDeadline, setRejoinDeadline] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<'client' | 'consultant' | 'admin' | null>(null);
+  const [followUp, setFollowUp] = useState<any | null>(null);
   
   const [remoteParticipants, setRemoteParticipants] = useState<Map<string, RemoteParticipant>>(new Map());
   const [presenceCount, setPresenceCount] = useState<number>(1);
@@ -348,6 +350,8 @@ export default function MeetingPage() {
       setIsRejoinSession(Boolean(accessResult.isRejoin));
       setCanJoin(Boolean(accessResult.canJoin));
       setStatus(accessResult.sessionStatus as any);
+      setUserRole(accessResult.role || null);
+      setFollowUp(accessResult.followUp || null);
 
       if (accessResult.timing) {
         setRejoinDeadline(accessResult.timing.rejoinDeadline);
@@ -815,6 +819,49 @@ export default function MeetingPage() {
                     />
                     <div className="absolute bottom-6 left-6 bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full z-10">
                       <span className="text-sm font-medium text-white">You</span>
+                    </div>
+
+                    {/* Waiting Screen Overlay */}
+                    <div className="absolute inset-0 flex items-center justify-center p-6 z-10 pointer-events-none">
+                      <div className="bg-background/90 backdrop-blur-md border border-amber-500/30 rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl text-center space-y-4 pointer-events-auto">
+                        <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
+                          <div className="absolute inset-0 rounded-full bg-amber-500/20 animate-ping" />
+                          <div className="w-14 h-14 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+                            <Clock className="w-7 h-7 text-amber-500 animate-pulse" />
+                          </div>
+                        </div>
+
+                        <div>
+                          <h3 className="text-lg font-bold text-foreground">
+                            Waiting for the other participant to join...
+                          </h3>
+                          <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                            {userRole === 'client'
+                              ? `You have joined the meeting room. Waiting for your consultant (${booking?.consultants?.name || 'Consultant'}) to connect.`
+                              : `You have joined the meeting room. Waiting for the client (${booking?.name || 'Client'}) to connect.`}
+                          </p>
+                        </div>
+
+                        {followUp && followUp.status === 'confirmed' && (
+                          <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 text-xs text-emerald-400 text-left space-y-1">
+                            <div className="flex items-center gap-1.5 font-semibold text-emerald-500">
+                              <CheckCircle className="h-3.5 w-3.5" />
+                              <span>Confirmed Follow-Up Consultation</span>
+                            </div>
+                            <p className="text-muted-foreground">
+                              Scheduled: {followUp.confirmed_date} at {followUp.confirmed_time}
+                            </p>
+                            <p className="text-muted-foreground text-[11px]">
+                              Clarification / Topic: {followUp.reason}
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground bg-secondary/60 rounded-full py-1.5 px-3">
+                          <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                          <span>Connected to room • Auto-connecting upon entry</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1382,21 +1429,41 @@ export default function MeetingPage() {
                 transition={{ delay: 0.2 }}
                 className="space-y-4"
               >
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-center space-y-1.5">
-                  <div className="flex items-center justify-center gap-2 text-amber-500 text-sm font-semibold">
-                    <RotateCcw className="h-4 w-4" />
-                    <span>7-Day Follow-Up Window Active</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Both the client and assigned consultant can rejoin this original room for follow-up questions
-                    {rejoinDaysRemaining ? ` (${rejoinDaysRemaining} day${rejoinDaysRemaining > 1 ? 's' : ''} left)` : ''}.
-                  </p>
-                  {rejoinDeadline && (
-                    <p className="text-[11px] text-amber-500 font-medium">
-                      Expires: {new Date(rejoinDeadline).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                {followUp && followUp.status === "confirmed" ? (
+                  <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 text-center space-y-1.5">
+                    <div className="flex items-center justify-center gap-2 text-emerald-500 text-sm font-semibold">
+                      <CheckCircle className="h-4 w-4" />
+                      <span>Confirmed Follow-Up Consultation</span>
+                    </div>
+                    <p className="text-xs text-emerald-400 font-medium">
+                      Scheduled: {followUp.confirmed_date} at {followUp.confirmed_time}
                     </p>
-                  )}
-                </div>
+                    <p className="text-xs text-muted-foreground">
+                      Topic: {followUp.reason}
+                    </p>
+                    {rejoinDeadline && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Window expires: {new Date(rejoinDeadline).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-center space-y-1.5">
+                    <div className="flex items-center justify-center gap-2 text-amber-500 text-sm font-semibold">
+                      <RotateCcw className="h-4 w-4" />
+                      <span>7-Day Follow-Up Window Active</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Both the client and assigned consultant can rejoin this original room for follow-up questions
+                      {rejoinDaysRemaining ? ` (${rejoinDaysRemaining} day${rejoinDaysRemaining > 1 ? 's' : ''} left)` : ''}.
+                    </p>
+                    {rejoinDeadline && (
+                      <p className="text-[11px] text-amber-500 font-medium">
+                        Expires: {new Date(rejoinDeadline).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <Button 
                   size="lg" 
@@ -1405,7 +1472,7 @@ export default function MeetingPage() {
                   disabled={callStarted}
                 >
                   <RotateCcw className="h-5 w-5" /> 
-                  {callStarted ? "Connecting to Room..." : "Rejoin Video Call"}
+                  {callStarted ? "Connecting to Room..." : (followUp?.status === "confirmed" ? "Join Confirmed Follow-up Call" : "Rejoin Video Call")}
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   Reuses the original consultation meeting room.

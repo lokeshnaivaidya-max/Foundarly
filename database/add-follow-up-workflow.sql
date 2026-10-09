@@ -265,13 +265,10 @@ CREATE INDEX IF NOT EXISTS idx_rate_limit_reset ON public.rate_limit_entries(res
 ALTER TABLE public.rate_limit_entries ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Allow service role and system rate limiting" ON public.rate_limit_entries;
-CREATE POLICY "Allow service role and system rate limiting" 
-ON public.rate_limit_entries 
-FOR ALL 
-USING (true) 
-WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow service role access" ON public.rate_limit_entries;
 
-GRANT ALL ON TABLE public.rate_limit_entries TO authenticated, service_role, anon;
+REVOKE ALL ON TABLE public.rate_limit_entries FROM anon, authenticated, PUBLIC;
+GRANT ALL ON TABLE public.rate_limit_entries TO service_role;
 
 CREATE OR REPLACE FUNCTION public.check_rate_limit(
   p_key TEXT,
@@ -316,4 +313,5 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.check_rate_limit(TEXT, INT, INT) TO authenticated, service_role, anon;
+REVOKE ALL ON FUNCTION public.check_rate_limit(TEXT, INT, INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.check_rate_limit(TEXT, INT, INT) TO service_role;

@@ -324,14 +324,15 @@ CREATE TABLE IF NOT EXISTS public.rate_limit_entries (
 CREATE INDEX IF NOT EXISTS idx_rate_limit_reset ON public.rate_limit_entries(reset_at);
 ALTER TABLE public.rate_limit_entries ENABLE ROW LEVEL SECURITY;
 
+-- Remove any unrestricted policies
 DROP POLICY IF EXISTS "Allow service role and system rate limiting" ON public.rate_limit_entries;
-CREATE POLICY "Allow service role and system rate limiting" 
-ON public.rate_limit_entries 
-FOR ALL 
-USING (true) 
-WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow service role access" ON public.rate_limit_entries;
 
-GRANT ALL ON TABLE public.rate_limit_entries TO authenticated, service_role, anon;
+-- Revoke all direct table access from untrusted client roles
+REVOKE ALL ON TABLE public.rate_limit_entries FROM anon, authenticated, PUBLIC;
+
+-- Exclusively grant table access to trusted server-side service_role
+GRANT ALL ON TABLE public.rate_limit_entries TO service_role;
 
 -- Atomic RPC function for distributed rate limiting
 -- Parameter names and return schema exactly match src/server/rateLimiter.ts
@@ -380,7 +381,8 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.check_rate_limit(TEXT, INT, INT) TO authenticated, service_role, anon;
+REVOKE ALL ON FUNCTION public.check_rate_limit(TEXT, INT, INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.check_rate_limit(TEXT, INT, INT) TO service_role;
 
 -- ============================================================================
 -- 7. VERIFICATION QUERIES

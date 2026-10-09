@@ -108,11 +108,18 @@ export const meetingService = {
 
       // Fallback: Query Supabase directly if Express server API is unreachable
       try {
-        const { data: booking, error: bookingErr } = await supabase
+        const rawBookingId = cleanRoomId.startsWith('foundarly-') ? cleanRoomId.replace('foundarly-', '') : cleanRoomId;
+        const isRawUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawBookingId);
+
+        const baseQuery = supabase
           .from('bookings')
-          .select('*, consultants(id, name, title, email, user_id)')
-          .or(`meeting_room_id.eq.${cleanRoomId},id.eq.${cleanRoomId.replace('foundarly-', '')}`)
-          .maybeSingle();
+          .select('*, consultants(id, name, title, email, user_id)');
+
+        const { data: booking, error: bookingErr } = await (
+          isRawUuid
+            ? baseQuery.or(`meeting_room_id.eq.${cleanRoomId},id.eq.${rawBookingId}`).maybeSingle()
+            : baseQuery.eq('meeting_room_id', cleanRoomId).maybeSingle()
+        );
 
         if (bookingErr || !booking) {
           return {
@@ -126,9 +133,20 @@ export const meetingService = {
           };
         }
 
-        const consultantObj = Array.isArray(booking.consultants)
+        let consultantObj = Array.isArray(booking.consultants)
           ? booking.consultants[0]
           : booking.consultants;
+
+        if (!consultantObj && booking.consultant_id) {
+          const { data: directConsultant } = await supabase
+            .from('consultants')
+            .select('id, name, title, email, user_id')
+            .eq('id', booking.consultant_id)
+            .maybeSingle();
+          if (directConsultant) {
+            consultantObj = directConsultant;
+          }
+        }
 
         const authCheck = validateParticipantAccess(
           currentUser,

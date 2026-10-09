@@ -213,13 +213,18 @@ async function startServer() {
 
     try {
       const rawBookingId = cleanRoomId.startsWith("foundarly-") ? cleanRoomId.replace("foundarly-", "") : cleanRoomId;
+      const isRawUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawBookingId);
 
       // Query booking and linked consultant details via Supabase Admin Client
-      const { data: bookings, error: bookingError } = await supabaseAdminClient
+      const baseQuery = supabaseAdminClient
         .from("bookings")
-        .select("*, consultants(id, name, title, email, user_id)")
-        .or(`meeting_room_id.eq.${cleanRoomId},id.eq.${rawBookingId}`)
-        .limit(1);
+        .select("*, consultants(id, name, title, email, user_id)");
+
+      const { data: bookings, error: bookingError } = await (
+        isRawUuid
+          ? baseQuery.or(`meeting_room_id.eq.${cleanRoomId},id.eq.${rawBookingId}`).limit(1)
+          : baseQuery.eq("meeting_room_id", cleanRoomId).limit(1)
+      );
 
       if (bookingError) {
         console.error("[Meeting Server] Database fetch error:", bookingError);
@@ -239,9 +244,21 @@ async function startServer() {
         });
       }
 
-      const consultantObj = Array.isArray(booking.consultants)
+      let consultantObj = Array.isArray(booking.consultants)
         ? booking.consultants[0]
         : booking.consultants;
+
+      // Fallback: direct consultant lookup if relationship was not auto-joined
+      if (!consultantObj && booking.consultant_id) {
+        const { data: directConsultant } = await supabaseAdminClient
+          .from("consultants")
+          .select("id, name, title, email, user_id")
+          .eq("id", booking.consultant_id)
+          .maybeSingle();
+        if (directConsultant) {
+          consultantObj = directConsultant;
+        }
+      }
 
       const isAdmin = isAllowedAdminEmail(user.email);
       const authResult = validateParticipantAccess(user, booking, consultantObj, isAdmin);

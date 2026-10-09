@@ -247,6 +247,46 @@ describe('7-Day Meeting Rejoin & Security Authorization', () => {
     });
   });
 
+  describe('Edge Cases & Resilient Verification', () => {
+    it('handles case-insensitive and trimmed email comparisons', () => {
+      const clientUpper = { id: 'other-id', email: '  CLIENT@EXAMPLE.COM  ' };
+      const res = validateParticipantAccess(clientUpper, baseBooking, mockConsultantRecord, false);
+      expect(res.authorized).toBe(true);
+      expect(res.role).toBe('client');
+
+      const consultantUpper = { id: 'other-id', email: ' CONSULTANT@EXAMPLE.COM ' };
+      const res2 = validateParticipantAccess(consultantUpper, baseBooking, mockConsultantRecord, false);
+      expect(res2.authorized).toBe(true);
+      expect(res2.role).toBe('consultant');
+    });
+
+    it('uses actual meeting_ended_at when available as the 7-day reference anchor', () => {
+      const bookingWithActualEnd = {
+        ...baseBooking,
+        meeting_started_at: '2026-10-01T14:05:00Z',
+        meeting_ended_at: '2026-10-01T15:15:00Z', // Session ran 15 mins longer
+      };
+
+      const timing = parseSessionTimes(bookingWithActualEnd);
+      expect(timing.sessionReferenceEnd.toISOString()).toBe('2026-10-01T15:15:00.000Z');
+      expect(timing.rejoinDeadline.getTime() - new Date('2026-10-01T15:15:00Z').getTime()).toBe(REJOIN_WINDOW_MS);
+    });
+
+    it('strictly enforces deadline boundary: eligible at deadline - 1s, expired at deadline + 1s', () => {
+      const timing = parseSessionTimes(baseBooking);
+
+      const oneSecondBefore = new Date(timing.rejoinDeadline.getTime() - 1000);
+      const eligible = calculateRejoinEligibility(baseBooking, oneSecondBefore);
+      expect(eligible.sessionStatus).toBe('rejoin_eligible');
+      expect(eligible.canJoin).toBe(true);
+
+      const oneSecondAfter = new Date(timing.rejoinDeadline.getTime() + 1000);
+      const expired = calculateRejoinEligibility(baseBooking, oneSecondAfter);
+      expect(expired.sessionStatus).toBe('expired');
+      expect(expired.canJoin).toBe(false);
+    });
+  });
+
   describe('Flexible Time Parsing', () => {
     it('parses 24-hour time strings correctly', () => {
       expect(parseTimeString('14:30')).toEqual({ hours: 14, minutes: 30 });

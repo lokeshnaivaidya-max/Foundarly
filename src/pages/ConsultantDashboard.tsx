@@ -14,12 +14,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   DollarSign, Calendar, Star, TrendingUp, Clock, Video, 
-  CreditCard, CheckCircle2, XCircle, RefreshCw, Copy, Check, Shield
+  CreditCard, CheckCircle2, XCircle, RefreshCw, Copy, Check, Shield, RotateCcw
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageLoader } from "@/components/PageLoader";
 import { motion } from "framer-motion";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import { calculateRejoinEligibility } from "@/utils/meetingRejoin";
 
 export default function ConsultantDashboard() {
   const { user, profile } = useAuth();
@@ -522,43 +523,81 @@ export default function ConsultantDashboard() {
                       </div>
 
                       <div className="flex flex-col gap-2">
-                        {booking.status === "confirmed" && (
-                          <>
-                            <Button
-                              size="sm"
-                              onClick={() => navigate(`/meeting/${booking.meeting_room_id}`)}
-                              className="gap-2"
-                            >
-                              <Video className="h-4 w-4" />
-                              Join Meeting
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => copyMeetingLink(booking.meeting_room_id)}
-                              className="gap-2"
-                            >
-                              {linkCopied === booking.meeting_room_id ? (
-                                <Check className="h-4 w-4" />
-                              ) : (
-                                <Copy className="h-4 w-4" />
-                              )}
-                              Copy Link
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setSelectedBooking(booking);
-                                setRescheduleDialogOpen(true);
-                              }}
-                              className="gap-2"
-                            >
-                              <RefreshCw className="h-4 w-4" />
-                              Reschedule
-                            </Button>
-                          </>
-                        )}
+                        {booking.meeting_room_id && (() => {
+                          const eligibility = calculateRejoinEligibility(booking, new Date());
+                          if (eligibility.sessionStatus === "rejoin_eligible") {
+                            return (
+                              <>
+                                <Button
+                                  size="sm"
+                                  onClick={() => navigate(`/meeting/${booking.meeting_room_id}`)}
+                                  className="gap-2 bg-amber-500/15 text-amber-500 hover:bg-amber-500/25 border border-amber-500/30 text-xs font-medium"
+                                  title={`Follow-up rejoin available until ${eligibility.rejoinDeadline.toLocaleDateString()}`}
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5 text-amber-500" />
+                                  Rejoin Meeting ({eligibility.rejoinDaysRemaining}d left)
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => copyMeetingLink(booking.meeting_room_id)}
+                                  className="gap-2 text-xs"
+                                >
+                                  {linkCopied === booking.meeting_room_id ? (
+                                    <Check className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <Copy className="h-3.5 w-3.5" />
+                                  )}
+                                  Copy Link
+                                </Button>
+                              </>
+                            );
+                          }
+                          return null;
+                        })()}
+
+                        {booking.status === "confirmed" && (() => {
+                          const eligibility = calculateRejoinEligibility(booking, new Date());
+                          if (eligibility.sessionStatus === "rejoin_eligible") return null;
+                          return (
+                            <>
+                              <Button
+                                size="sm"
+                                onClick={() => navigate(`/meeting/${booking.meeting_room_id}`)}
+                                className="gap-2"
+                              >
+                                <Video className="h-4 w-4" />
+                                Join Meeting
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => copyMeetingLink(booking.meeting_room_id)}
+                                className="gap-2"
+                              >
+                                {linkCopied === booking.meeting_room_id ? (
+                                  <Check className="h-4 w-4" />
+                                ) : (
+                                  <Copy className="h-4 w-4" />
+                                )}
+                                Copy Link
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedBooking(booking);
+                                  setRescheduleDialogOpen(true);
+                                }}
+                                className="gap-2"
+                              >
+                                <RefreshCw className="h-4 w-4" />
+                                Reschedule
+                              </Button>
+                            </>
+                          );
+                        })()}
+
                         {booking.status === "completed" && booking.consultant_earnings > 0 && (
                           <div className="text-right">
                             <p className="text-sm text-muted-foreground">Earned</p>

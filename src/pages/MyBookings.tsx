@@ -4,7 +4,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, User, MessageSquare, CreditCard, Video, Star, AlertCircle, Trash2, LogIn, CheckCircle, RefreshCw } from "lucide-react";
+import { Calendar, Clock, User, MessageSquare, CreditCard, Video, Star, AlertCircle, Trash2, LogIn, CheckCircle, RefreshCw, RotateCcw } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { isUserAdmin } from "@/lib/authorization";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -14,6 +14,7 @@ import { emailService } from "@/services/email";
 import { useNavigate, Link } from "react-router-dom";
 import { SkeletonList } from "@/components/PageLoader";
 import { toast } from "sonner";
+import { calculateRejoinEligibility } from "@/utils/meetingRejoin";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -204,33 +205,54 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
               </Button>
             </>
           )}
-          {/* Join / View call */}
-          {booking.meeting_room_id && booking.status === "confirmed" && (() => {
-            const ms = getMeetingStatus(booking.date, booking.time, booking.session_duration || 60);
-            return ms === "live" ? (
-              <Link to={`/meeting/${booking.meeting_room_id}`}>
-                <Button size="sm" className="gap-2 glow-gold-sm">
-                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                  <Video className="h-3.5 w-3.5" /> Join Call
-                </Button>
-              </Link>
-            ) : ms === "upcoming" ? (
-              <>
+          {/* Join / Rejoin / View call */}
+          {booking.meeting_room_id && (booking.status === "confirmed" || booking.status === "completed") && (() => {
+            const eligibility = calculateRejoinEligibility(booking, new Date());
+            const sessionStatus = eligibility.sessionStatus;
+
+            if (sessionStatus === "live") {
+              return (
                 <Link to={`/meeting/${booking.meeting_room_id}`}>
-                  <Button size="sm" variant="outline" className="gap-2 text-xs">
-                    <Clock className="h-3.5 w-3.5" /> View Session
+                  <Button size="sm" className="gap-2 glow-gold-sm">
+                    <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                    <Video className="h-3.5 w-3.5" /> Join Call
                   </Button>
                 </Link>
-                {(!booking.reschedule_status || booking.reschedule_status === "none" || booking.reschedule_status === "rejected") && (
-                  <Button size="sm" variant="outline" className="gap-2 text-xs" onClick={() => onReschedule(booking)}>
-                    <RefreshCw className="h-3.5 w-3.5" /> Reschedule
+              );
+            }
+
+            if (sessionStatus === "rejoin_eligible") {
+              return (
+                <Link to={`/meeting/${booking.meeting_room_id}`} title={`Follow-up rejoin active until ${eligibility.rejoinDeadline.toLocaleDateString()}`}>
+                  <Button size="sm" className="gap-2 bg-amber-500/15 text-amber-500 hover:bg-amber-500/25 border border-amber-500/30 text-xs font-medium">
+                    <RotateCcw className="h-3.5 w-3.5 text-amber-500" /> Rejoin Call ({eligibility.rejoinDaysRemaining}d left)
                   </Button>
-                )}
-              </>
-            ) : ms === "ended" ? (
+                </Link>
+              );
+            }
+
+            if (sessionStatus === "upcoming") {
+              return (
+                <>
+                  <Link to={`/meeting/${booking.meeting_room_id}`}>
+                    <Button size="sm" variant="outline" className="gap-2 text-xs">
+                      <Clock className="h-3.5 w-3.5" /> View Session
+                    </Button>
+                  </Link>
+                  {(!booking.reschedule_status || booking.reschedule_status === "none" || booking.reschedule_status === "rejected") && (
+                    <Button size="sm" variant="outline" className="gap-2 text-xs" onClick={() => onReschedule(booking)}>
+                      <RefreshCw className="h-3.5 w-3.5" /> Reschedule
+                    </Button>
+                  )}
+                </>
+              );
+            }
+
+            // Expired (> 7 days)
+            return (
               <>
-                <span className="flex items-center gap-1.5 text-xs text-red-500 bg-red-500/10 border border-red-500/20 rounded-full px-3 py-1">
-                  <AlertCircle className="h-3 w-3" /> Meeting Ended
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground bg-secondary/80 border border-border rounded-full px-3 py-1">
+                  <AlertCircle className="h-3 w-3 text-muted-foreground" /> Meeting Ended
                 </span>
                 {(!booking.reschedule_status || booking.reschedule_status === "none" || booking.reschedule_status === "rejected") && (
                   <Button size="sm" variant="outline" className="gap-2 text-xs" onClick={() => onReschedule(booking)}>
@@ -238,7 +260,7 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
                   </Button>
                 )}
               </>
-            ) : null;
+            );
           })()}
           {booking.status === "completed" && (
             <Link to={`/review/${booking.id}`}>

@@ -5,13 +5,14 @@ import { bookingsService } from "@/services/bookings";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Video, VideoOff, Mic, MicOff, PhoneOff, Monitor, MonitorOff, User, Clock, ArrowLeft, AlertCircle, Copy, Check, Link2, Maximize, Minimize, Settings, Users, X, Calendar } from "lucide-react";
+import { Video, VideoOff, Mic, MicOff, PhoneOff, Monitor, MonitorOff, User, Clock, ArrowLeft, AlertCircle, Copy, Check, Link2, Maximize, Minimize, Settings, Users, X, Calendar, RotateCcw, ShieldAlert, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { PageLoader } from "@/components/PageLoader";
 import { motion, AnimatePresence } from "framer-motion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { WebRTCService } from "@/services/webrtcService";
+import { meetingService, MeetingAccessResponse } from "@/services/meetingService";
 
 interface BookingWithConsultant {
   id: string;
@@ -239,13 +240,22 @@ function Countdown({ targetDate, targetTime }: { targetDate: string; targetTime:
   );
 }
 
-const STATUS_COLORS = {
+const STATUS_COLORS: Record<string, string> = {
   upcoming: "bg-yellow-500/15 text-yellow-500 border-yellow-500/30",
   live: "bg-green-500/15 text-green-400 border-green-500/30",
+  rejoin_eligible: "bg-amber-500/15 text-amber-400 border-amber-500/30",
   completed: "bg-muted text-muted-foreground border-border",
   missed: "bg-red-500/15 text-red-400 border-red-500/30",
+  expired: "bg-destructive/15 text-destructive border-destructive/30",
 };
-const STATUS_LABELS = { upcoming: "Upcoming", live: "Live Now", completed: "Completed", missed: "Missed" };
+const STATUS_LABELS: Record<string, string> = {
+  upcoming: "Upcoming",
+  live: "Live Now",
+  rejoin_eligible: "7-Day Rejoin Active",
+  completed: "Completed",
+  missed: "Missed",
+  expired: "Rejoin Expired",
+};
 
 export default function MeetingPage() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -261,7 +271,7 @@ export default function MeetingPage() {
   const [loading, setLoading] = useState(true);
   const [callStarted, setCallStarted] = useState(false);
   const [callEnded, setCallEnded] = useState(false);
-  const [status, setStatus] = useState<"upcoming" | "live" | "completed" | "missed">("upcoming");
+  const [status, setStatus] = useState<"upcoming" | "live" | "rejoin_eligible" | "completed" | "missed" | "expired">("upcoming");
   const [muted, setMuted] = useState(false);
   const [videoOff, setVideoOff] = useState(false);
   const [manualEntry, setManualEntry] = useState(false);
@@ -269,6 +279,18 @@ export default function MeetingPage() {
   const [linkCopied, setLinkCopied] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [callStartTime, setCallStartTime] = useState<Date | null>(null);
+
+  // 7-Day Rejoin & Server Access Control States
+  const [accessError, setAccessError] = useState<{
+    title: string;
+    message: string;
+    code?: string;
+    rejoinDeadline?: string;
+  } | null>(null);
+  const [isRejoinSession, setIsRejoinSession] = useState(false);
+  const [canJoin, setCanJoin] = useState(false);
+  const [rejoinDaysRemaining, setRejoinDaysRemaining] = useState<number | null>(null);
+  const [rejoinDeadline, setRejoinDeadline] = useState<string | null>(null);
   
   const [remoteParticipants, setRemoteParticipants] = useState<Map<string, RemoteParticipant>>(new Map());
   const [presenceCount, setPresenceCount] = useState<number>(1);
@@ -297,13 +319,70 @@ export default function MeetingPage() {
     });
   };
 
+  // Periodic refresh of server-validated session access
+  const loadMeetingAccess = useCallback(async () => {
+    if (!roomId) return;
+    try {
+      const accessResult = await meetingService.validateAccess(roomId);
+
+      if (!accessResult.success || !accessResult.authorized) {
+        setAccessError({
+          title: accessResult.code === 'REJOIN_EXPIRED' ? '7-Day Follow-Up Window Expired' :
+                 accessResult.code === 'ROOM_NOT_FOUND' ? 'Meeting Session Not Found' :
+                 accessResult.code === 'BOOKING_CANCELLED' ? 'Consultation Cancelled' :
+                 accessResult.code === 'BOOKING_PENDING' ? 'Consultation Pending Verification' :
+                 'Access Denied',
+          message: accessResult.error || 'You are not authorized to access this meeting session.',
+          code: accessResult.code || 'ACCESS_DENIED',
+          rejoinDeadline: accessResult.timing?.rejoinDeadline,
+        });
+        setCanJoin(false);
+        setIsRejoinSession(false);
+        setBooking(accessResult.booking || null);
+        setStatus(accessResult.sessionStatus as any || 'expired');
+        return;
+      }
+
+      setAccessError(null);
+      setBooking(accessResult.booking);
+      setIsRejoinSession(Boolean(accessResult.isRejoin));
+      setCanJoin(Boolean(accessResult.canJoin));
+      setStatus(accessResult.sessionStatus as any);
+
+      if (accessResult.timing) {
+        setRejoinDeadline(accessResult.timing.rejoinDeadline);
+        setRejoinDaysRemaining(accessResult.timing.rejoinDaysRemaining);
+      }
+    } catch (err: any) {
+      console.error("[Meeting] Validation failed:", err);
+      setAccessError({
+        title: 'Connection Error',
+        message: 'Unable to verify meeting authorization with the server.',
+        code: 'NETWORK_ERROR',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [roomId]);
+
   useEffect(() => {
-    if (!booking) return;
-    const tick = () => setStatus(getMeetingStatus(booking.date, booking.time, booking.session_duration || 60));
-    tick();
-    const id = setInterval(tick, 30000);
-    return () => clearInterval(id);
-  }, [booking]);
+    if (authLoading) return;
+    
+    if (!user) { 
+      navigate("/login", { state: { from: `/meeting/${roomId}` } }); 
+      return; 
+    }
+    
+    if (!roomId) { 
+      setManualEntry(true); 
+      setLoading(false); 
+      return; 
+    }
+    
+    loadMeetingAccess();
+    const interval = setInterval(loadMeetingAccess, 45000);
+    return () => clearInterval(interval);
+  }, [user, roomId, navigate, authLoading, loadMeetingAccess]);
 
   // Timer countdown during active call
   useEffect(() => {
@@ -317,7 +396,7 @@ export default function MeetingPage() {
       
       if (remaining <= 0) {
         setTimeRemaining(0);
-        toast.warning("Session time has ended");
+        toast.warning(isRejoinSession ? "Follow-up session completed" : "Session time has ended");
         endCall();
       } else {
         setTimeRemaining(remaining);
@@ -335,83 +414,7 @@ export default function MeetingPage() {
     updateTimer();
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
-  }, [callStarted, callEnded, booking, callStartTime]);
-
-  useEffect(() => {
-    if (authLoading) return;
-    
-    if (!user) { 
-      navigate("/login", { state: { from: `/meeting/${roomId}` } }); 
-      return; 
-    }
-    
-    if (!roomId) { 
-      setManualEntry(true); 
-      setLoading(false); 
-      return; 
-    }
-    
-    (async () => {
-      try {
-        const allBookings = await bookingsService.getAll();
-        const found = (allBookings as BookingWithConsultant[]).find(b => b.meeting_room_id === roomId);
-        
-        if (!found) {
-          console.warn("[Meeting] Meeting not found in database - creating open session context");
-          
-          const openBooking: BookingWithConsultant = {
-            id: roomId?.replace('foundarly-', '') || 'open-meeting',
-            user_id: user.id,
-            consultant_id: 'open-consultant',
-            date: new Date().toISOString().split('T')[0],
-            time: new Date().toTimeString().split(' ')[0].substring(0, 5),
-            session_duration: 60,
-            status: 'confirmed',
-            meeting_room_id: roomId || 'open-room',
-            name: user.email || 'Participant',
-            consultants: {
-              name: 'Meeting Host',
-              title: 'Consultant',
-              user_id: 'open-consultant'
-            }
-          };
-          
-          setBooking(openBooking);
-          setStatus('live');
-          setLoading(false);
-          return;
-        }
-
-        setBooking(found);
-        setStatus(getMeetingStatus(found.date, found.time, found.session_duration || 60));
-      } catch (err: any) {
-        console.error("Failed to load meeting:", err);
-        toast.info("Joining meeting in open access mode");
-        
-        const mockBooking: BookingWithConsultant = {
-          id: roomId?.replace('foundarly-', '') || 'test',
-          user_id: user.id,
-          consultant_id: 'test-consultant',
-          date: new Date().toISOString().split('T')[0],
-          time: new Date().toTimeString().split(' ')[0].substring(0, 5),
-          session_duration: 60,
-          status: 'confirmed',
-          meeting_room_id: roomId || 'test-room',
-          name: user.email || 'User',
-          consultants: {
-            name: 'Meeting Host',
-            title: 'Professional Consultant',
-            user_id: 'test-consultant'
-          }
-        };
-        
-        setBooking(mockBooking);
-        setStatus('live');
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [user, roomId, navigate, authLoading]);
+  }, [callStarted, callEnded, booking, callStartTime, isRejoinSession]);
 
   const startCall = useCallback(async () => {
     console.log("=== START CALL FUNCTION CALLED ===");
@@ -421,15 +424,18 @@ export default function MeetingPage() {
       return;
     }
 
-    if (!canJoinMeeting(booking.date, booking.time, booking.session_duration || 60)) {
-      toast.error("Meeting can only be joined 5 minutes before the scheduled time");
+    if (!canJoin && !isRejoinSession && status !== 'live' && status !== 'rejoin_eligible') {
+      toast.error("Meeting can only be joined during the active session or 7-day follow-up window.");
       return;
     }
 
     try {
       setCallStarted(true);
       setCallStartTime(new Date());
-      toast.info("Connecting to real-time WebRTC video call...");
+      toast.info(isRejoinSession 
+        ? "Rejoining 7-day follow-up video call..." 
+        : "Connecting to real-time WebRTC video call..."
+      );
 
       const userId = user?.id || `user_${Math.random().toString(36).substring(2, 9)}`;
       const userName = user?.email?.split('@')[0] || 'Participant';
@@ -621,6 +627,70 @@ export default function MeetingPage() {
   };
 
   if (authLoading || loading) return <PageLoader text="Loading your session..." />;
+
+  // Access Denied / 7-Day Expired / Invalid Session Error Screen
+  if (accessError) {
+    const isExpired = accessError.code === "REJOIN_EXPIRED";
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-md w-full"
+        >
+          <div className="bg-gradient-card border border-border rounded-2xl p-8 space-y-6 text-center shadow-lg">
+            <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-2 ${
+              isExpired ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : "bg-destructive/10 text-destructive border border-destructive/20"
+            }`}>
+              {isExpired ? (
+                <Clock className="h-8 w-8 text-amber-500" />
+              ) : (
+                <ShieldAlert className="h-8 w-8 text-destructive" />
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <h1 className="font-display text-2xl font-bold text-foreground">
+                {accessError.title}
+              </h1>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                {accessError.message}
+              </p>
+            </div>
+
+            {isExpired && accessError.rejoinDeadline && (
+              <div className="bg-secondary/60 border border-border rounded-xl p-3 text-xs text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground">7-Day Clarification Window Concluded</p>
+                <p>Eligible until: {new Date(accessError.rejoinDeadline).toLocaleDateString("en-US", {
+                  month: "long",
+                  day: "numeric",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}</p>
+              </div>
+            )}
+
+            <div className="space-y-2 pt-2">
+              <Button
+                className="w-full glow-gold"
+                onClick={() => navigate(dashboardPath)}
+              >
+                Return to Bookings
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => navigate("/consultants")}
+              >
+                Book a New Consultation
+              </Button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   // Manual Entry Screen
   if (manualEntry) {
@@ -1293,22 +1363,86 @@ export default function MeetingPage() {
                 <Button 
                   size="lg" 
                   className="w-full glow-gold gap-2 text-base py-6" 
-                  onClick={() => {
-                    console.log("Join button clicked!");
-                    if (canJoinMeeting(booking.date, booking.time, booking.session_duration || 60)) {
-                      startCall();
-                    } else {
-                      toast.error("You can only join 5 minutes before the scheduled time");
-                    }
-                  }}
-                  disabled={callStarted || !canJoinMeeting(booking.date, booking.time, booking.session_duration || 60)}
+                  onClick={() => startCall()}
+                  disabled={callStarted}
                 >
                   <Video className="h-5 w-5" /> 
-                  {callStarted ? "Loading..." : "Join Video Call"}
+                  {callStarted ? "Connecting..." : "Join Video Call"}
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   Make sure your camera and microphone are ready
                 </p>
+              </motion.div>
+            )}
+
+            {status === "rejoin_eligible" && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="space-y-4"
+              >
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-center space-y-1.5">
+                  <div className="flex items-center justify-center gap-2 text-amber-500 text-sm font-semibold">
+                    <RotateCcw className="h-4 w-4" />
+                    <span>7-Day Follow-Up Window Active</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Both the client and assigned consultant can rejoin this original room for follow-up questions
+                    {rejoinDaysRemaining ? ` (${rejoinDaysRemaining} day${rejoinDaysRemaining > 1 ? 's' : ''} left)` : ''}.
+                  </p>
+                  {rejoinDeadline && (
+                    <p className="text-[11px] text-amber-500 font-medium">
+                      Expires: {new Date(rejoinDeadline).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  )}
+                </div>
+
+                <Button 
+                  size="lg" 
+                  className="w-full glow-gold gap-2 text-base py-6 font-semibold" 
+                  onClick={() => startCall()}
+                  disabled={callStarted}
+                >
+                  <RotateCcw className="h-5 w-5" /> 
+                  {callStarted ? "Connecting to Room..." : "Rejoin Video Call"}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Reuses the original consultation meeting room.
+                </p>
+              </motion.div>
+            )}
+
+            {status === "expired" && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-4"
+              >
+                <div className="bg-secondary border border-border rounded-xl p-4 text-center space-y-1.5">
+                  <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm font-medium">
+                    <AlertCircle className="h-4 w-4 text-destructive" />
+                    <span>7-Day Rejoin Period Expired</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    The 7-day follow-up clarification period has passed for this session.
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <Button 
+                    variant="outline" 
+                    className="flex-1"
+                    onClick={() => navigate("/consultants")}
+                  >
+                    Book New Session
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => navigate(dashboardPath)}
+                  >
+                    My Bookings
+                  </Button>
+                </div>
               </motion.div>
             )}
 

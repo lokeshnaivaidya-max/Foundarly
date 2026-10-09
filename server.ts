@@ -21,6 +21,11 @@ import {
 } from "./src/utils/emailTemplates.js";
 import { sendEmail, verifySmtpConnection, getSmtpConfig, getSmtpAuditInfo } from "./src/server/mailer.js";
 import { createClient } from "@supabase/supabase-js";
+import {
+  calculateRejoinEligibility,
+  validateParticipantAccess,
+  parseSessionTimes,
+} from "./src/utils/meetingRejoin.js";
 
 dotenv.config();
 
@@ -136,6 +141,194 @@ async function startServer() {
       replyTo: config.replyTo,
       timestamp: new Date().toISOString(),
     });
+  });
+
+  // Rate Limiting helper for meeting access validation to prevent room ID guessing
+  const meetingRateLimits = new Map<string, { count: number; resetAt: number }>();
+  function checkMeetingRateLimit(key: string, limit: number = 60, windowMs: number = 60000): boolean {
+    const now = Date.now();
+    const record = meetingRateLimits.get(key);
+    if (!record || now > record.resetAt) {
+      meetingRateLimits.set(key, { count: 1, resetAt: now + windowMs });
+      return true;
+    }
+    if (record.count >= limit) {
+      return false;
+    }
+    record.count += 1;
+    return true;
+  }
+
+  // Authentication helper for authenticated users (clients, consultants, admins)
+  async function authenticateSessionUser(req: express.Request): Promise<{ user: any; error?: string; status?: number }> {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return { error: "Unauthorized: Missing or invalid Authorization header.", status: 401, user: null };
+    }
+    const token = authHeader.replace("Bearer ", "").trim();
+    if (!token) {
+      return { error: "Unauthorized: Missing authentication token.", status: 401, user: null };
+    }
+    try {
+      const { data: { user }, error: userError } = await supabaseAdminClient.auth.getUser(token);
+      if (userError || !user) {
+        return { error: "Unauthorized: Invalid or expired authentication session.", status: 401, user: null };
+      }
+      return { user };
+    } catch (err: any) {
+      return { error: "Internal authentication verification error.", status: 500, user: null };
+    }
+  }
+
+  // Core handler: Authoritative Server-Side Meeting Access & 7-Day Rejoin Validator
+  async function handleMeetingAccessValidation(roomId: string | undefined, req: express.Request, res: express.Response) {
+    const ip = req.ip || req.socket.remoteAddress || "client_unknown";
+    if (!checkMeetingRateLimit(`meeting_rate_${ip}`, 60, 60000)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many requests. Please slow down and try again.",
+        code: "RATE_LIMITED",
+      });
+    }
+
+    const auth = await authenticateSessionUser(req);
+    if (auth.error || !auth.user) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        error: auth.error || "Authentication required to access meeting room.",
+        code: "UNAUTHENTICATED",
+      });
+    }
+
+    const user = auth.user;
+    const cleanRoomId = (roomId || "").trim();
+
+    if (!cleanRoomId || cleanRoomId.length > 255) {
+      return res.status(400).json({
+        success: false,
+        error: "Valid meeting room ID is required.",
+        code: "INVALID_ROOM_ID",
+      });
+    }
+
+    try {
+      const rawBookingId = cleanRoomId.startsWith("foundarly-") ? cleanRoomId.replace("foundarly-", "") : cleanRoomId;
+
+      // Query booking and linked consultant details via Supabase Admin Client
+      const { data: bookings, error: bookingError } = await supabaseAdminClient
+        .from("bookings")
+        .select("*, consultants(id, name, title, email, user_id)")
+        .or(`meeting_room_id.eq.${cleanRoomId},id.eq.${rawBookingId}`)
+        .limit(1);
+
+      if (bookingError) {
+        console.error("[Meeting Server] Database fetch error:", bookingError);
+        return res.status(500).json({
+          success: false,
+          error: "Failed to verify meeting session due to a database error.",
+          code: "DATABASE_ERROR",
+        });
+      }
+
+      const booking = bookings?.[0];
+      if (!booking) {
+        return res.status(404).json({
+          success: false,
+          error: "Meeting session not found or invalid meeting link.",
+          code: "ROOM_NOT_FOUND",
+        });
+      }
+
+      const consultantObj = Array.isArray(booking.consultants)
+        ? booking.consultants[0]
+        : booking.consultants;
+
+      const isAdmin = isAllowedAdminEmail(user.email);
+      const authResult = validateParticipantAccess(user, booking, consultantObj, isAdmin);
+
+      if (!authResult.authorized) {
+        return res.status(403).json({
+          success: false,
+          error: authResult.reason || "You are not authorized to access this meeting room.",
+          code: authResult.code || "UNAUTHORIZED_PARTICIPANT",
+        });
+      }
+
+      // Authoritative server-side 7-day eligibility calculation
+      const serverNow = new Date();
+      const eligibility = calculateRejoinEligibility(booking, serverNow);
+      const timing = parseSessionTimes(booking);
+
+      if (eligibility.sessionStatus === "expired") {
+        return res.status(403).json({
+          success: false,
+          error: "The 7-day follow-up rejoin window for this consultation has expired.",
+          code: "REJOIN_EXPIRED",
+          sessionStatus: "expired",
+          canJoin: false,
+          isRejoin: false,
+          timing: {
+            scheduledStart: timing.scheduledStart.toISOString(),
+            scheduledEnd: timing.scheduledEnd.toISOString(),
+            rejoinDeadline: eligibility.rejoinDeadline.toISOString(),
+            rejoinTimeRemainingMs: 0,
+            rejoinDaysRemaining: 0,
+            serverTime: serverNow.toISOString(),
+          },
+        });
+      }
+
+      return res.json({
+        success: true,
+        authorized: true,
+        canJoin: eligibility.canJoin,
+        isRejoin: eligibility.isRejoin,
+        sessionStatus: eligibility.sessionStatus,
+        role: authResult.role,
+        booking: {
+          id: booking.id,
+          meeting_room_id: booking.meeting_room_id || cleanRoomId,
+          user_id: booking.user_id,
+          consultant_id: booking.consultant_id,
+          date: booking.date,
+          time: booking.time,
+          session_duration: booking.session_duration || 60,
+          status: booking.status,
+          name: booking.name,
+          email: booking.email,
+          consultants: consultantObj ? {
+            name: consultantObj.name,
+            title: consultantObj.title,
+            user_id: consultantObj.user_id,
+          } : undefined,
+        },
+        timing: {
+          scheduledStart: timing.scheduledStart.toISOString(),
+          scheduledEnd: timing.scheduledEnd.toISOString(),
+          rejoinDeadline: eligibility.rejoinDeadline.toISOString(),
+          rejoinTimeRemainingMs: eligibility.rejoinTimeRemainingMs,
+          rejoinDaysRemaining: eligibility.rejoinDaysRemaining,
+          timeUntilStartMs: eligibility.timeUntilStartMs,
+          serverTime: serverNow.toISOString(),
+        },
+      });
+    } catch (err: any) {
+      console.error("[Meeting Server] Unexpected validation error:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Internal server error occurred while verifying meeting session.",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  }
+
+  // API Endpoints: Meeting Access & Rejoin Validation
+  app.post("/api/meeting/validate-access", (req, res) => {
+    handleMeetingAccessValidation(req.body?.roomId, req, res);
+  });
+
+  app.get("/api/meeting/:roomId/access", (req, res) => {
+    handleMeetingAccessValidation(req.params.roomId, req, res);
   });
 
   // Protected Admin API: Verify admin authorization status

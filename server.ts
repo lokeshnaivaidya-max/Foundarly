@@ -1656,10 +1656,10 @@ async function startServer() {
   });
 
   // Explicit JSON 404 response for unmatched API routes
-  app.all("/api/*", (req, res) => {
+  app.use("/api", (req, res) => {
     return res.status(404).json({
       success: false,
-      error: `API endpoint '${req.method} ${req.path}' not found`,
+      error: `API endpoint '${req.method} ${req.originalUrl || req.url}' not found`,
       code: "API_ENDPOINT_NOT_FOUND",
     });
   });

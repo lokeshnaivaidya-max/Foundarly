@@ -3,6 +3,7 @@ import { motion, useInView, useMotionValue, useTransform } from "framer-motion";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import HowItWorksModal from "@/components/HowItWorksModal";
+import { ConsultantsSEO } from "@/components/SEO";
 import { SkeletonGrid } from "@/components/PageLoader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -261,6 +262,7 @@ export default function ConsultantsPage() {
 
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
+      <ConsultantsSEO />
       <Header />
 
       {/* ── Hero ── */}

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { SEO } from "@/components/SEO";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -377,6 +378,11 @@ export default function ConsultantDashboard() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="Consultant Dashboard - Foundarly"
+        description="Private dashboard for verified Foundarly consultants to manage bookings, earnings, and follow-ups."
+        noindex={true}
+      />
       {/* Header */}
       <div className="border-b border-border bg-card">
         <div className="container mx-auto px-4 py-6">

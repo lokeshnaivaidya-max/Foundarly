@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import AnimatedSection from "@/components/AnimatedSection";
+import { SEO } from "@/components/SEO";
 import { SkeletonGrid } from "@/components/PageLoader";
 import { blogService } from "@/services/blog";
 
@@ -50,6 +51,11 @@ export default function BlogPage() {
   };
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="The Foundarly Journal - Strategic Advisory & Founder Insights"
+        description="Ideas, playbooks, and strategic frameworks from the industry founders and executives shaping the startup ecosystem."
+        url="https://foundarly.in/blog"
+      />
       <Header />
       <main className="pt-28 pb-24">
         <div className="container mx-auto px-6">

@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import HowItWorksModal from "@/components/HowItWorksModal";
+import { SEO } from "@/components/SEO";
 import { PageLoader } from "@/components/PageLoader";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -115,6 +116,27 @@ export default function ConsultantProfile() {
 
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
+      <SEO
+        title={`${consultant.name} - ${consultant.title || "Business Consultant"}`}
+        description={`${consultant.bio ? consultant.bio.slice(0, 150) + "..." : `Book a 1-on-1 strategic consultation with ${consultant.name} on Foundarly.`}`}
+        url={`https://foundarly.in/consultants/${consultant.id}`}
+        image={consultant.image_url || "https://foundarly.in/og-image.jpg"}
+        structuredData={{
+          "@context": "https://schema.org",
+          "@type": "ProfilePage",
+          "mainEntity": {
+            "@type": "Person",
+            "name": consultant.name,
+            "jobTitle": consultant.title,
+            "description": consultant.bio,
+            "image": consultant.image_url,
+            "worksFor": {
+              "@type": "Organization",
+              "name": "Foundarly"
+            }
+          }
+        }}
+      />
       <Header />
 
       {/* Hero / Header Banner */}

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import AnimatedSection from "@/components/AnimatedSection";
+import { SEO } from "@/components/SEO";
 import { SkeletonGrid } from "@/components/PageLoader";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
@@ -35,6 +36,24 @@ export default function PricingPage() {
   };
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="Consultation Pricing - Transparent & Fair Value"
+        description="Explore Foundarly's transparent consultation pricing. Book 30 or 60-minute 1-on-1 strategy sessions with verified experts with zero hidden fees."
+        url="https://foundarly.in/pricing"
+        structuredData={{
+          "@context": "https://schema.org",
+          "@type": "Product",
+          "name": "Foundarly 1-on-1 Business Consultation",
+          "description": "Private 1-on-1 consultation session with verified industry experts.",
+          "offers": {
+            "@type": "AggregateOffer",
+            "priceCurrency": "INR",
+            "lowPrice": "1500",
+            "highPrice": "5000",
+            "offerCount": "10"
+          }
+        }}
+      />
       <Header />
       <main className="pt-28 pb-24">
         <div className="container mx-auto px-6">

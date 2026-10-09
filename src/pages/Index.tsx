@@ -1,5 +1,6 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import { HomeSEO } from "@/components/SEO";
 import HeroSection from "@/components/home/HeroSection";
 import ServicesSection from "@/components/home/ServicesSection";
 import HowItWorksSection from "@/components/home/HowItWorksSection";
@@ -11,6 +12,7 @@ import ClosingCTASection from "@/components/home/ClosingCTASection";
 const Index = () => {
   return (
     <div className="min-h-screen bg-background">
+      <HomeSEO />
       <Header />
       <main>
         <HeroSection />

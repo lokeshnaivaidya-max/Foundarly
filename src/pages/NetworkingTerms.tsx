@@ -1,6 +1,7 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import AnimatedSection from "@/components/AnimatedSection";
+import { SEO } from "@/components/SEO";
 
 const terms = [
   {
@@ -48,6 +49,11 @@ const terms = [
 export default function NetworkingTermsPage() {
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="Community Terms - Foundarly Networking Hub"
+        description="Guidelines, codes of conduct, and terms of service for members of the Foundarly Founder & Entrepreneur Networking Community."
+        url="https://foundarly.in/networking-terms"
+      />
       <Header />
       <main className="pt-28 pb-24">
         <div className="container mx-auto px-6 max-w-3xl">

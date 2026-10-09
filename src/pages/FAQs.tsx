@@ -3,6 +3,7 @@ import { motion, useInView, useMotionValue, useTransform } from "framer-motion";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import HowItWorksModal from "@/components/HowItWorksModal";
+import { SEO } from "@/components/SEO";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Input } from "@/components/ui/input";
 import { faqsService, FAQ } from "@/services/faqs";
@@ -88,6 +89,23 @@ export default function FAQsPage() {
 
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
+      <SEO
+        title="Frequently Asked Questions (FAQs) - Foundarly"
+        description="Got questions about booking business consultations, session summaries, payments, or the 7-day meeting rejoin window? Find instant answers here."
+        url="https://foundarly.in/faqs"
+        structuredData={{
+          "@context": "https://schema.org",
+          "@type": "FAQPage",
+          "mainEntity": faqs.slice(0, 10).map((f) => ({
+            "@type": "Question",
+            "name": f.question,
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": f.answer,
+            },
+          })),
+        }}
+      />
       <Header />
 
       {/* ── Hero ── */}

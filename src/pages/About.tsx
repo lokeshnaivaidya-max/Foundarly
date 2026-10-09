@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion, useMotionValue, useTransform, useInView, useScroll, useSpring } from "framer-motion";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import { AboutSEO } from "@/components/SEO";
 import { Search, UserCheck, CalendarCheck, Video, FileText, Star, ArrowRight, Zap, Shield, Users, TrendingUp } from "lucide-react";
 
 // ── Floating particle ─────────────────────────────────────────────────────────
@@ -503,6 +504,7 @@ function HowItWorksSection() {
 export default function AboutPage() {
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
+      <AboutSEO />
       <Header />
       <HeroSection />
       <StorySection />

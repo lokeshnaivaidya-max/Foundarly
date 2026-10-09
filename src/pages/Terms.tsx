@@ -1,6 +1,7 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import AnimatedSection from "@/components/AnimatedSection";
+import { SEO } from "@/components/SEO";
 import { Users, Briefcase } from "lucide-react";
 
 const userTerms = [
@@ -90,6 +91,11 @@ function TermsSection({ title, icon: Icon, items, accent }: {
 export default function TermsPage() {
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="Terms & Conditions - Foundarly"
+        description="Review the terms and conditions for clients and consultants on Foundarly, including session codes of conduct, booking policies, and dispute terms."
+        url="https://foundarly.in/terms"
+      />
       <Header />
       <main className="pt-28 pb-24">
         <div className="container mx-auto px-6 max-w-3xl">

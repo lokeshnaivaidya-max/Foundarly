@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion, useInView, useMotionValue, useTransform } from "framer-motion";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import { SEO } from "@/components/SEO";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar, Clock, User, MessageSquare, CreditCard, Video, Star, AlertCircle, Trash2, LogIn, CheckCircle, RefreshCw, RotateCcw } from "lucide-react";
@@ -640,6 +641,11 @@ export default function MyBookingsPage() {
 
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
+      <SEO
+        title="My Bookings - Foundarly"
+        description="View and manage your upcoming consultations, rejoins, and follow-up requests."
+        noindex={true}
+      />
       <Header />
 
       {/* ── Hero ── */}

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import AnimatedSection from '@/components/AnimatedSection';
+import { SEO } from '@/components/SEO';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -108,6 +109,11 @@ export default function ApplyConsultant() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="Become a Consultant - Join Foundarly's Expert Network"
+        description="Apply to become an approved business consultant on Foundarly. Share your expertise, conduct 1-on-1 consultations, and guide founders."
+        url="https://foundarly.in/apply-consultant"
+      />
       <Header />
       <main className="pt-28 pb-24">
         <div className="container mx-auto px-6 max-w-3xl">

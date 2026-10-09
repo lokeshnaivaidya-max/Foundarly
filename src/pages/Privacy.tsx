@@ -1,6 +1,7 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import AnimatedSection from "@/components/AnimatedSection";
+import { SEO } from "@/components/SEO";
 
 const sections = [
   {
@@ -48,6 +49,11 @@ const sections = [
 export default function PrivacyPage() {
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="Privacy Policy - Foundarly"
+        description="Learn how Foundarly protects your personal information, session confidentiality, and privacy rights across consultations and platform features."
+        url="https://foundarly.in/privacy"
+      />
       <Header />
       <main className="pt-28 pb-24">
         <div className="container mx-auto px-6 max-w-3xl">

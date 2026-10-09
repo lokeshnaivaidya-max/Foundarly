@@ -9,6 +9,7 @@ import { CurrencyProvider } from "@/contexts/CurrencyContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AIChatWidget from "@/components/AIChatWidget";
+import { CookieConsent } from "@/components/CookieConsent";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import Index from "./pages/Index";
 import Consultants from "./pages/Consultants";
@@ -67,6 +68,7 @@ const App = () => (
                 <Toaster />
                 <Sonner />
                 <AIChatWidget />
+                <CookieConsent />
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                   <Routes>
                     <Route path="/" element={<Consultants />} />

@@ -136,7 +136,73 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.set("trust proxy", 1);
+  app.use(express.json({ limit: "1mb" }));
+
+  // Global Security & Defense Headers Middleware
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self), geolocation=(self)");
+    if (process.env.NODE_ENV === "production") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+    }
+    next();
+  });
+
+  // Global Multi-Bucket Rate Limiter
+  const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+  function checkRateLimit(key: string, limit: number, windowMs: number): { allowed: boolean; retryAfter: number } {
+    const now = Date.now();
+    const record = rateLimitStore.get(key);
+    if (!record || now > record.resetAt) {
+      rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+      return { allowed: true, retryAfter: 0 };
+    }
+    if (record.count >= limit) {
+      const retryAfter = Math.ceil((record.resetAt - now) / 1000);
+      return { allowed: false, retryAfter };
+    }
+    record.count += 1;
+    return { allowed: true, retryAfter: 0 };
+  }
+
+  // Periodic cleanup of stale rate-limit keys
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, val] of rateLimitStore.entries()) {
+      if (now > val.resetAt) {
+        rateLimitStore.delete(key);
+      }
+    }
+  }, 120000);
+
+  // Rate Limiting Middleware Factory
+  function createRateLimiter(actionName: string, limit: number, windowMs: number) {
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || req.socket.remoteAddress || "unknown_ip";
+      const key = `${actionName}:${clientIp}`;
+      const { allowed, retryAfter } = checkRateLimit(key, limit, windowMs);
+      if (!allowed) {
+        res.setHeader("Retry-After", String(retryAfter));
+        return res.status(429).json({
+          success: false,
+          error: "Too many requests. Please slow down and try again.",
+          code: "RATE_LIMITED",
+          retryAfter,
+        });
+      }
+      next();
+    };
+  }
+
+  // Apply rate limiter to sensitive email and booking endpoints
+  app.use("/api/send-booking-email", createRateLimiter("send_booking_email", 30, 60000));
+  app.use("/api/send-test-email", createRateLimiter("send_test_email", 10, 60000));
+  app.use("/api/verify-smtp", createRateLimiter("verify_smtp", 20, 60000));
+  app.use("/api/follow-ups/request", createRateLimiter("followup_request", 20, 60000));
 
   // API Health Check
   app.get("/api/health", (req, res) => {

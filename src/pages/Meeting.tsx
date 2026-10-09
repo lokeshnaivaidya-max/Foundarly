@@ -4,6 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { bookingsService } from "@/services/bookings";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { SEO } from "@/components/SEO";
 import { Input } from "@/components/ui/input";
 import { Video, VideoOff, Mic, MicOff, PhoneOff, Monitor, MonitorOff, User, Clock, ArrowLeft, AlertCircle, Copy, Check, Link2, Maximize, Minimize, Settings, Users, X, Calendar, RotateCcw, ShieldAlert, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -746,6 +747,11 @@ export default function MeetingPage() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <SEO
+        title="Consultation Meeting Room - Foundarly"
+        description="Private, encrypted video meeting room for 1-on-1 business consultations."
+        noindex={true}
+      />
       {/* Top bar */}
       <div className="border-b border-border bg-card px-4 py-3 flex items-center justify-between gap-4 flex-wrap shadow-sm">
         <div className="flex items-center gap-3">

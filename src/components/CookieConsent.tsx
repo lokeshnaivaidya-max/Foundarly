@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
 import { Cookie, X, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -73,9 +72,9 @@ export function CookieConsent() {
             <h3 className="font-semibold text-sm text-foreground">Privacy &amp; Cookie Preferences</h3>
             <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
               We use necessary cookies for secure authentication and session management. Optional analytics help us enhance consultation reliability. Read our{" "}
-              <Link to="/privacy" className="text-primary hover:underline underline-offset-2">
+              <a href="/privacy" className="text-primary hover:underline underline-offset-2">
                 Privacy Policy
-              </Link>
+              </a>
               .
             </p>
           </div>

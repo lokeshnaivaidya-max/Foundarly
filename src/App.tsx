@@ -67,9 +67,9 @@ const App = () => (
               <TooltipProvider>
                 <Toaster />
                 <Sonner />
-                <AIChatWidget />
-                <CookieConsent />
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                  <AIChatWidget />
+                  <CookieConsent />
                   <Routes>
                     <Route path="/" element={<Consultants />} />
                     <Route path="/home" element={<Index />} />

@@ -88,8 +88,11 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }
   }
 
-  const roomId = body?.roomId;
-  const cleanRoomId = (roomId || '').trim();
+  let cleanRoomId = (body?.roomId || '').trim();
+  if (cleanRoomId.includes('/meeting/')) {
+    cleanRoomId = cleanRoomId.split('/meeting/').pop() || cleanRoomId;
+  }
+  cleanRoomId = cleanRoomId.split('?')[0].split('#')[0].replace(/\/+$/, '').trim();
 
   if (!cleanRoomId || cleanRoomId.length > 255) {
     return res.status(400).json({
@@ -103,17 +106,54 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     const rawBookingId = cleanRoomId.startsWith('foundarly-')
       ? cleanRoomId.replace('foundarly-', '')
       : cleanRoomId;
+    const prefixedRoomId = cleanRoomId.startsWith('foundarly-')
+      ? cleanRoomId
+      : `foundarly-${cleanRoomId}`;
     const isRawUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawBookingId);
+    const isCleanUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanRoomId);
 
-    const baseQuery = supabase
+    // Build flexible OR filter matching room ID variants and booking UUID
+    const orFilters: string[] = [
+      `meeting_room_id.eq.${cleanRoomId}`,
+      `meeting_room_id.eq.${prefixedRoomId}`,
+      `meeting_room_id.eq.${rawBookingId}`,
+    ];
+    if (isRawUuid) {
+      orFilters.push(`id.eq.${rawBookingId}`);
+    }
+    if (isCleanUuid && cleanRoomId !== rawBookingId) {
+      orFilters.push(`id.eq.${cleanRoomId}`);
+    }
+
+    // Scoped client with user token if service role key is not configured
+    const clientToUse = (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY.trim())
+      ? supabase
+      : createClient(supabaseUrl, process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd', {
+          global: {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          },
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+          },
+        });
+
+    const baseQuery = clientToUse
       .from('bookings')
       .select('*, consultants(id, name, title, email, user_id)');
 
-    const { data: bookings, error: bookingError } = await (
-      isRawUuid
-        ? baseQuery.or(`meeting_room_id.eq.${cleanRoomId},id.eq.${rawBookingId}`).limit(1)
-        : baseQuery.eq('meeting_room_id', cleanRoomId).limit(1)
-    );
+    let { data: bookings, error: bookingError } = await baseQuery
+      .or(orFilters.join(','))
+      .limit(1);
+
+    if (bookingError || !bookings || bookings.length === 0) {
+      const flatQuery = clientToUse.from('bookings').select('*');
+      const flatResult = await flatQuery.or(orFilters.join(',')).limit(1);
+      if (flatResult.data && flatResult.data.length > 0) {
+        bookings = flatResult.data;
+        bookingError = null;
+      }
+    }
 
     if (bookingError) {
       console.error('[Meeting Serverless] DB error:', bookingError);
@@ -138,7 +178,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       : booking.consultants;
 
     if (!consultantObj && booking.consultant_id) {
-      const { data: directConsultant } = await supabase
+      const { data: directConsultant } = await clientToUse
         .from('consultants')
         .select('id, name, title, email, user_id')
         .eq('id', booking.consultant_id)

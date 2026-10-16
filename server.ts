@@ -22,10 +22,13 @@ import {
   generateFollowUpConfirmedEmailText,
   generateFollowUpDeclinedEmailHTML,
   generateFollowUpDeclinedEmailText,
+  generateParticipantWaitingEmailHTML,
+  generateParticipantWaitingEmailText,
   EmailBookingData,
   EmailBookingRejectedData,
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
+  EmailParticipantWaitingData,
 } from "./src/utils/emailTemplates.js";
 import { sendEmail, verifySmtpConnection, getSmtpConfig, getSmtpAuditInfo } from "./src/server/mailer.js";
 import { createClient } from "@supabase/supabase-js";
@@ -279,7 +282,14 @@ async function startServer() {
     }
 
     const user = auth.user;
-    const cleanRoomId = (roomId || "").trim();
+    const token = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
+
+    // Clean and normalize roomId: extract room ID if full URL, strip query params and trailing slashes
+    let cleanRoomId = (roomId || "").trim();
+    if (cleanRoomId.includes('/meeting/')) {
+      cleanRoomId = cleanRoomId.split('/meeting/').pop() || cleanRoomId;
+    }
+    cleanRoomId = cleanRoomId.split('?')[0].split('#')[0].replace(/\/+$/, '').trim();
 
     if (!cleanRoomId || cleanRoomId.length > 255) {
       return res.status(400).json({
@@ -291,18 +301,59 @@ async function startServer() {
 
     try {
       const rawBookingId = cleanRoomId.startsWith("foundarly-") ? cleanRoomId.replace("foundarly-", "") : cleanRoomId;
+      const prefixedRoomId = cleanRoomId.startsWith("foundarly-") ? cleanRoomId : `foundarly-${cleanRoomId}`;
       const isRawUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawBookingId);
+      const isCleanUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanRoomId);
 
-      // Query booking and linked consultant details via Supabase Admin Client
-      const baseQuery = supabaseAdminClient
+      // If SUPABASE_SERVICE_ROLE_KEY is available, use supabaseAdminClient (bypasses RLS).
+      // Otherwise, create a client scoped with the authenticated user's bearer token so RLS allows reading their booking.
+      const clientToUse = (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY.trim())
+        ? supabaseAdminClient
+        : createClient(
+            process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co",
+            process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd",
+            {
+              global: {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              },
+              auth: {
+                persistSession: false,
+                autoRefreshToken: false,
+              },
+            }
+          );
+
+      // Build flexible OR filter matching room ID variants and booking UUID
+      const orFilters: string[] = [
+        `meeting_room_id.eq.${cleanRoomId}`,
+        `meeting_room_id.eq.${prefixedRoomId}`,
+        `meeting_room_id.eq.${rawBookingId}`,
+      ];
+      if (isRawUuid) {
+        orFilters.push(`id.eq.${rawBookingId}`);
+      }
+      if (isCleanUuid && cleanRoomId !== rawBookingId) {
+        orFilters.push(`id.eq.${cleanRoomId}`);
+      }
+
+      // Query booking and linked consultant details
+      const baseQuery = clientToUse
         .from("bookings")
         .select("*, consultants(id, name, title, email, user_id)");
 
-      const { data: bookings, error: bookingError } = await (
-        isRawUuid
-          ? baseQuery.or(`meeting_room_id.eq.${cleanRoomId},id.eq.${rawBookingId}`).limit(1)
-          : baseQuery.eq("meeting_room_id", cleanRoomId).limit(1)
-      );
+      let { data: bookings, error: bookingError } = await baseQuery
+        .or(orFilters.join(","))
+        .limit(1);
+
+      // Fallback: If joined query errored or returned empty, try flat bookings select
+      if (bookingError || !bookings || bookings.length === 0) {
+        const flatQuery = clientToUse.from("bookings").select("*");
+        const flatResult = await flatQuery.or(orFilters.join(",")).limit(1);
+        if (flatResult.data && flatResult.data.length > 0) {
+          bookings = flatResult.data;
+          bookingError = null;
+        }
+      }
 
       if (bookingError) {
         console.error("[Meeting Server] Database fetch error:", bookingError);
@@ -328,7 +379,7 @@ async function startServer() {
 
       // Fallback: direct consultant lookup if relationship was not auto-joined
       if (!consultantObj && booking.consultant_id) {
-        const { data: directConsultant } = await supabaseAdminClient
+        const { data: directConsultant } = await clientToUse
           .from("consultants")
           .select("id, name, title, email, user_id")
           .eq("id", booking.consultant_id)
@@ -427,6 +478,251 @@ async function startServer() {
 
   app.get("/api/meeting/:roomId/access", (req, res) => {
     handleMeetingAccessValidation(req.params.roomId, req, res);
+  });
+
+  // Cooldown tracker for waiting participant email notifications
+  // Key: `${bookingId}_${role}`, Value: timestamp (ms)
+  const waitingNotificationCooldowns = new Map<string, number>();
+
+  async function handleMeetingNotifyWaiting(
+    roomIdInput: string | undefined,
+    req: express.Request,
+    res: express.Response
+  ) {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        error: auth.error || "Authentication required.",
+        code: "UNAUTHENTICATED",
+      });
+    }
+
+    let cleanRoomId = (roomIdInput || "").trim();
+    if (cleanRoomId.includes("/meeting/")) {
+      cleanRoomId = cleanRoomId.split("/meeting/").pop() || cleanRoomId;
+    }
+    cleanRoomId = cleanRoomId.split("?")[0].split("#")[0].replace(/\/+$/, "").trim();
+
+    if (!cleanRoomId || cleanRoomId.length > 255) {
+      return res.status(400).json({
+        success: false,
+        error: "Valid meeting room ID is required.",
+        code: "INVALID_ROOM_ID",
+      });
+    }
+
+    try {
+      const rawBookingId = cleanRoomId.startsWith("foundarly-")
+        ? cleanRoomId.replace("foundarly-", "")
+        : cleanRoomId;
+      const prefixedRoomId = cleanRoomId.startsWith("foundarly-")
+        ? cleanRoomId
+        : `foundarly-${cleanRoomId}`;
+      const isRawUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawBookingId);
+      const isCleanUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanRoomId);
+
+      const orFilters: string[] = [
+        `meeting_room_id.eq.${cleanRoomId}`,
+        `meeting_room_id.eq.${prefixedRoomId}`,
+        `meeting_room_id.eq.${rawBookingId}`,
+      ];
+      if (isRawUuid) {
+        orFilters.push(`id.eq.${rawBookingId}`);
+      }
+      if (isCleanUuid && cleanRoomId !== rawBookingId) {
+        orFilters.push(`id.eq.${cleanRoomId}`);
+      }
+
+      const clientToUse = supabaseAdminClient || supabaseUserClient(auth.token);
+
+      const baseQuery = clientToUse
+        .from("bookings")
+        .select("*, consultants(id, name, title, email, user_id)");
+
+      let { data: bookings, error: bookingError } = await baseQuery
+        .or(orFilters.join(","))
+        .limit(1);
+
+      if (bookingError || !bookings || bookings.length === 0) {
+        const flatQuery = clientToUse.from("bookings").select("*");
+        const flatResult = await flatQuery.or(orFilters.join(",")).limit(1);
+        if (flatResult.data && flatResult.data.length > 0) {
+          bookings = flatResult.data;
+          bookingError = null;
+        }
+      }
+
+      if (bookingError || !bookings || bookings.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: "Meeting session not found or invalid meeting link.",
+          code: "ROOM_NOT_FOUND",
+        });
+      }
+
+      const booking = bookings[0];
+
+      let consultantObj = Array.isArray(booking.consultants)
+        ? booking.consultants[0]
+        : booking.consultants;
+
+      if (!consultantObj && booking.consultant_id) {
+        const { data: directConsultant } = await clientToUse
+          .from("consultants")
+          .select("id, name, title, email, user_id")
+          .eq("id", booking.consultant_id)
+          .maybeSingle();
+        if (directConsultant) {
+          consultantObj = directConsultant;
+        }
+      }
+
+      const authCheck = validateParticipantAccess(
+        auth.user,
+        booking,
+        consultantObj,
+        auth.isAdmin
+      );
+
+      if (!authCheck.authorized) {
+        return res.status(403).json({
+          success: false,
+          error: authCheck.reason || "You are not authorized to access this meeting session.",
+          code: authCheck.code || "UNAUTHORIZED_PARTICIPANT",
+        });
+      }
+
+      const eligibility = calculateRejoinEligibility(booking, new Date());
+      if (eligibility.sessionStatus === "expired") {
+        return res.status(410).json({
+          success: false,
+          error: "The 7-day follow-up window for this consultation has concluded.",
+          code: "REJOIN_EXPIRED",
+        });
+      }
+
+      const senderRole = authCheck.role;
+      if (senderRole !== "client" && senderRole !== "consultant") {
+        return res.json({
+          success: true,
+          message: "Admin presence does not trigger participant notification.",
+        });
+      }
+
+      // 3-minute cooldown per booking per sender role to avoid duplicate spam
+      const cooldownKey = `${booking.id}_${senderRole}`;
+      const now = Date.now();
+      const lastSent = waitingNotificationCooldowns.get(cooldownKey) || 0;
+      if (now - lastSent < 3 * 60 * 1000) {
+        return res.json({
+          success: true,
+          throttled: true,
+          message: "Waiting notification was recently sent. Please wait before notifying again.",
+        });
+      }
+
+      const siteUrl = (
+        process.env.APP_URL ||
+        process.env.SITE_URL ||
+        process.env.VITE_SITE_URL ||
+        req.headers.origin ||
+        `http://localhost:${PORT}`
+      ).trim();
+      const effectiveRoomId = booking.meeting_room_id || `foundarly-${booking.id}`;
+      const meetingLink = `${siteUrl}/meeting/${effectiveRoomId}`;
+      const isFollowUp = eligibility.isRejoin || booking.status === "completed";
+
+      let recipientEmail = "";
+      let recipientName = "";
+      let waitingUserName = "";
+
+      if (senderRole === "client") {
+        recipientEmail = consultantObj?.email || "";
+        recipientName = consultantObj?.name || "Consultant";
+        waitingUserName = booking.name || auth.user.email?.split("@")[0] || "Client";
+      } else {
+        recipientEmail = booking.email || "";
+        recipientName = booking.name || "Client";
+        waitingUserName = consultantObj?.name || auth.user.email?.split("@")[0] || "Consultant";
+      }
+
+      if (!recipientEmail || !recipientEmail.includes("@")) {
+        console.warn(`[Meeting Notification] Recipient email missing for booking ${booking.id}`);
+        return res.json({
+          success: false,
+          error: "Recipient email is not available for this booking.",
+        });
+      }
+
+      const waitingData: EmailParticipantWaitingData = {
+        bookingId: booking.id,
+        recipientName,
+        recipientEmail,
+        waitingUserName,
+        waitingUserRole: senderRole,
+        meetingLink,
+        meetingRoomId: effectiveRoomId,
+        date: booking.date,
+        time: booking.time,
+        isFollowUp,
+      };
+
+      const emailHtml = generateParticipantWaitingEmailHTML(waitingData);
+      const emailText = generateParticipantWaitingEmailText(waitingData);
+      const emailSubject = senderRole === "client"
+        ? `${waitingUserName} is waiting in your Foundarly meeting room`
+        : `Your consultant, ${waitingUserName}, is waiting in your Foundarly meeting room`;
+
+      const smtpConfig = getSmtpConfig();
+      if (!smtpConfig.pass) {
+        console.warn("[Meeting Notification] SMTP_PASS not set. Notification recorded in dev log.");
+        waitingNotificationCooldowns.set(cooldownKey, now);
+        return res.json({
+          success: true,
+          simulated: true,
+          message: `Notification simulated (SMTP_PASS not configured). Target: ${recipientEmail}`,
+          recipient: recipientEmail,
+        });
+      }
+
+      const mailResult = await sendEmail({
+        from: smtpConfig.defaultFrom,
+        to: recipientEmail,
+        replyTo: smtpConfig.replyTo,
+        subject: emailSubject,
+        html: emailHtml,
+        text: emailText,
+      });
+
+      waitingNotificationCooldowns.set(cooldownKey, now);
+
+      if (!mailResult.success) {
+        console.error("[Meeting Notification] Email send failed:", mailResult.error);
+        return res.status(500).json({
+          success: false,
+          error: mailResult.error || "Failed to send waiting notification email.",
+        });
+      }
+
+      console.log(`[Meeting Notification] Waiting alert sent to ${recipientEmail} for booking ${booking.id}`);
+      return res.json({
+        success: true,
+        message: `Notification sent to ${recipientEmail}`,
+        recipient: recipientEmail,
+      });
+    } catch (err: any) {
+      console.error("[Meeting Notification] Internal error:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Internal error processing waiting notification.",
+      });
+    }
+  }
+
+  // API Endpoint: Send email notification when a participant is waiting in room
+  app.post("/api/meeting/notify-waiting", (req, res) => {
+    handleMeetingNotifyWaiting(req.body?.roomId, req, res);
   });
 
   // =========================================================================

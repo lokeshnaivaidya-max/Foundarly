@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SEO } from "@/components/SEO";
 import { Input } from "@/components/ui/input";
-import { Video, VideoOff, Mic, MicOff, PhoneOff, Monitor, MonitorOff, User, Clock, ArrowLeft, AlertCircle, Copy, Check, Link2, Maximize, Minimize, Settings, Users, X, Calendar, RotateCcw, ShieldAlert, AlertTriangle } from "lucide-react";
+import { Video, VideoOff, Mic, MicOff, PhoneOff, Monitor, MonitorOff, User, Clock, ArrowLeft, AlertCircle, Copy, Check, Link2, Maximize, Minimize, Settings, Users, X, Calendar, RotateCcw, ShieldAlert, AlertTriangle, Bell, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { PageLoader } from "@/components/PageLoader";
 import { motion, AnimatePresence } from "framer-motion";
@@ -310,6 +310,32 @@ export default function MeetingPage() {
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [rescheduling, setRescheduling] = useState(false);
 
+  const [waitingNotificationSent, setWaitingNotificationSent] = useState(false);
+  const [waitingNotificationSending, setWaitingNotificationSending] = useState(false);
+  const hasTriggeredNotificationRef = useRef(false);
+
+  const handleManualNotifyWaiting = useCallback(async () => {
+    if (!roomId) return;
+    setWaitingNotificationSending(true);
+    try {
+      const res = await meetingService.notifyWaiting(roomId);
+      if (res.success) {
+        setWaitingNotificationSent(true);
+        if (res.throttled) {
+          toast.info("A notification was already sent recently.");
+        } else {
+          toast.success("Notification sent to the other participant!");
+        }
+      } else {
+        toast.error(res.error || "Failed to send notification.");
+      }
+    } catch {
+      toast.error("Network error sending notification.");
+    } finally {
+      setWaitingNotificationSending(false);
+    }
+  }, [roomId]);
+
   // Copy meeting link to clipboard
   const copyMeetingLink = () => {
     const meetingUrl = `${window.location.origin}/meeting/${booking?.meeting_room_id}`;
@@ -486,6 +512,27 @@ export default function MeetingPage() {
       await service.joinRoom(roomId || 'default-room');
 
       toast.success("Connected to meeting room!");
+
+      // 3. Automatically notify the other participant if they are not yet present in the room
+      if (!hasTriggeredNotificationRef.current && roomId) {
+        hasTriggeredNotificationRef.current = true;
+        setWaitingNotificationSending(true);
+        meetingService.notifyWaiting(roomId).then((res) => {
+          setWaitingNotificationSending(false);
+          if (res.success) {
+            setWaitingNotificationSent(true);
+            const otherParty = userRole === 'client'
+              ? (booking?.consultants?.name || 'your consultant')
+              : (booking?.name || 'the client');
+            if (!res.throttled) {
+              toast.info(`Email notification sent to ${otherParty} that you're waiting in the meeting room.`);
+            }
+          }
+        }).catch((err) => {
+          setWaitingNotificationSending(false);
+          console.warn("[Meeting] Waiting notification warning:", err);
+        });
+      }
     } catch (error: any) {
       console.error("❌ ERROR in startCall:", error);
       console.log(error);
@@ -862,6 +909,28 @@ export default function MeetingPage() {
                             </p>
                           </div>
                         )}
+
+                        {/* Participant Notification Status Banner */}
+                        <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 text-xs space-y-2 text-left">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 text-primary font-medium text-xs">
+                              <Bell className="h-3.5 w-3.5" />
+                              <span>{waitingNotificationSent ? "Email Alert Dispatched" : "Participant Notification"}</span>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={waitingNotificationSending}
+                              onClick={handleManualNotifyWaiting}
+                              className="h-6 text-[11px] px-2 text-primary hover:bg-primary/10"
+                            >
+                              {waitingNotificationSending ? "Sending..." : "Resend Alert"}
+                            </Button>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground leading-normal">
+                            An email notification with the meeting room link has been dispatched to {userRole === 'client' ? (booking?.consultants?.name || 'your consultant') : (booking?.name || 'the client')} inviting them to connect.
+                          </p>
+                        </div>
 
                         <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground bg-secondary/60 rounded-full py-1.5 px-3">
                           <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />

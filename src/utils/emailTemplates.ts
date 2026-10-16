@@ -1083,3 +1083,133 @@ If you have questions or require further assistance, please contact us at hello@
 Foundarly Consultation Platform`;
 }
 
+/* ==========================================================================
+   PARTICIPANT WAITING IN MEETING ROOM NOTIFICATION EMAIL
+   ========================================================================== */
+
+export interface EmailParticipantWaitingData {
+  bookingId: string;
+  recipientName: string;
+  recipientEmail: string;
+  waitingUserName: string;
+  waitingUserRole: 'client' | 'consultant';
+  meetingLink: string;
+  meetingRoomId: string;
+  date?: string;
+  time?: string;
+  isFollowUp?: boolean;
+}
+
+export function generateParticipantWaitingEmailHTML(data: EmailParticipantWaitingData): string {
+  const isClientWaiting = data.waitingUserRole === 'client';
+  const roleTitle = isClientWaiting ? 'Client' : 'Consultant';
+  const headerTitle = isClientWaiting
+    ? `${escapeHTML(data.waitingUserName)} is waiting in the meeting room`
+    : `Your consultant is waiting in the meeting room`;
+  const subTitle = data.isFollowUp ? '7-Day Follow-Up Consultation' : 'Scheduled Consultation Session';
+
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHTML(headerTitle)} - Foundarly</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06); border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 36px 30px; text-align: center; border-bottom: 3px solid #d97706;">
+              <p style="margin: 0 0 8px 0; font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #f59e0b;">Foundarly • Live Session Alert</p>
+              <h1 style="margin: 0 0 6px 0; color: #ffffff; font-size: 22px; font-weight: 700; line-height: 28px;">${escapeHTML(headerTitle)}</h1>
+              <p style="margin: 0; color: #94a3b8; font-size: 13px;">${escapeHTML(subTitle)}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 28px;">
+              <p style="font-size: 15px; line-height: 24px; margin: 0 0 16px 0;">Hello <strong>${escapeHTML(data.recipientName)}</strong>,</p>
+              <p style="font-size: 14px; line-height: 22px; color: #475569; margin: 0 0 24px 0;">
+                <strong>${escapeHTML(data.waitingUserName)}</strong> (${escapeHTML(roleTitle)}) has joined your consultation meeting room and is waiting for you to connect.
+              </p>
+
+              <!-- Meeting Details Box -->
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td style="padding-bottom: 10px; font-size: 13px; color: #64748b; width: 140px;">Session Type:</td>
+                    <td style="padding-bottom: 10px; font-size: 13px; font-weight: 600; color: #1e293b;">
+                      ${data.isFollowUp ? '7-Day Follow-Up Clarification' : 'Consultation Meeting'}
+                    </td>
+                  </tr>
+                  ${data.date ? `
+                  <tr>
+                    <td style="padding-bottom: 10px; font-size: 13px; color: #64748b;">Scheduled Date:</td>
+                    <td style="padding-bottom: 10px; font-size: 13px; font-weight: 600; color: #1e293b;">${escapeHTML(data.date)} ${data.time ? `at ${escapeHTML(data.time)}` : ''}</td>
+                  </tr>
+                  ` : ''}
+                  <tr>
+                    <td style="padding-bottom: 10px; font-size: 13px; color: #64748b;">Waiting Participant:</td>
+                    <td style="padding-bottom: 10px; font-size: 13px; font-weight: 600; color: #d97706;">
+                      ${escapeHTML(data.waitingUserName)} (${escapeHTML(roleTitle)})
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="font-size: 13px; color: #64748b;">Room ID:</td>
+                    <td style="font-size: 13px; font-family: monospace; color: #334155;">${escapeHTML(data.meetingRoomId)}</td>
+                  </tr>
+                </table>
+              </div>
+
+              <!-- CTA Button -->
+              <div style="text-align: center; margin: 28px 0;">
+                <a href="${escapeHTML(data.meetingLink)}" style="display: inline-block; background: linear-gradient(135deg, #d97706 0%, #b45309 100%); color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 600; padding: 14px 36px; border-radius: 8px; box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3);">
+                  Join Meeting Now &rarr;
+                </a>
+              </div>
+
+              <p style="font-size: 12px; line-height: 18px; color: #64748b; text-align: center; margin: 0 0 8px 0;">
+                Or copy and paste this link into your browser:
+              </p>
+              <p style="font-size: 12px; font-family: monospace; color: #d97706; text-align: center; word-break: break-all; margin: 0 0 24px 0;">
+                <a href="${escapeHTML(data.meetingLink)}" style="color: #d97706; text-decoration: underline;">${escapeHTML(data.meetingLink)}</a>
+              </p>
+
+              <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+              <p style="font-size: 12px; color: #94a3b8; line-height: 18px; margin: 0; text-align: center;">
+                Both participants can access this secure meeting room directly without generating a new link.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export function generateParticipantWaitingEmailText(data: EmailParticipantWaitingData): string {
+  const isClientWaiting = data.waitingUserRole === 'client';
+  const roleTitle = isClientWaiting ? 'Client' : 'Consultant';
+
+  return `Meeting Alert: ${data.waitingUserName} is waiting in the room - Foundarly
+
+Hello ${data.recipientName},
+
+${data.waitingUserName} (${roleTitle}) has joined your consultation room and is waiting for you to connect.
+
+Session Details:
+- Type: ${data.isFollowUp ? '7-Day Follow-Up Clarification' : 'Consultation Meeting'}
+${data.date ? `- Scheduled Date: ${data.date} ${data.time ? `at ${data.time}` : ''}\n` : ''}- Waiting Participant: ${data.waitingUserName} (${roleTitle})
+- Room ID: ${data.meetingRoomId}
+
+Join the meeting directly using this link:
+${data.meetingLink}
+
+---
+Foundarly Consultation Platform`;
+}
+
+

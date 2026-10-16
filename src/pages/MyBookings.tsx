@@ -296,13 +296,18 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
             </>
           )}
           {/* Join / Rejoin / View call */}
-          {booking.meeting_room_id && (booking.status === "confirmed" || booking.status === "completed") && (() => {
+          {(() => {
+            const effectiveRoomId = booking.meeting_room_id || (booking.id ? (booking.id.startsWith('foundarly-') ? booking.id : `foundarly-${booking.id}`) : null);
+            if (!effectiveRoomId || (booking.status !== "confirmed" && booking.status !== "completed")) {
+              return null;
+            }
+
             const eligibility = calculateRejoinEligibility(booking, new Date());
             const sessionStatus = eligibility.sessionStatus;
 
             if (sessionStatus === "live") {
               return (
-                <Link to={`/meeting/${booking.meeting_room_id}`}>
+                <Link to={`/meeting/${effectiveRoomId}`}>
                   <Button size="sm" className="gap-2 glow-gold-sm">
                     <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
                     <Video className="h-3.5 w-3.5" /> Join Call
@@ -314,7 +319,7 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
             if (sessionStatus === "rejoin_eligible") {
               if (followUp && followUp.status === "confirmed") {
                 return (
-                  <Link to={`/meeting/${booking.meeting_room_id}`}>
+                  <Link to={`/meeting/${effectiveRoomId}`}>
                     <Button size="sm" className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium">
                       <Video className="h-3.5 w-3.5" /> Join Confirmed Follow-up
                     </Button>
@@ -324,7 +329,7 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
 
               if (followUp && (followUp.status === "pending_consultant" || followUp.status === "alternative_proposed")) {
                 return (
-                  <Link to={`/meeting/${booking.meeting_room_id}`}>
+                  <Link to={`/meeting/${effectiveRoomId}`}>
                     <Button size="sm" variant="outline" className="gap-2 text-xs">
                       <Video className="h-3.5 w-3.5" /> View Meeting Room
                     </Button>
@@ -341,7 +346,7 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
                   >
                     <RotateCcw className="h-3.5 w-3.5 text-amber-500" /> Request Follow-up ({eligibility.rejoinDaysRemaining}d left)
                   </Button>
-                  <Link to={`/meeting/${booking.meeting_room_id}`}>
+                  <Link to={`/meeting/${effectiveRoomId}`}>
                     <Button size="sm" variant="ghost" className="gap-1.5 text-xs text-muted-foreground hover:bg-secondary">
                       <Video className="h-3.5 w-3.5" /> Quick Rejoin
                     </Button>
@@ -353,7 +358,7 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
             if (sessionStatus === "upcoming") {
               return (
                 <>
-                  <Link to={`/meeting/${booking.meeting_room_id}`}>
+                  <Link to={`/meeting/${effectiveRoomId}`}>
                     <Button size="sm" variant="outline" className="gap-2 text-xs">
                       <Clock className="h-3.5 w-3.5" /> View Session
                     </Button>
@@ -373,6 +378,11 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground bg-secondary/80 border border-border rounded-full px-3 py-1">
                   <AlertCircle className="h-3 w-3 text-muted-foreground" /> Meeting Ended
                 </span>
+                <Link to={`/meeting/${effectiveRoomId}`}>
+                  <Button size="sm" variant="ghost" className="gap-1.5 text-xs text-muted-foreground hover:bg-secondary">
+                    <Clock className="h-3.5 w-3.5" /> View Session
+                  </Button>
+                </Link>
                 {(!booking.reschedule_status || booking.reschedule_status === "none" || booking.reschedule_status === "rejected") && (
                   <Button size="sm" variant="outline" className="gap-2 text-xs" onClick={() => onReschedule(booking)}>
                     <RefreshCw className="h-3.5 w-3.5" /> Reschedule
@@ -588,11 +598,16 @@ export default function MyBookingsPage() {
   };
 
   const handleJoinWithId = () => {
-    if (!manualMeetingId.trim()) {
+    let cleanId = manualMeetingId.trim();
+    if (!cleanId) {
       toast.error("Please enter a meeting ID");
       return;
     }
-    navigate(`/meeting/${manualMeetingId.trim()}`);
+    if (cleanId.includes('/meeting/')) {
+      cleanId = cleanId.split('/meeting/').pop() || cleanId;
+    }
+    cleanId = cleanId.split('?')[0].split('#')[0].replace(/\/+$/, '').trim();
+    navigate(`/meeting/${cleanId}`);
   };
 
   const handleRescheduleRequest = async () => {

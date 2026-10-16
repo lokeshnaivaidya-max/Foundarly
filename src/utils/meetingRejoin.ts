@@ -311,10 +311,11 @@ export function validateParticipantAccess(
   }
 
   // 3. Consultant verification
+  const isConsultantByDirectId = Boolean(booking.consultant_id && booking.consultant_id === user.id);
   const isConsultantById = Boolean(consultant?.user_id && consultant.user_id === user.id);
   const isConsultantByEmail = Boolean(userEmail && consultantEmail && userEmail === consultantEmail);
 
-  if (isConsultantById || isConsultantByEmail) {
+  if (isConsultantByDirectId || isConsultantById || isConsultantByEmail) {
     return { authorized: true, role: 'consultant' };
   }
 

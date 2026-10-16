@@ -637,14 +637,17 @@ export default function ConsultantDashboard() {
                       </div>
 
                       <div className="flex flex-col gap-2">
-                        {booking.meeting_room_id && (() => {
+                        {(() => {
+                          const effectiveRoomId = booking.meeting_room_id || (booking.id ? (booking.id.startsWith('foundarly-') ? booking.id : `foundarly-${booking.id}`) : '');
+                          if (!effectiveRoomId) return null;
+
                           const eligibility = calculateRejoinEligibility(booking, new Date());
                           if (eligibility.sessionStatus === "rejoin_eligible") {
                             return (
                               <>
                                 <Button
                                   size="sm"
-                                  onClick={() => navigate(`/meeting/${booking.meeting_room_id}`)}
+                                  onClick={() => navigate(`/meeting/${effectiveRoomId}`)}
                                   className="gap-2 bg-amber-500/15 text-amber-500 hover:bg-amber-500/25 border border-amber-500/30 text-xs font-medium"
                                   title={`Follow-up rejoin available until ${eligibility.rejoinDeadline.toLocaleDateString()}`}
                                 >
@@ -654,10 +657,10 @@ export default function ConsultantDashboard() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => copyMeetingLink(booking.meeting_room_id)}
+                                  onClick={() => copyMeetingLink(effectiveRoomId)}
                                   className="gap-2 text-xs"
                                 >
-                                  {linkCopied === booking.meeting_room_id ? (
+                                  {linkCopied === effectiveRoomId ? (
                                     <Check className="h-3.5 w-3.5" />
                                   ) : (
                                     <Copy className="h-3.5 w-3.5" />
@@ -667,49 +670,48 @@ export default function ConsultantDashboard() {
                               </>
                             );
                           }
-                          return null;
-                        })()}
 
-                        {booking.status === "confirmed" && (() => {
-                          const eligibility = calculateRejoinEligibility(booking, new Date());
-                          if (eligibility.sessionStatus === "rejoin_eligible") return null;
-                          return (
-                            <>
-                              <Button
-                                size="sm"
-                                onClick={() => navigate(`/meeting/${booking.meeting_room_id}`)}
-                                className="gap-2"
-                              >
-                                <Video className="h-4 w-4" />
-                                Join Meeting
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => copyMeetingLink(booking.meeting_room_id)}
-                                className="gap-2"
-                              >
-                                {linkCopied === booking.meeting_room_id ? (
-                                  <Check className="h-4 w-4" />
-                                ) : (
-                                  <Copy className="h-4 w-4" />
-                                )}
-                                Copy Link
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setSelectedBooking(booking);
-                                  setRescheduleDialogOpen(true);
-                                }}
-                                className="gap-2"
-                              >
-                                <RefreshCw className="h-4 w-4" />
-                                Reschedule
-                              </Button>
-                            </>
-                          );
+                          if (booking.status === "confirmed") {
+                            return (
+                              <>
+                                <Button
+                                  size="sm"
+                                  onClick={() => navigate(`/meeting/${effectiveRoomId}`)}
+                                  className="gap-2"
+                                >
+                                  <Video className="h-4 w-4" />
+                                  Join Meeting
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => copyMeetingLink(effectiveRoomId)}
+                                  className="gap-2"
+                                >
+                                  {linkCopied === effectiveRoomId ? (
+                                    <Check className="h-4 w-4" />
+                                  ) : (
+                                    <Copy className="h-4 w-4" />
+                                  )}
+                                  Copy Link
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setSelectedBooking(booking);
+                                    setRescheduleDialogOpen(true);
+                                  }}
+                                  className="gap-2"
+                                >
+                                  <RefreshCw className="h-4 w-4" />
+                                  Reschedule
+                                </Button>
+                              </>
+                            );
+                          }
+
+                          return null;
                         })()}
 
                         {booking.status === "completed" && booking.consultant_earnings > 0 && (
@@ -874,31 +876,34 @@ export default function ConsultantDashboard() {
                             </div>
                           )}
 
-                          {isConfirmed && (
-                            <>
-                              <Button
-                                size="sm"
-                                className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs"
-                                onClick={() => navigate(`/meeting/${fu.meeting_room_id}`)}
-                              >
-                                <Video className="h-3.5 w-3.5" />
-                                Enter Meeting Room
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => copyMeetingLink(fu.meeting_room_id)}
-                                className="gap-2 text-xs"
-                              >
-                                {linkCopied === fu.meeting_room_id ? (
-                                  <Check className="h-3.5 w-3.5" />
-                                ) : (
-                                  <Copy className="h-3.5 w-3.5" />
-                                )}
-                                Copy Room Link
-                              </Button>
-                            </>
-                          )}
+                          {isConfirmed && (() => {
+                            const effectiveFuRoomId = fu.meeting_room_id || (fu.booking_id ? (fu.booking_id.startsWith('foundarly-') ? fu.booking_id : `foundarly-${fu.booking_id}`) : '');
+                            return (
+                              <>
+                                <Button
+                                  size="sm"
+                                  className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs"
+                                  onClick={() => navigate(`/meeting/${effectiveFuRoomId}`)}
+                                >
+                                  <Video className="h-3.5 w-3.5" />
+                                  Enter Meeting Room
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => copyMeetingLink(effectiveFuRoomId)}
+                                  className="gap-2 text-xs"
+                                >
+                                  {linkCopied === effectiveFuRoomId ? (
+                                    <Check className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <Copy className="h-3.5 w-3.5" />
+                                  )}
+                                  Copy Room Link
+                                </Button>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     </Card>

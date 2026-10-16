@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import {
   calculateRejoinEligibility,
   validateParticipantAccess,
+  parseSessionTimes,
 } from '../../src/utils/meetingRejoin.js';
 import { checkDistributedRateLimit, extractClientIp } from '../../src/server/rateLimiter.js';
 
@@ -38,7 +39,6 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
   // Rate Limiting by IP (Distributed across instances with in-memory fallback)
   const ip = extractClientIp(req);
   const rateLimit = await checkDistributedRateLimit(`meeting_rate_${ip}`, 60, 60000);
-
   if (!rateLimit.allowed) {
     if (rateLimit.retryAfter) {
       res.setHeader('Retry-After', String(rateLimit.retryAfter));
@@ -112,19 +112,6 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     const isRawUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawBookingId);
     const isCleanUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanRoomId);
 
-    // Build flexible OR filter matching room ID variants and booking UUID
-    const orFilters: string[] = [
-      `meeting_room_id.eq.${cleanRoomId}`,
-      `meeting_room_id.eq.${prefixedRoomId}`,
-      `meeting_room_id.eq.${rawBookingId}`,
-    ];
-    if (isRawUuid) {
-      orFilters.push(`id.eq.${rawBookingId}`);
-    }
-    if (isCleanUuid && cleanRoomId !== rawBookingId) {
-      orFilters.push(`id.eq.${cleanRoomId}`);
-    }
-
     // Scoped client with user token if service role key is not configured
     const clientToUse = (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY.trim())
       ? supabase
@@ -138,33 +125,103 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           },
         });
 
-    const baseQuery = clientToUse
-      .from('bookings')
-      .select('*, consultants(id, name, title, email, user_id)');
+    let booking: any = null;
+    let consultantObj: any = null;
 
-    let { data: bookings, error: bookingError } = await baseQuery
-      .or(orFilters.join(','))
-      .limit(1);
+    // 1. Prioritize SECURITY DEFINER RPC lookup (bypasses RLS safely and joins consultant details)
+    try {
+      const { data: rpcData, error: rpcError } = await clientToUse
+        .rpc('lookup_meeting_room', { p_room_id: cleanRoomId });
 
-    if (bookingError || !bookings || bookings.length === 0) {
-      const flatQuery = clientToUse.from('bookings').select('*');
-      const flatResult = await flatQuery.or(orFilters.join(',')).limit(1);
-      if (flatResult.data && flatResult.data.length > 0) {
-        bookings = flatResult.data;
-        bookingError = null;
+      if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+        const row = rpcData[0];
+        booking = {
+          id: row.id,
+          user_id: row.user_id,
+          consultant_id: row.consultant_id,
+          name: row.name,
+          email: row.email,
+          date: row.date,
+          time: row.time,
+          message: row.message,
+          status: row.status,
+          payment_status: row.payment_status,
+          session_duration: row.session_duration,
+          session_price: row.session_price,
+          meeting_room_id: row.meeting_room_id || cleanRoomId,
+          participants_count: row.participants_count,
+          meeting_started_at: row.meeting_started_at,
+          meeting_ended_at: row.meeting_ended_at,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+        };
+        if (row.consultant_name || row.consultant_email || row.consultant_user_id) {
+          consultantObj = {
+            id: row.consultant_id,
+            name: row.consultant_name,
+            email: row.consultant_email,
+            title: row.consultant_title,
+            user_id: row.consultant_user_id,
+          };
+        }
+      }
+    } catch {
+      // Non-blocking: proceed to direct table queries
+    }
+
+    // 2. Fallback to direct table queries if RPC is not present or returned empty
+    if (!booking) {
+      const orFilters: string[] = [
+        `meeting_room_id.eq.${cleanRoomId}`,
+        `meeting_room_id.eq.${prefixedRoomId}`,
+        `meeting_room_id.eq.${rawBookingId}`,
+      ];
+      if (isRawUuid) {
+        orFilters.push(`id.eq.${rawBookingId}`);
+      }
+      if (isCleanUuid && cleanRoomId !== rawBookingId) {
+        orFilters.push(`id.eq.${cleanRoomId}`);
+      }
+
+      const baseQuery = clientToUse
+        .from('bookings')
+        .select('*, consultants(id, name, title, email, user_id)');
+
+      let { data: bookings, error: bookingError } = await baseQuery
+        .or(orFilters.join(','))
+        .limit(1);
+
+      if (bookingError || !bookings || bookings.length === 0) {
+        const flatQuery = clientToUse.from('bookings').select('*');
+        const flatResult = await flatQuery.or(orFilters.join(',')).limit(1);
+        if (flatResult.data && flatResult.data.length > 0) {
+          bookings = flatResult.data;
+          bookingError = null;
+        }
+      }
+
+      // If user email is present, check if query filtered by email can locate the booking under email-scoped RLS
+      if ((bookingError || !bookings || bookings.length === 0) && user?.email) {
+        const userEmail = user.email.toLowerCase().trim();
+        const emailQuery = clientToUse
+          .from('bookings')
+          .select('*, consultants(id, name, title, email, user_id)')
+          .eq('email', userEmail);
+        const emailResult = await emailQuery.or(orFilters.join(',')).limit(1);
+        if (emailResult.data && emailResult.data.length > 0) {
+          bookings = emailResult.data;
+          bookingError = null;
+        }
+      }
+
+      if (bookings && bookings.length > 0) {
+        booking = bookings[0];
+        consultantObj = Array.isArray(booking.consultants)
+          ? booking.consultants[0]
+          : booking.consultants;
       }
     }
 
-    if (bookingError) {
-      console.error('[Meeting Serverless] DB error:', bookingError);
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to verify meeting session due to a database error.',
-        code: 'DATABASE_ERROR',
-      });
-    }
-
-    const booking = bookings?.[0];
     if (!booking) {
       return res.status(404).json({
         success: false,
@@ -173,16 +230,13 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       });
     }
 
-    let consultantObj = Array.isArray(booking.consultants)
-      ? booking.consultants[0]
-      : booking.consultants;
-
     if (!consultantObj && booking.consultant_id) {
       const { data: directConsultant } = await clientToUse
         .from('consultants')
         .select('id, name, title, email, user_id')
         .eq('id', booking.consultant_id)
         .maybeSingle();
+
       if (directConsultant) {
         consultantObj = directConsultant;
       }
@@ -202,6 +256,37 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       });
     }
 
+    // Auto-link guest booking user_id if client is now logged in with matching email
+    if (!booking.user_id && user.id && authResult.role === 'client') {
+      try {
+        await clientToUse
+          .from('bookings')
+          .update({ user_id: user.id })
+          .eq('id', booking.id);
+        booking.user_id = user.id;
+      } catch {
+        // Non-blocking self-healing attempt
+      }
+    }
+
+    // Load active follow-up request if present
+    let followUp: any = null;
+    try {
+      const { data: fuData } = await clientToUse
+        .from('follow_up_requests')
+        .select('*')
+        .eq('booking_id', booking.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (fuData) {
+        followUp = fuData;
+      }
+    } catch {
+      // Non-blocking
+    }
+
+    const sessionTimes = parseSessionTimes(booking);
     const timingResult = calculateRejoinEligibility(booking);
 
     return res.status(200).json({
@@ -211,19 +296,34 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       isRejoin: timingResult.isRejoin,
       sessionStatus: timingResult.sessionStatus,
       role: authResult.role,
+      followUp: followUp || null,
       timing: {
-        scheduledStart: timingResult.rejoinDeadline.toISOString(),
+        scheduledStart: sessionTimes.scheduledStart.toISOString(),
+        scheduledEnd: sessionTimes.scheduledEnd.toISOString(),
         rejoinDeadline: timingResult.rejoinDeadline.toISOString(),
         rejoinTimeRemainingMs: timingResult.rejoinTimeRemainingMs,
         rejoinDaysRemaining: timingResult.rejoinDaysRemaining,
+        timeUntilStartMs: timingResult.timeUntilStartMs,
         serverTime: new Date().toISOString(),
       },
       booking: {
         id: booking.id,
-        meeting_room_id: booking.meeting_room_id || `foundarly-${booking.id}`,
+        meeting_room_id: booking.meeting_room_id || cleanRoomId,
+        user_id: booking.user_id,
+        consultant_id: booking.consultant_id,
         date: booking.date,
         time: booking.time,
+        session_duration: booking.session_duration || 60,
         status: booking.status,
+        name: booking.name,
+        email: booking.email,
+        consultants: consultantObj ? {
+          id: consultantObj.id,
+          name: consultantObj.name,
+          title: consultantObj.title,
+          email: consultantObj.email,
+          user_id: consultantObj.user_id,
+        } : undefined,
       },
     });
   } catch (err: unknown) {

@@ -144,20 +144,58 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           },
         });
 
-    const baseQuery = clientToUse
-      .from('bookings')
-      .select('*, consultants(id, name, title, email, user_id)');
+    let bookings: any[] | null = null;
+    let bookingError: any = null;
 
-    let { data: bookings, error: bookingError } = await baseQuery
-      .or(orFilters.join(','))
-      .limit(1);
+    // 1. Prioritize SECURITY DEFINER RPC lookup
+    try {
+      const { data: rpcData, error: rpcError } = await clientToUse
+        .rpc('lookup_meeting_room', { p_room_id: cleanRoomId });
+      if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+        const row = rpcData[0];
+        bookings = [{
+          ...row,
+          consultants: (row.consultant_name || row.consultant_email || row.consultant_user_id) ? {
+            id: row.consultant_id,
+            name: row.consultant_name,
+            email: row.consultant_email,
+            title: row.consultant_title,
+            user_id: row.consultant_user_id,
+          } : undefined,
+        }];
+      }
+    } catch {
+      // Non-blocking
+    }
 
-    if (bookingError || !bookings || bookings.length === 0) {
-      const flatQuery = clientToUse.from('bookings').select('*');
-      const flatResult = await flatQuery.or(orFilters.join(',')).limit(1);
-      if (flatResult.data && flatResult.data.length > 0) {
-        bookings = flatResult.data;
-        bookingError = null;
+    if (!bookings || bookings.length === 0) {
+      const baseQuery = clientToUse
+        .from('bookings')
+        .select('*, consultants(id, name, title, email, user_id)');
+
+      const baseRes = await baseQuery.or(orFilters.join(',')).limit(1);
+      bookings = baseRes.data;
+      bookingError = baseRes.error;
+
+      if (bookingError || !bookings || bookings.length === 0) {
+        const flatQuery = clientToUse.from('bookings').select('*');
+        const flatResult = await flatQuery.or(orFilters.join(',')).limit(1);
+        if (flatResult.data && flatResult.data.length > 0) {
+          bookings = flatResult.data;
+          bookingError = null;
+        }
+      }
+
+      if ((bookingError || !bookings || bookings.length === 0) && user?.email) {
+        const emailQuery = clientToUse
+          .from('bookings')
+          .select('*, consultants(id, name, title, email, user_id)')
+          .eq('email', user.email.toLowerCase().trim());
+        const emailResult = await emailQuery.or(orFilters.join(',')).limit(1);
+        if (emailResult.data && emailResult.data.length > 0) {
+          bookings = emailResult.data;
+          bookingError = null;
+        }
       }
     }
 

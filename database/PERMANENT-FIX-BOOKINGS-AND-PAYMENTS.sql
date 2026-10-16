@@ -1,5 +1,5 @@
 -- =====================================================
--- PERMANENT FIX FOR BOOKING & PAYMENT PIPELINE + RLS
+-- SECURE FIX FOR BOOKING & PAYMENT PIPELINE + RLS
 -- =====================================================
 -- Run this script in the Supabase SQL Editor
 -- =====================================================
@@ -57,14 +57,39 @@ CREATE TABLE IF NOT EXISTS upi_payments (
 );
 
 -- 4. ENABLE REALTIME REPLICATION FOR BOOKINGS AND UPI_PAYMENTS
-ALTER PUBLICATION supabase_realtime ADD TABLE bookings;
-ALTER PUBLICATION supabase_realtime ADD TABLE upi_payments;
+DO $$
+BEGIN
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE bookings;
+  EXCEPTION WHEN duplicate_object THEN
+    -- Table already in publication
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE upi_payments;
+  EXCEPTION WHEN duplicate_object THEN
+    -- Table already in publication
+  END;
+END;
+$$;
 
 -- 5. ROW LEVEL SECURITY (RLS) POLICIES
-
--- Enable RLS
 ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE upi_payments ENABLE ROW LEVEL SECURITY;
+
+-- Helper admin function
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  ) OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = 'admin@foundarly.com';
+$$;
+
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated, service_role, anon;
 
 -- Drop existing policies to prevent conflicts
 DROP POLICY IF EXISTS "Anyone can create bookings" ON bookings;
@@ -77,76 +102,100 @@ DROP POLICY IF EXISTS "Users can update own bookings" ON bookings;
 DROP POLICY IF EXISTS "Admins can update bookings" ON bookings;
 DROP POLICY IF EXISTS "Admins can delete bookings" ON bookings;
 DROP POLICY IF EXISTS "Admins can manage bookings" ON bookings;
+DROP POLICY IF EXISTS "Users and admins can view bookings" ON bookings;
+DROP POLICY IF EXISTS "Users and admins can update bookings" ON bookings;
+DROP POLICY IF EXISTS "Secure view bookings" ON bookings;
+DROP POLICY IF EXISTS "Secure update bookings" ON bookings;
+DROP POLICY IF EXISTS "Admin delete bookings" ON bookings;
 
 DROP POLICY IF EXISTS "Anyone can insert upi_payments" ON upi_payments;
 DROP POLICY IF EXISTS "Users can view own upi_payments" ON upi_payments;
 DROP POLICY IF EXISTS "Admins can view all upi_payments" ON upi_payments;
 DROP POLICY IF EXISTS "Everyone can view upi_payments" ON upi_payments;
+DROP POLICY IF EXISTS "Users and admins can view upi_payments" ON upi_payments;
+DROP POLICY IF EXISTS "Users and admins can update upi_payments" ON upi_payments;
 DROP POLICY IF EXISTS "Admins can update upi_payments" ON upi_payments;
 DROP POLICY IF EXISTS "Admins can delete upi_payments" ON upi_payments;
+DROP POLICY IF EXISTS "Secure view upi_payments" ON upi_payments;
+DROP POLICY IF EXISTS "Admin update upi_payments" ON upi_payments;
+DROP POLICY IF EXISTS "Admin delete upi_payments" ON upi_payments;
 
--- BOOKINGS POLICIES --
--- Allow ANY user (authenticated or anonymous) to insert bookings
+-- BOOKINGS POLICIES ----
 CREATE POLICY "Anyone can create bookings"
   ON bookings FOR INSERT
   WITH CHECK (true);
 
--- Allow users to view their own bookings, OR allow everyone if admin / authenticated
-CREATE POLICY "Users and admins can view bookings"
+CREATE POLICY "Secure view bookings"
   ON bookings FOR SELECT
+  TO authenticated
   USING (
-    auth.uid() = user_id 
-    OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-    OR auth.role() = 'service_role'
-    OR true -- Ensures admin queries with custom auth tokens or fallback can read all bookings
+    (auth.uid() IS NOT NULL AND auth.uid() = user_id)
+    OR (auth.jwt() ->> 'email' IS NOT NULL AND LOWER(email) = LOWER(auth.jwt() ->> 'email'))
+    OR consultant_id IN (
+      SELECT c.id FROM public.consultants c
+      WHERE c.user_id = auth.uid() 
+         OR (auth.jwt() ->> 'email' IS NOT NULL AND LOWER(c.email) = LOWER(auth.jwt() ->> 'email'))
+    )
+    OR public.is_admin()
   );
 
--- Allow users to update their own bookings, or admins to update any
-CREATE POLICY "Users and admins can update bookings"
+CREATE POLICY "Secure update bookings"
   ON bookings FOR UPDATE
+  TO authenticated
   USING (
-    auth.uid() = user_id 
-    OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-    OR true
+    (auth.uid() IS NOT NULL AND auth.uid() = user_id)
+    OR (auth.jwt() ->> 'email' IS NOT NULL AND LOWER(email) = LOWER(auth.jwt() ->> 'email'))
+    OR consultant_id IN (
+      SELECT c.id FROM public.consultants c
+      WHERE c.user_id = auth.uid() 
+         OR (auth.jwt() ->> 'email' IS NOT NULL AND LOWER(c.email) = LOWER(auth.jwt() ->> 'email'))
+    )
+    OR public.is_admin()
   );
 
--- Allow admins to delete bookings
-CREATE POLICY "Admins can delete bookings"
+CREATE POLICY "Admin delete bookings"
   ON bookings FOR DELETE
+  TO authenticated
   USING (
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-    OR true
+    public.is_admin()
   );
 
--- UPI_PAYMENTS POLICIES --
--- Allow ANY user (authenticated or anonymous) to submit payment details
+-- UPI_PAYMENTS POLICIES ----
 CREATE POLICY "Anyone can insert upi_payments"
   ON upi_payments FOR INSERT
   WITH CHECK (true);
 
--- Allow users to view their own payments, or admins to view all
-CREATE POLICY "Users and admins can view upi_payments"
+CREATE POLICY "Secure view upi_payments"
   ON upi_payments FOR SELECT
+  TO authenticated
   USING (
-    auth.uid() = user_id 
-    OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-    OR true
+    (auth.uid() IS NOT NULL AND auth.uid() = user_id)
+    OR (auth.jwt() ->> 'email' IS NOT NULL AND LOWER(customer_email) = LOWER(auth.jwt() ->> 'email'))
+    OR booking_id IN (
+      SELECT b.id FROM public.bookings b
+      WHERE b.user_id = auth.uid()
+         OR (auth.jwt() ->> 'email' IS NOT NULL AND LOWER(b.email) = LOWER(auth.jwt() ->> 'email'))
+    )
+    OR consultant_id IN (
+      SELECT c.id FROM public.consultants c
+      WHERE c.user_id = auth.uid() 
+         OR (auth.jwt() ->> 'email' IS NOT NULL AND LOWER(c.email) = LOWER(auth.jwt() ->> 'email'))
+    )
+    OR public.is_admin()
   );
 
--- Allow admins to update payments
-CREATE POLICY "Admins can update upi_payments"
+CREATE POLICY "Admin update upi_payments"
   ON upi_payments FOR UPDATE
+  TO authenticated
   USING (
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-    OR true
+    public.is_admin()
   );
 
--- Allow admins to delete payments
-CREATE POLICY "Admins can delete upi_payments"
+CREATE POLICY "Admin delete upi_payments"
   ON upi_payments FOR DELETE
+  TO authenticated
   USING (
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-    OR true
+    public.is_admin()
   );
 
 -- 6. INDEXES FOR FAST PERFORMANCE
@@ -157,5 +206,3 @@ CREATE INDEX IF NOT EXISTS idx_bookings_payment_status ON bookings(payment_statu
 CREATE INDEX IF NOT EXISTS idx_upi_payments_booking_id ON upi_payments(booking_id);
 CREATE INDEX IF NOT EXISTS idx_upi_payments_user_id ON upi_payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_upi_payments_status ON upi_payments(status);
-
--- Done!

@@ -19,7 +19,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const { user, profile, signUp, signIn, signInWithGoogle, loading: authLoading } = useAuth();
+  const { user, profile, isAdmin, isConsultant, signUp, signIn, signInWithGoogle, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -30,10 +30,10 @@ export default function LoginPage() {
 
       const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from;
 
-      if (isUserAdmin(user, profile)) {
+      if (isAdmin || isUserAdmin(user, profile)) {
         const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
         navigate(validAdminFrom, { replace: true });
-      } else if (profile?.role === 'consultant' || profile?.is_consultant) {
+      } else if (isConsultant || profile?.role === 'consultant' || profile?.is_consultant) {
         const validConsultantFrom = (typeof fromPath === 'string' && fromPath.startsWith('/consultant')) ? fromPath : '/consultant/dashboard';
         navigate(validConsultantFrom, { replace: true });
       } else {
@@ -41,7 +41,7 @@ export default function LoginPage() {
         navigate(validUserFrom, { replace: true });
       }
     }
-  }, [user, profile, authLoading, navigate, location.state]);
+  }, [user, profile, isAdmin, isConsultant, authLoading, navigate, location.state]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

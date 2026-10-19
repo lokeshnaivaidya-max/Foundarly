@@ -13,7 +13,7 @@ export default function ProtectedRoute({
   requireAdmin = false,
   allowedRoles
 }: ProtectedRouteProps) {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, isAdmin, isConsultant, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -26,7 +26,7 @@ export default function ProtectedRoute({
 
   if (requireAdmin) {
     // Defense-in-depth: Must be authenticated AND have verified admin authorization
-    const isAuthorized = Boolean(user && isUserAdmin(user, profile));
+    const isAuthorized = Boolean(user && (isAdmin || isUserAdmin(user, profile)));
 
     if (!user) {
       // Unauthenticated user -> redirect to admin login
@@ -47,10 +47,9 @@ export default function ProtectedRoute({
 
   // Check allowed roles list
   if (allowedRoles && allowedRoles.length > 0) {
-    const isCurrentAdmin = isUserAdmin(user, profile);
-    const userRole: 'admin' | 'consultant' | 'client' = isCurrentAdmin
+    const userRole: 'admin' | 'consultant' | 'client' = isAdmin
       ? 'admin'
-      : (profile?.role === 'consultant' || profile?.is_consultant)
+      : isConsultant
         ? 'consultant'
         : 'client';
 

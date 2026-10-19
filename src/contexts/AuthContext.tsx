@@ -85,70 +85,102 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq('id', userId)
         .maybeSingle();
 
-      if (data) {
-        let profileData = data as Profile;
+      let profileData = (data as Profile) || null;
 
-        // Security Defense:
-        // 1. If profile has role 'admin' in database but the user's verified email is NOT in the admin allowlist,
-        // demote/sanitize the profile back to 'client' immediately to neutralize historical accidental escalation.
-        if (profileData.role === 'admin' && !isAllowlistedAdmin) {
-          secureLog.warn(`[Security] Revoking unauthorized admin role for non-allowlist email (${userEmail}). Reverting to client role.`);
-          profileData = { ...profileData, role: 'client' };
-          // Persist sanitized role to database
-          supabase.from('profiles').update({ role: 'client' }).eq('id', userId).then();
-        }
-        // 2. If the user is on the legitimate admin allowlist and their profile has not yet been marked admin, sync it.
-        else if (isAllowlistedAdmin && profileData.role !== 'admin') {
+      // 1. Check if user is an allowlisted admin
+      if (isAllowlistedAdmin) {
+        if (!profileData) {
+          profileData = {
+            id: userId,
+            role: 'admin',
+            full_name: targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Admin',
+            is_consultant: false,
+          };
+        } else {
           profileData = { ...profileData, role: 'admin' };
-          supabase.from('profiles').update({ role: 'admin' }).eq('id', userId).then();
         }
-
+        supabase.from('profiles').upsert({ id: userId, role: 'admin', full_name: profileData.full_name }).then();
         setProfile(profileData);
-        console.log("[AuthContext] Profile loaded from public.profiles:", profileData);
         return profileData;
       }
 
-      if (error) {
-        secureLog.error('Unable to fetch profile from public.profiles:', error);
+      // If profile had admin role in DB but email is NOT allowlisted, revoke immediately
+      if (profileData && profileData.role === 'admin' && !isAllowlistedAdmin) {
+        secureLog.warn(`[Security] Revoking unauthorized admin role for non-allowlist email (${userEmail}).`);
+        profileData = { ...profileData, role: 'client' };
       }
 
-      // If profile does not exist in DB, construct a fallback.
-      // Default to 'client'. ONLY assign 'admin' if verified email is in the explicit admin allowlist.
-      const fallbackName = targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'User';
-      const fallbackRole: 'admin' | 'client' = isAllowlistedAdmin ? 'admin' : 'client';
-      const fallbackProfile: Profile = {
+      // 2. Check if user is a consultant (by user_id OR email in consultants table)
+      let isConsultantUser = Boolean(profileData?.role === 'consultant' || profileData?.is_consultant);
+      let consultantName = profileData?.full_name;
+
+      try {
+        let consultantQuery = supabase
+          .from('consultants')
+          .select('id, name, email, user_id, is_active')
+          .eq('is_active', true);
+
+        if (userEmail) {
+          consultantQuery = consultantQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
+        } else {
+          consultantQuery = consultantQuery.eq('user_id', userId);
+        }
+
+        const { data: matchedConsultants } = await consultantQuery.limit(1);
+        const matchedConsultant = matchedConsultants?.[0];
+
+        if (matchedConsultant) {
+          isConsultantUser = true;
+          consultantName = consultantName || matchedConsultant.name;
+
+          // If consultant.user_id is not linked to current user, link it now
+          if (matchedConsultant.user_id !== userId) {
+            supabase
+              .from('consultants')
+              .update({ user_id: userId })
+              .eq('id', matchedConsultant.id)
+              .then();
+
+            // Also notify server sync endpoint asynchronously
+            fetch('/api/consultant/sync', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ''}`,
+              },
+              body: JSON.stringify({ consultantId: matchedConsultant.id }),
+            }).catch(() => {});
+          }
+        }
+      } catch (consErr) {
+        console.warn('[AuthContext] Consultant check non-fatal warning:', consErr);
+      }
+
+      const finalRole: 'client' | 'consultant' = isConsultantUser ? 'consultant' : 'client';
+      const fallbackName = consultantName || targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'User';
+
+      const resolvedProfile: Profile = {
         id: userId,
-        role: fallbackRole,
+        role: finalRole,
         full_name: fallbackName,
-        is_consultant: false,
+        is_consultant: isConsultantUser,
       };
 
-      // Try inserting into public.profiles
+      // Persist / update profile in public.profiles table
       try {
-        const { data: created, error: createError } = await supabase
+        await supabase
           .from('profiles')
-          .insert({
+          .upsert({
             id: userId,
             full_name: fallbackName,
-            email: targetUser?.email,
-            role: fallbackRole,
-            is_consultant: false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .select('*')
-          .maybeSingle();
-
-        if (created && !createError) {
-          setProfile(created as Profile);
-          return created as Profile;
-        }
-      } catch (insertErr) {
-        console.warn('[AuthContext] Could not auto-create missing profile in DB:', insertErr);
+            role: finalRole,
+          });
+      } catch (upsertErr) {
+        console.warn('[AuthContext] Could not upsert profile in DB:', upsertErr);
       }
 
-      setProfile(fallbackProfile);
-      return fallbackProfile;
+      setProfile(resolvedProfile);
+      return resolvedProfile;
     } catch (error) {
       secureLog.error('Error in fetchProfile:', error);
       const fallbackProfile: Profile = {
@@ -260,13 +292,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(null);
   };
 
-  const hasRole = (role: 'admin' | 'client' | 'consultant') => {
-    if (role === 'admin') return isUserAdmin(user, profile);
-    if (role === 'client') return profile?.role === 'client' || (!isUserAdmin(user, profile) && !profile?.is_consultant);
-    return profile?.role === 'consultant' || profile?.is_consultant === true;
-  };
-
   const isCurrentAdmin = isUserAdmin(user, profile);
+  const isCurrentConsultant = !isCurrentAdmin && (profile?.role === 'consultant' || profile?.is_consultant === true);
+  const isCurrentClient = !isCurrentAdmin && !isCurrentConsultant;
+
+  const hasRole = (role: 'admin' | 'client' | 'consultant') => {
+    if (role === 'admin') return isCurrentAdmin;
+    if (role === 'consultant') return isCurrentConsultant;
+    return isCurrentClient;
+  };
 
   const value = {
     user,
@@ -278,8 +312,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signInWithGoogle,
     signOut,
     isAdmin: isCurrentAdmin,
-    isClient: profile?.role === 'client' || (!isCurrentAdmin && !profile?.is_consultant),
-    isConsultant: !isCurrentAdmin && (profile?.role === 'consultant' || profile?.is_consultant === true),
+    isClient: isCurrentClient,
+    isConsultant: isCurrentConsultant,
     hasRole,
   };
 

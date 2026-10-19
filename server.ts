@@ -381,14 +381,44 @@ async function startServer() {
         }
 
         if ((bookingError || !bookings || bookings.length === 0) && user?.email) {
-          const emailQuery = clientToUse
+          const userEmailClean = user.email.toLowerCase().trim();
+          // Check if client email matches
+          const emailQuery = supabaseAdminClient
             .from("bookings")
             .select("*, consultants(id, name, title, email, user_id)")
-            .eq("email", user.email.toLowerCase().trim());
+            .eq("email", userEmailClean);
           const emailResult = await emailQuery.or(orFilters.join(",")).limit(1);
           if (emailResult.data && emailResult.data.length > 0) {
             bookings = emailResult.data;
             bookingError = null;
+          } else {
+            // Check if consultant email or user_id matches
+            const { data: matchedCons } = await supabaseAdminClient
+              .from("consultants")
+              .select("id, name, title, email, user_id")
+              .or(`user_id.eq.${user.id},email.ilike.${userEmailClean}`)
+              .limit(1);
+
+            if (matchedCons && matchedCons.length > 0) {
+              const consId = matchedCons[0].id;
+              const consQuery = supabaseAdminClient
+                .from("bookings")
+                .select("*, consultants(id, name, title, email, user_id)")
+                .eq("consultant_id", consId);
+              const consResult = await consQuery.or(orFilters.join(",")).limit(1);
+              if (consResult.data && consResult.data.length > 0) {
+                bookings = consResult.data;
+                bookingError = null;
+                // Self-heal consultant user_id if needed
+                if (matchedCons[0].user_id !== user.id) {
+                  supabaseAdminClient
+                    .from("consultants")
+                    .update({ user_id: user.id })
+                    .eq("id", consId)
+                    .then();
+                }
+              }
+            }
           }
         }
       }
@@ -417,7 +447,7 @@ async function startServer() {
 
       // Fallback: direct consultant lookup if relationship was not auto-joined
       if (!consultantObj && booking.consultant_id) {
-        const { data: directConsultant } = await clientToUse
+        const { data: directConsultant } = await supabaseAdminClient
           .from("consultants")
           .select("id, name, title, email, user_id")
           .eq("id", booking.consultant_id)
@@ -1003,6 +1033,282 @@ async function startServer() {
         error: "Internal server error occurred while creating follow-up request.",
         code: "INTERNAL_ERROR",
       });
+    }
+  });
+
+  // =========================================================================
+  // CONSULTANT DASHBOARD & ROLE ENDPOINTS
+  // =========================================================================
+
+  // 1. Get current consultant profile & auto-link user account
+  app.get("/api/consultant/me", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({ success: false, error: "Authentication required." });
+    }
+
+    const user = auth.user;
+    const userEmail = (user.email || "").toLowerCase().trim();
+
+    try {
+      let query = supabaseAdminClient
+        .from("consultants")
+        .select("*")
+        .eq("is_active", true);
+
+      if (userEmail) {
+        query = query.or(`user_id.eq.${user.id},email.ilike.${userEmail}`);
+      } else {
+        query = query.eq("user_id", user.id);
+      }
+
+      const { data: consultants, error } = await query.limit(1);
+      const consultant = consultants?.[0];
+
+      if (!consultant) {
+        return res.json({ success: true, isConsultant: false, consultant: null });
+      }
+
+      // Self-heal linking user_id if null or mismatched
+      if (consultant.user_id !== user.id) {
+        await supabaseAdminClient
+          .from("consultants")
+          .update({ user_id: user.id })
+          .eq("id", consultant.id);
+        consultant.user_id = user.id;
+      }
+
+      // Self-heal profile role
+      await supabaseAdminClient
+        .from("profiles")
+        .upsert({
+          id: user.id,
+          role: "consultant",
+          full_name: consultant.name,
+        });
+
+      return res.json({
+        success: true,
+        isConsultant: true,
+        consultant,
+      });
+    } catch (err: any) {
+      console.error("[Consultant API] Error fetching consultant profile:", err);
+      return res.status(500).json({ success: false, error: "Failed to resolve consultant profile." });
+    }
+  });
+
+  // 2. Explicitly link consultant record
+  app.post("/api/consultant/sync", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({ success: false, error: "Authentication required." });
+    }
+
+    const user = auth.user;
+    const userEmail = (user.email || "").toLowerCase().trim();
+    const consultantId = req.body?.consultantId;
+
+    try {
+      let query = supabaseAdminClient
+        .from("consultants")
+        .select("id, name, email, user_id")
+        .eq("is_active", true);
+
+      if (consultantId) {
+        query = query.eq("id", consultantId);
+      } else if (userEmail) {
+        query = query.or(`user_id.eq.${user.id},email.ilike.${userEmail}`);
+      } else {
+        query = query.eq("user_id", user.id);
+      }
+
+      const { data: consultants } = await query.limit(1);
+      const consultant = consultants?.[0];
+
+      if (!consultant) {
+        return res.status(404).json({ success: false, error: "Consultant record not found." });
+      }
+
+      if (consultant.user_id !== user.id) {
+        await supabaseAdminClient
+          .from("consultants")
+          .update({ user_id: user.id })
+          .eq("id", consultant.id);
+      }
+
+      await supabaseAdminClient
+        .from("profiles")
+        .upsert({
+          id: user.id,
+          role: "consultant",
+          full_name: consultant.name,
+        });
+
+      return res.json({ success: true, linked: true, consultantId: consultant.id });
+    } catch (err: any) {
+      console.error("[Consultant Sync] Error syncing consultant:", err);
+      return res.status(500).json({ success: false, error: "Sync failed." });
+    }
+  });
+
+  // 3. Get Bookings strictly for the Authenticated Consultant
+  app.get("/api/consultant/bookings", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({ success: false, error: "Authentication required." });
+    }
+
+    const user = auth.user;
+    const userEmail = (user.email || "").toLowerCase().trim();
+
+    try {
+      let query = supabaseAdminClient
+        .from("consultants")
+        .select("id, name, email, user_id")
+        .eq("is_active", true);
+
+      if (userEmail) {
+        query = query.or(`user_id.eq.${user.id},email.ilike.${userEmail}`);
+      } else {
+        query = query.eq("user_id", user.id);
+      }
+
+      const { data: consultants } = await query.limit(1);
+      const consultant = consultants?.[0];
+
+      if (!consultant) {
+        return res.status(403).json({ success: false, error: "Forbidden: Not registered as a consultant." });
+      }
+
+      // Self-heal link if needed
+      if (consultant.user_id !== user.id) {
+        await supabaseAdminClient
+          .from("consultants")
+          .update({ user_id: user.id })
+          .eq("id", consultant.id);
+      }
+
+      // Query bookings strictly for this consultant
+      const { data: bookings, error: bErr } = await supabaseAdminClient
+        .from("bookings")
+        .select("*")
+        .eq("consultant_id", consultant.id)
+        .order("date", { ascending: false })
+        .order("time", { ascending: false });
+
+      if (bErr) {
+        console.error("[Consultant API] Error fetching consultant bookings:", bErr);
+        return res.status(500).json({ success: false, error: "Failed to fetch bookings." });
+      }
+
+      // Format bookings: ensure valid meeting_room_id, earnings, and client information
+      const formatted = (bookings || []).map((b: any) => {
+        const effectiveRoomId = b.meeting_room_id || (b.id ? (b.id.startsWith("foundarly-") ? b.id : `foundarly-${b.id}`) : "");
+        return {
+          ...b,
+          meeting_room_id: effectiveRoomId,
+          consultant_name: consultant.name,
+          consultant_earnings: b.consultant_earnings ?? (b.session_price ? Math.round(b.session_price * 0.8) : 0),
+          payout_status: b.payout_status || "pending",
+          reschedule_status: b.reschedule_status || "none",
+        };
+      });
+
+      return res.json({
+        success: true,
+        consultantId: consultant.id,
+        bookings: formatted,
+      });
+    } catch (err: any) {
+      console.error("[Consultant API] Unexpected bookings error:", err);
+      return res.status(500).json({ success: false, error: "Internal server error." });
+    }
+  });
+
+  // 4. Get Dynamic Stats for Authenticated Consultant
+  app.get("/api/consultant/stats", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({ success: false, error: "Authentication required." });
+    }
+
+    const user = auth.user;
+    const userEmail = (user.email || "").toLowerCase().trim();
+
+    try {
+      let query = supabaseAdminClient
+        .from("consultants")
+        .select("id, name, email, user_id")
+        .eq("is_active", true);
+
+      if (userEmail) {
+        query = query.or(`user_id.eq.${user.id},email.ilike.${userEmail}`);
+      } else {
+        query = query.eq("user_id", user.id);
+      }
+
+      const { data: consultants } = await query.limit(1);
+      const consultant = consultants?.[0];
+
+      if (!consultant) {
+        return res.status(403).json({ success: false, error: "Forbidden: Not registered as a consultant." });
+      }
+
+      const { data: bookings } = await supabaseAdminClient
+        .from("bookings")
+        .select("id, status, session_price, consultant_earnings, payout_status, date, time")
+        .eq("consultant_id", consultant.id);
+
+      const allBookings = bookings || [];
+      const totalBookings = allBookings.length;
+      const completedSessions = allBookings.filter(b => b.status === "completed").length;
+      const upcomingSessions = allBookings.filter(b => b.status === "confirmed").length;
+
+      let totalEarnings = 0;
+      let pendingEarnings = 0;
+      let paidEarnings = 0;
+
+      for (const b of allBookings) {
+        if (b.status === "completed") {
+          const earnings = b.consultant_earnings ?? (b.session_price ? Math.round(b.session_price * 0.8) : 0);
+          totalEarnings += earnings;
+          if (b.payout_status === "paid") {
+            paidEarnings += earnings;
+          } else {
+            pendingEarnings += earnings;
+          }
+        }
+      }
+
+      const { data: reviews } = await supabaseAdminClient
+        .from("testimonials")
+        .select("rating")
+        .eq("consultant_id", consultant.id);
+
+      let avgRating: number | null = null;
+      const totalReviews = reviews?.length || 0;
+      if (totalReviews > 0) {
+        const sum = reviews!.reduce((acc, r) => acc + (r.rating || 5), 0);
+        avgRating = Number((sum / totalReviews).toFixed(1));
+      }
+
+      return res.json({
+        success: true,
+        stats: {
+          total_bookings: totalBookings,
+          completed_sessions: completedSessions,
+          upcoming_sessions: upcomingSessions,
+          total_earnings: totalEarnings,
+          pending_earnings: pendingEarnings,
+          paid_earnings: paidEarnings,
+          average_rating: avgRating,
+          total_reviews: totalReviews,
+        },
+      });
+    } catch (err: any) {
+      console.error("[Consultant API] Unexpected stats error:", err);
+      return res.status(500).json({ success: false, error: "Failed to compute stats." });
     }
   });
 

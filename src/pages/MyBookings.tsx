@@ -413,7 +413,7 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
 }
 
 export default function MyBookingsPage() {
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, profile, isAdmin, isConsultant, loading: authLoading } = useAuth();
   const { formatPrice } = useCurrency();
   const navigate = useNavigate();
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -447,10 +447,10 @@ export default function MyBookingsPage() {
 
   useEffect(() => {
     if (!authLoading && !user) { navigate("/login"); return; }
-    if (!authLoading && isUserAdmin(user, profile)) { navigate("/admin", { replace: true }); return; }
-    if (!authLoading && (profile?.role === 'consultant' || profile?.is_consultant)) { navigate("/consultant/dashboard", { replace: true }); return; }
+    if (!authLoading && (isAdmin || isUserAdmin(user, profile))) { navigate("/admin", { replace: true }); return; }
+    if (!authLoading && (isConsultant || profile?.role === 'consultant' || profile?.is_consultant)) { navigate("/consultant/dashboard", { replace: true }); return; }
     if (user) loadBookings();
-  }, [user, profile, authLoading, navigate]);
+  }, [user, profile, isAdmin, isConsultant, authLoading, navigate]);
 
   const loadFollowUps = async () => {
     try {

@@ -81,59 +81,33 @@ export default function ConsultantDashboard() {
 
     try {
       setLoading(true);
-      
-      // First, check if user has consultant role in profiles
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
+      const userParam = { id: user.id, email: user.email };
 
-      // If no profile exists, create one with client role initially
-      if (profileError && profileError.code === 'PGRST116') {
-        const { error: createError } = await supabase
-          .from("profiles")
-          .insert({
-            id: user.id,
-            role: "client",
-            full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || "User"
-          });
-        
-        if (createError) {
-          console.error("Error creating profile:", createError);
-        }
-      }
+      // 1. Resolve consultant profile (checks both user_id and email, and auto-links)
+      const consultant = await consultantDashboardService.getConsultantProfile(userParam);
 
-      // Check if user is linked to an active consultant
-      const { data: consultant, error: consultantError } = await supabase
-        .from("consultants")
-        .select("id, is_active, name")
-        .eq("user_id", user.id)
-        .eq("is_active", true)
-        .single();
-
-      if (consultantError || !consultant) {
-        console.log("User is not linked to an active consultant");
+      if (!consultant) {
+        console.log("User is not linked to an active consultant record");
         setAccessDenied(true);
         setLoading(false);
         return;
       }
 
-      // If user is linked to consultant but doesn't have consultant role, update it
-      if (!profile || profile.role !== "consultant") {
-        console.log("Updating user role to consultant");
-        const { error: updateError } = await supabase
-          .from("profiles")
-          .update({ role: "consultant" })
-          .eq("id", user.id);
+      // 2. Ensure profile role is consultant
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
 
-        if (updateError) {
-          console.error("Error updating role:", updateError);
-          // Continue anyway - they have consultant record
-        }
+      if (!profile || profile.role !== "consultant") {
+        console.log("Syncing user role to consultant in profiles table");
+        await supabase
+          .from("profiles")
+          .upsert({ id: user.id, role: "consultant", full_name: consultant.name });
       }
 
-      // User has proper access, load dashboard data
+      // User has verified consultant access, load dashboard data
       loadDashboardData();
     } catch (error) {
       console.error("Error checking consultant access:", error);
@@ -147,10 +121,11 @@ export default function ConsultantDashboard() {
 
     setLoading(true);
     try {
+      const userParam = { id: user.id, email: user.email };
       const [statsData, bookingsData, payoutsData, followUpsRes] = await Promise.all([
-        consultantDashboardService.getDashboardStats(user.id),
-        consultantDashboardService.getConsultantBookings(user.id),
-        consultantDashboardService.getPayoutRequests(user.id),
+        consultantDashboardService.getDashboardStats(userParam),
+        consultantDashboardService.getConsultantBookings(userParam),
+        consultantDashboardService.getPayoutRequests(userParam),
         followUpService.listConsultantFollowUps(),
       ]);
 
@@ -273,7 +248,7 @@ export default function ConsultantDashboard() {
         };
 
     const result = await consultantDashboardService.createPayoutRequest(
-      user!.id,
+      { id: user!.id, email: user!.email },
       parseFloat(payoutAmount),
       paymentMethod,
       details

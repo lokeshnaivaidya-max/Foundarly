@@ -49,7 +49,7 @@ export default function Header() {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, profile, isAdmin, signOut } = useAuth();
+  const { user, profile, isAdmin, isConsultant, isClient, signOut } = useAuth();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 15);
@@ -116,8 +116,8 @@ export default function Header() {
   };
 
   const isAdminRole = Boolean(isAdmin);
-  const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
-  const isClientRole = !isAdminRole && !isConsultantRole;
+  const isConsultantRole = Boolean(isConsultant);
+  const isClientRole = Boolean(isClient);
 
   return (
     <header

@@ -128,8 +128,8 @@ if (!nav.mediaDevices.getDisplayMedia) {
 
 if (typeof g.RTCPeerConnection === "undefined") {
   class MockRTCPeerConnection {
-    connectionState = "connected";
-    iceConnectionState = "connected";
+    connectionState = "new";
+    iceConnectionState = "new";
     signalingState = "stable";
     ontrack: ((e: unknown) => void) | null = null;
     onicecandidate: ((e: unknown) => void) | null = null;
@@ -159,8 +159,14 @@ if (typeof g.RTCPeerConnection === "undefined") {
       return { type: "answer", sdp: "v=0..." };
     }
 
-    async setLocalDescription() {}
-    async setRemoteDescription() {}
+    async setLocalDescription() {
+      this.connectionState = "connected";
+      this.iceConnectionState = "connected";
+    }
+    async setRemoteDescription() {
+      this.connectionState = "connected";
+      this.iceConnectionState = "connected";
+    }
     async addIceCandidate() {}
     restartIce() {}
     close() {

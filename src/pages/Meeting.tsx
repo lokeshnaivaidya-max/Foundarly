@@ -258,6 +258,21 @@ const STATUS_LABELS: Record<string, string> = {
   expired: "Rejoin Expired",
 };
 
+function getCanonicalRoomId(currentRoomId?: string, currentBooking?: any): string {
+  if (currentBooking?.meeting_room_id && typeof currentBooking.meeting_room_id === 'string' && currentBooking.meeting_room_id.trim()) {
+    return currentBooking.meeting_room_id.trim();
+  }
+  if (currentBooking?.id) {
+    const rawId = String(currentBooking.id).trim();
+    return rawId.startsWith('foundarly-') ? rawId : `foundarly-${rawId}`;
+  }
+  if (currentRoomId) {
+    let clean = currentRoomId.trim().replace(/^.*\/meeting\//, '').split('?')[0].split('#')[0].replace(/\/+$/, '');
+    return clean.startsWith('foundarly-') ? clean : `foundarly-${clean}`;
+  }
+  return 'default-room';
+}
+
 export default function MeetingPage() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
@@ -315,10 +330,11 @@ export default function MeetingPage() {
   const hasTriggeredNotificationRef = useRef(false);
 
   const handleManualNotifyWaiting = useCallback(async () => {
-    if (!roomId) return;
+    const canonicalRoom = getCanonicalRoomId(roomId, booking);
+    if (!canonicalRoom) return;
     setWaitingNotificationSending(true);
     try {
-      const res = await meetingService.notifyWaiting(roomId);
+      const res = await meetingService.notifyWaiting(canonicalRoom);
       if (res.success) {
         setWaitingNotificationSent(true);
         if (res.throttled) {
@@ -334,11 +350,12 @@ export default function MeetingPage() {
     } finally {
       setWaitingNotificationSending(false);
     }
-  }, [roomId]);
+  }, [roomId, booking]);
 
   // Copy meeting link to clipboard
   const copyMeetingLink = () => {
-    const meetingUrl = `${window.location.origin}/meeting/${booking?.meeting_room_id}`;
+    const canonicalRoom = getCanonicalRoomId(roomId, booking);
+    const meetingUrl = `${window.location.origin}/meeting/${canonicalRoom}`;
     navigator.clipboard.writeText(meetingUrl).then(() => {
       setLinkCopied(true);
       toast.success("Meeting link copied to clipboard!");
@@ -379,6 +396,12 @@ export default function MeetingPage() {
       setStatus(accessResult.sessionStatus as any);
       setUserRole(accessResult.role || null);
       setFollowUp(accessResult.followUp || null);
+
+      const canonicalRoom = getCanonicalRoomId(roomId, accessResult.booking);
+      if (roomId && roomId !== canonicalRoom) {
+        console.log(`[Meeting] Canonicalizing room URL from ${roomId} to ${canonicalRoom}`);
+        window.history.replaceState(null, '', `/meeting/${canonicalRoom}`);
+      }
 
       if (accessResult.timing) {
         setRejoinDeadline(accessResult.timing.rejoinDeadline);
@@ -508,16 +531,18 @@ export default function MeetingPage() {
       const stream = await service.initLocalStream(!videoOff, !muted);
       setLocalStream(stream);
 
-      // 2. Join signaling channel
-      await service.joinRoom(roomId || 'default-room');
+      // 2. Join signaling channel using canonical room ID
+      const canonicalRoom = getCanonicalRoomId(roomId, booking);
+      console.log(`[Meeting] Joining signaling channel with canonical room ID: ${canonicalRoom}`);
+      await service.joinRoom(canonicalRoom);
 
       toast.success("Connected to meeting room!");
 
       // 3. Automatically notify the other participant if they are not yet present in the room
-      if (!hasTriggeredNotificationRef.current && roomId) {
+      if (!hasTriggeredNotificationRef.current && canonicalRoom) {
         hasTriggeredNotificationRef.current = true;
         setWaitingNotificationSending(true);
-        meetingService.notifyWaiting(roomId).then((res) => {
+        meetingService.notifyWaiting(canonicalRoom).then((res) => {
           setWaitingNotificationSending(false);
           if (res.success) {
             setWaitingNotificationSent(true);
@@ -1413,7 +1438,7 @@ export default function MeetingPage() {
               <div className="space-y-3">
                 <div className="bg-secondary/50 border border-border rounded-lg p-3">
                   <p className="text-xs text-muted-foreground mb-1">Meeting ID</p>
-                  <p className="font-mono text-sm font-medium">{booking.meeting_room_id}</p>
+                  <p className="font-mono text-sm font-medium">{getCanonicalRoomId(roomId, booking)}</p>
                 </div>
 
                 {/* Shareable Link */}
@@ -1443,7 +1468,7 @@ export default function MeetingPage() {
                     </Button>
                   </div>
                   <p className="font-mono text-xs text-muted-foreground break-all">
-                    {window.location.origin}/meeting/{booking.meeting_room_id}
+                    {window.location.origin}/meeting/{getCanonicalRoomId(roomId, booking)}
                   </p>
                 </div>
               </div>

@@ -2,7 +2,7 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
 export interface SignalPayload {
-  type: 'user-joined' | 'offer' | 'answer' | 'ice-candidate' | 'user-left';
+  type: 'user-joined' | 'offer' | 'answer' | 'ice-candidate' | 'user-left' | 'request-offer' | 'renegotiate';
   senderId: string;
   targetId?: string;
   sdp?: RTCSessionDescriptionInit;
@@ -144,17 +144,42 @@ export class WebRTCService {
     return this.localStream;
   }
 
+  private negotiationInterval: any = null;
+
+  /**
+   * Canonicalizes any room ID variant to ensure both client and consultant
+   * connect to the exact same signaling channel regardless of URL format.
+   */
+  public static canonicalizeRoomId(raw: string): string {
+    if (!raw) return 'foundarly-default';
+    let clean = raw.trim();
+    if (clean.includes('/meeting/')) {
+      clean = clean.split('/meeting/').pop() || clean;
+    }
+    clean = clean.split('?')[0].split('#')[0].replace(/\/+$/, '').trim();
+    if (!clean.startsWith('foundarly-')) {
+      clean = `foundarly-${clean}`;
+    }
+    return clean;
+  }
+
+  getRoomId(): string {
+    return this.roomId;
+  }
+
   /**
    * Join meeting room and set up Supabase Realtime signaling
    */
   async joinRoom(roomId: string): Promise<void> {
-    this.roomId = roomId;
-    const channelName = `meeting_room_${roomId}`;
+    const canonical = WebRTCService.canonicalizeRoomId(roomId);
+    this.roomId = canonical;
+    const channelName = `meeting_room_${canonical}`;
 
-    console.log(`[WebRTC] Joining room: ${roomId} on channel: ${channelName}`);
+    console.log(`[WebRTC] Joining room: ${canonical} on channel: ${channelName}`);
 
     this.channel = supabase.channel(channelName, {
       config: {
+        broadcast: { ack: false, self: false },
         presence: {
           key: this.userId
         }
@@ -191,12 +216,20 @@ export class WebRTCService {
       if (this.onPresenceUpdate) {
         this.onPresenceUpdate(participantCount, participants);
       }
+
+      // Automatically trigger negotiation with peers detected in presence
+      participants.forEach((p) => {
+        if (p.id !== this.userId) {
+          this.ensurePeerNegotiation(p.id);
+        }
+      });
     });
 
     this.channel.on('presence', { event: 'join' }, async ({ key, newPresences }) => {
       console.log(`[User Joined Presence] User: ${key}`, newPresences);
       if (key !== this.userId) {
-        console.log(`[Signaling] New user ${key} joined room.`);
+        console.log(`[Signaling] New user ${key} joined room, ensuring negotiation.`);
+        this.ensurePeerNegotiation(key);
       }
     });
 
@@ -231,6 +264,23 @@ export class WebRTCService {
             email: this.userInfo.email
           });
 
+          // Periodic watchdog: if there are other participants in presence but not yet connected, re-attempt negotiation
+          if (this.negotiationInterval) {
+            clearInterval(this.negotiationInterval);
+          }
+          this.negotiationInterval = setInterval(() => {
+            if (!this.channel) return;
+            const state = this.channel.presenceState();
+            Object.keys(state).forEach((peerId) => {
+              if (peerId !== this.userId) {
+                const pc = this.peerConnections.get(peerId);
+                if (!pc || (pc.connectionState !== 'connected' && pc.iceConnectionState !== 'connected')) {
+                  this.ensurePeerNegotiation(peerId);
+                }
+              }
+            });
+          }, 3500);
+
           resolve();
         } else if (status === 'CHANNEL_ERROR') {
           console.error('[WebRTC] Supabase Channel Error:', err);
@@ -260,27 +310,40 @@ export class WebRTCService {
     switch (type) {
       case 'user-joined': {
         console.log(`[Signaling] User joined: ${senderId}`);
-        // Existing peer in room initiates offer to the new joiner
-        console.log(`[Signaling] Creating offer for new peer ${senderId}`);
+        // Ensure deterministic peer negotiation
+        await this.ensurePeerNegotiation(senderId);
+        break;
+      }
+
+      case 'request-offer': {
+        console.log(`[Signaling] Received request-offer from ${senderId}`);
+        await this.createAndSendOffer(senderId);
+        break;
+      }
+
+      case 'renegotiate': {
+        console.log(`[Signaling] Received renegotiate from ${senderId}`);
         await this.createAndSendOffer(senderId);
         break;
       }
 
       case 'offer': {
         console.log(`[Signaling] Offer received from ${senderId}`);
-        await this.handleOffer(senderId, sdp);
+        await this.handleOffer(senderId, sdp!);
         break;
       }
 
       case 'answer': {
         console.log(`[Signaling] Answer received from ${senderId}`);
-        await this.handleAnswer(senderId, sdp);
+        await this.handleAnswer(senderId, sdp!);
         break;
       }
 
       case 'ice-candidate': {
         console.log(`[Signaling] ICE candidate received from ${senderId}`);
-        await this.handleIceCandidate(senderId, candidate);
+        if (candidate) {
+          await this.handleIceCandidate(senderId, candidate);
+        }
         break;
       }
 
@@ -292,6 +355,34 @@ export class WebRTCService {
 
       default:
         console.warn(`[Signaling] Unknown signal type: ${type}`);
+    }
+  }
+
+  /**
+   * Deterministically ensures WebRTC negotiation between this user and a remote peer.
+   * Prevents deadlock when participants join at different times or miss ephemeral broadcast packets.
+   */
+  public async ensurePeerNegotiation(remoteUserId: string): Promise<void> {
+    if (!remoteUserId || remoteUserId === this.userId) return;
+
+    const pc = this.getOrCreatePeerConnection(remoteUserId);
+    if (pc.connectionState === 'connected') return;
+
+    // Deterministic role: participant with lexicographically smaller ID acts as offerer
+    const isOfferer = this.userId < remoteUserId;
+
+    if (isOfferer) {
+      if (pc.signalingState === 'stable') {
+        console.log(`[WebRTC] Initiating offer as designated offerer for ${remoteUserId}`);
+        await this.createAndSendOffer(remoteUserId);
+      }
+    } else {
+      console.log(`[WebRTC] Prompting designated offerer ${remoteUserId} for offer`);
+      await this.sendSignal({
+        type: 'request-offer',
+        senderId: this.userId,
+        targetId: remoteUserId,
+      });
     }
   }
 
@@ -429,6 +520,18 @@ export class WebRTCService {
   private async handleOffer(remoteUserId: string, sdp: RTCSessionDescriptionInit): Promise<void> {
     try {
       const pc = this.getOrCreatePeerConnection(remoteUserId);
+      const isOfferCollision = pc.signalingState !== 'stable';
+      const isPolite = this.userId > remoteUserId;
+
+      if (isOfferCollision) {
+        if (!isPolite) {
+          console.log(`[WebRTC] Glare detected. Impolite peer ignoring offer collision from ${remoteUserId}`);
+          return;
+        }
+        console.log(`[WebRTC] Glare detected. Polite peer rolling back to accept offer from ${remoteUserId}`);
+        await pc.setLocalDescription({ type: 'rollback' });
+      }
+
       console.log(`[WebRTC] Setting remote description (Offer) from ${remoteUserId}...`);
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
 
@@ -644,6 +747,11 @@ export class WebRTCService {
    */
   async leave(): Promise<void> {
     console.log('[WebRTC] Leaving meeting and cleaning up resources...');
+
+    if (this.negotiationInterval) {
+      clearInterval(this.negotiationInterval);
+      this.negotiationInterval = null;
+    }
 
     // Send user-left signal
     await this.sendSignal({

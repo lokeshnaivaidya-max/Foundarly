@@ -152,4 +152,74 @@ describe("WebRTC Meeting End-To-End Verification", () => {
     await service1.leave();
     await service2.leave();
   });
+
+  it("canonicalizes diverse room ID formats to ensure participants join the exact same signaling channel", () => {
+    const rawUuid = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    const prefixed = `foundarly-${rawUuid}`;
+    const urlFormat = `https://foundarly.com/meeting/${rawUuid}?source=email`;
+    const trailingSlash = `foundarly-${rawUuid}/#intro`;
+
+    expect(WebRTCService.canonicalizeRoomId(rawUuid)).toBe(prefixed);
+    expect(WebRTCService.canonicalizeRoomId(prefixed)).toBe(prefixed);
+    expect(WebRTCService.canonicalizeRoomId(urlFormat)).toBe(prefixed);
+    expect(WebRTCService.canonicalizeRoomId(trailingSlash)).toBe(prefixed);
+  });
+
+  it("completes full two-participant signaling negotiation with presence-driven automatic offer", async () => {
+    const aliceId = "user_alice_aaa";
+    const bobId = "user_bob_bbb";
+
+    const serviceAlice = new WebRTCService(aliceId, { name: "Alice", email: "alice@test.com" });
+    const serviceBob = new WebRTCService(bobId, { name: "Bob", email: "bob@test.com" });
+
+    await serviceAlice.initLocalStream(true, true);
+    await serviceBob.initLocalStream(true, true);
+
+    // Mock signaling bus routing between Alice and Bob
+    const signalBus = async (fromUserId: string, payload: any) => {
+      if (fromUserId === aliceId) {
+        await serviceBob["handleSignalPayload"](payload);
+      } else {
+        await serviceAlice["handleSignalPayload"](payload);
+      }
+    };
+
+    serviceAlice["sendSignal"] = vi.fn().mockImplementation(async (payload) => {
+      await signalBus(aliceId, payload);
+    });
+    serviceBob["sendSignal"] = vi.fn().mockImplementation(async (payload) => {
+      await signalBus(bobId, payload);
+    });
+
+    let aliceRemoteStreamReceived: MediaStream | null = null;
+    let bobRemoteStreamReceived: MediaStream | null = null;
+
+    serviceAlice.onRemoteStream = (stream) => {
+      aliceRemoteStreamReceived = stream;
+    };
+    serviceBob.onRemoteStream = (stream) => {
+      bobRemoteStreamReceived = stream;
+    };
+
+    // When Bob joins, presence triggers negotiation
+    await serviceAlice.ensurePeerNegotiation(bobId);
+
+    // Verify PeerConnection was created on Alice
+    const pcAlice = serviceAlice["peerConnections"].get(bobId);
+    expect(pcAlice).toBeDefined();
+
+    // Verify Bob received offer and created PeerConnection with answer
+    const pcBob = serviceBob["peerConnections"].get(aliceId);
+    expect(pcBob).toBeDefined();
+    expect(serviceBob["sendSignal"]).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "answer", senderId: bobId, targetId: aliceId })
+    );
+
+    // Verify Alice's signalingState reached stable
+    expect(pcAlice?.signalingState).toBe("stable");
+    expect(pcBob?.signalingState).toBe("stable");
+
+    await serviceAlice.leave();
+    await serviceBob.leave();
+  });
 });

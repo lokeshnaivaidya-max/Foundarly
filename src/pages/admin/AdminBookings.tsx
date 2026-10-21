@@ -65,7 +65,7 @@ const getConsultantName = (b: any): string => {
 
 export default function AdminBookings() {
   const { formatPrice } = useCurrency();
-  const { user } = useAuth();
+  const { user, isSuperAdmin } = useAuth();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [showRescheduleOnly, setShowRescheduleOnly] = useState(false);
@@ -269,6 +269,10 @@ export default function AdminBookings() {
 
   const handleDelete = async () => {
     if (!selectedBooking) return;
+    if (!isSuperAdmin) {
+      toast.error("Only Super Administrators can delete booking records");
+      return;
+    }
 
     setDeleting(true);
     try {
@@ -1018,15 +1022,17 @@ export default function AdminBookings() {
                         >
                           Edit
                         </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="text-xs text-destructive hover:text-destructive/80 h-7 px-2"
-                          onClick={() => openDelete(b)}
-                          title="Delete booking record"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {isSuperAdmin && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-xs text-destructive hover:text-destructive/80 h-7 px-2"
+                            onClick={() => openDelete(b)}
+                            title="Delete booking record"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

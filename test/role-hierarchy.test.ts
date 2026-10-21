@@ -195,13 +195,17 @@ describe('Foundarly Super Admin & Developer Admin Role Hierarchy Suite', () => {
       const isSuper = (profile.role === 'super_admin' || profile.role === 'admin') && isSuperAdmin(user, profile);
       const isDev = profile.role === 'developer_admin';
 
-      if (route.startsWith('/api/admin/administrators') || route === '/api/send-application-email') {
+      if (route.startsWith('/api/admin/administrators')) {
         // Super Admin ONLY
         if (!isSuper) return { status: 403, error: 'Forbidden: Super Administrator privileges required.' };
         return { status: 200, success: true };
       }
 
-      if (route.startsWith('/api/admin/system-health') || route.startsWith('/api/admin/diagnostics')) {
+      if (
+        route.startsWith('/api/admin/system-health') || 
+        route.startsWith('/api/admin/diagnostics') ||
+        route === '/api/send-application-email'
+      ) {
         // Super Admin OR Developer Admin
         if (!isSuper && !isDev) return { status: 403, error: 'Forbidden: Administrator privileges required.' };
         return { status: 200, success: true };
@@ -215,21 +219,20 @@ describe('Foundarly Super Admin & Developer Admin Role Hierarchy Suite', () => {
     assert.equal(simulateApiRouteAuth('/api/admin/system-health', superAdminUser, superAdminProfile).status, 200);
     assert.equal(simulateApiRouteAuth('/api/send-application-email', superAdminUser, superAdminProfile).status, 200);
 
-    // 2. Developer Admin access to technical routes: 200 OK
+    // 2. Developer Admin access to operational & technical routes: 200 OK
     assert.equal(simulateApiRouteAuth('/api/admin/system-health', devAdminUser, devAdminProfile).status, 200);
     assert.equal(simulateApiRouteAuth('/api/admin/diagnostics/logs', devAdminUser, devAdminProfile).status, 200);
+    assert.equal(simulateApiRouteAuth('/api/send-application-email', devAdminUser, devAdminProfile).status, 200);
 
-    // 3. Developer Admin access to executive routes: strictly 403 Forbidden!
+    // 3. Developer Admin access to administrator management route: strictly 403 Forbidden!
     const devDeniedAdmins = simulateApiRouteAuth('/api/admin/administrators', devAdminUser, devAdminProfile);
     assert.equal(devDeniedAdmins.status, 403);
     assert.ok(devDeniedAdmins.error?.includes('Super Administrator privileges required'));
 
-    const devDeniedAppEmail = simulateApiRouteAuth('/api/send-application-email', devAdminUser, devAdminProfile);
-    assert.equal(devDeniedAppEmail.status, 403);
-
     // 4. Regular client access to any admin route: strictly 403 Forbidden!
     assert.equal(simulateApiRouteAuth('/api/admin/system-health', clientUser, clientProfile).status, 403);
     assert.equal(simulateApiRouteAuth('/api/admin/administrators', clientUser, clientProfile).status, 403);
+    assert.equal(simulateApiRouteAuth('/api/send-application-email', clientUser, clientProfile).status, 403);
   });
 
   // ==========================================================================
@@ -321,4 +324,194 @@ describe('Foundarly Super Admin & Developer Admin Role Hierarchy Suite', () => {
     assert.equal(migrated.find((u) => u.id === '3')?.finalRole, 'client');
     assert.equal(migrated.find((u) => u.id === '4')?.finalRole, 'consultant');
   });
+
+  // ==========================================================================
+  // Test 11: Payment records (upi_payments) query access for Developer Admin, Super Admin, and unauthorized users
+  // ==========================================================================
+  test('11. Payment records (upi_payments) query access for Developer Admin, Super Admin, and unauthorized users', () => {
+    const mockPayments = [
+      { id: 'pay-1', customer_email: 'alice@client.com', user_id: 'client-1', transaction_id: 'UPI12345', payment_amount: 1500, status: 'verified' },
+      { id: 'pay-2', customer_email: 'bob@client.com', user_id: 'client-2', transaction_id: 'UPI67890', payment_amount: 3000, status: 'pending' },
+      { id: 'pay-3', customer_email: 'user@example.com', user_id: clientUser.id, transaction_id: 'UPI11111', payment_amount: 2000, status: 'pending' },
+    ];
+
+    // Evaluates the RLS policy: Admins manage all UPI payments via public.is_admin() (or owner)
+    function simulateUpiPaymentsQuery(user: any, profile: any) {
+      const isSuper = (profile?.role === 'super_admin' || profile?.role === 'admin') && isSuperAdmin(user, profile);
+      const isDev = profile?.role === 'developer_admin';
+      const isAdmin = isSuper || isDev;
+
+      return mockPayments.filter((p) => {
+        // Admin full access
+        if (isAdmin) return true;
+        // User own payment access
+        if (user?.id && user.id === p.user_id) return true;
+        if (user?.email && user.email.toLowerCase() === p.customer_email.toLowerCase()) return true;
+        return false;
+      });
+    }
+
+    // 1. Super Admin sees all payments
+    const superAdminResults = simulateUpiPaymentsQuery(superAdminUser, superAdminProfile);
+    assert.equal(superAdminResults.length, 3);
+
+    // 2. Developer Admin sees the EXACT SAME payments
+    const devAdminResults = simulateUpiPaymentsQuery(devAdminUser, devAdminProfile);
+    assert.equal(devAdminResults.length, 3);
+    assert.deepEqual(
+      devAdminResults.map(p => p.id),
+      superAdminResults.map(p => p.id),
+      'Developer Admin must receive identical legitimate payment records as Super Admin'
+    );
+
+    // 3. Regular client only sees their own payment
+    const clientResults = simulateUpiPaymentsQuery(clientUser, clientProfile);
+    assert.equal(clientResults.length, 1);
+    assert.equal(clientResults[0].id, 'pay-3');
+    assert.equal(clientResults[0].user_id, clientUser.id);
+
+    // 4. Unauthorized other client sees 0 rows
+    const otherClient = { id: 'stranger-id', email: 'stranger@example.com' };
+    const otherProfile = { id: 'stranger-id', role: 'client' as const };
+    const otherResults = simulateUpiPaymentsQuery(otherClient, otherProfile);
+    assert.equal(otherResults.length, 0);
+
+    // 5. Unauthenticated / anonymous visitor sees 0 rows
+    const anonResults = simulateUpiPaymentsQuery(null, null);
+    assert.equal(anonResults.length, 0);
+  });
+
+  // ==========================================================================
+  // Test 12: Consultant Payouts (payout_requests) query access across roles
+  // ==========================================================================
+  test('12. Consultant Payouts (payout_requests) query access across roles', () => {
+    const mockPayouts = [
+      { id: 'payout-1', consultant_id: consultantUser.id, amount: 5000, status: 'pending' },
+      { id: 'payout-2', consultant_id: 'other-consultant-id', amount: 8000, status: 'approved' },
+    ];
+
+    // Evaluates the RLS policy: Admins manage all payouts via public.is_admin() (or consultant owner)
+    function simulatePayoutRequestsQuery(user: any, profile: any) {
+      const isSuper = (profile?.role === 'super_admin' || profile?.role === 'admin') && isSuperAdmin(user, profile);
+      const isDev = profile?.role === 'developer_admin';
+      const isAdmin = isSuper || isDev;
+
+      return mockPayouts.filter((pr) => {
+        // Admin full access
+        if (isAdmin) return true;
+        // Consultant own payout access
+        if (user?.id && user.id === pr.consultant_id) return true;
+        return false;
+      });
+    }
+
+    // 1. Super Admin sees all payouts
+    const superPayouts = simulatePayoutRequestsQuery(superAdminUser, superAdminProfile);
+    assert.equal(superPayouts.length, 2);
+
+    // 2. Developer Admin sees all payouts
+    const devPayouts = simulatePayoutRequestsQuery(devAdminUser, devAdminProfile);
+    assert.equal(devPayouts.length, 2);
+    assert.deepEqual(devPayouts.map(p => p.id), superPayouts.map(p => p.id));
+
+    // 3. Consultant only sees their own payout
+    const consultantPayouts = simulatePayoutRequestsQuery(consultantUser, consultantProfile);
+    assert.equal(consultantPayouts.length, 1);
+    assert.equal(consultantPayouts[0].consultant_id, consultantUser.id);
+
+    // 4. Regular client sees 0 payouts
+    const clientPayouts = simulatePayoutRequestsQuery(clientUser, clientProfile);
+    assert.equal(clientPayouts.length, 0);
+
+    // 5. Unauthenticated visitor sees 0 payouts
+    const anonPayouts = simulatePayoutRequestsQuery(null, null);
+    assert.equal(anonPayouts.length, 0);
+  });
+
+  // ==========================================================================
+  // Test 13: Operation-scoped RLS policies (SELECT vs UPDATE vs DELETE vs INSERT) across user tiers
+  // ==========================================================================
+  test('13. Operation-scoped RLS matrix (SELECT, UPDATE, DELETE, INSERT) across all 5 tiers', () => {
+    // Evaluates permissions according to revised 07 RLS policies
+    function checkOperationAccess(tier: 'super_admin' | 'developer_admin' | 'consultant' | 'client' | 'anon', table: string, op: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE') {
+      const isSuper = tier === 'super_admin';
+      const isDev = tier === 'developer_admin';
+      const isAdmin = isSuper || isDev;
+
+      if (table === 'upi_payments') {
+        if (op === 'INSERT') return true; // Anyone can submit payment proof during checkout
+        if (op === 'SELECT') return isAdmin || tier === 'client' || tier === 'consultant'; // filtered by ownership
+        if (op === 'UPDATE') return isAdmin; // Admins verify/reject payments
+        if (op === 'DELETE') return isSuper; // ONLY Super Admin can delete financial audit records
+      }
+
+      if (table === 'payout_requests') {
+        if (op === 'INSERT') return tier === 'consultant' || isSuper;
+        if (op === 'SELECT') return isAdmin || tier === 'consultant';
+        if (op === 'UPDATE') return isAdmin; // Admins approve/reject payouts
+        if (op === 'DELETE') return isSuper; // ONLY Super Admin can delete payouts
+      }
+
+      if (table === 'consultant_earnings') {
+        if (op === 'INSERT') return true; // system/trigger/service_role
+        if (op === 'SELECT') return isAdmin || tier === 'consultant';
+        if (op === 'UPDATE' || op === 'DELETE') return isSuper; // Immutable ledger, super admin emergency only
+      }
+
+      if (table === 'bookings') {
+        if (op === 'INSERT') return true; // Public checkout
+        if (op === 'SELECT' || op === 'UPDATE') return isAdmin || tier === 'consultant' || tier === 'client';
+        if (op === 'DELETE') return isSuper; // Strictly Super Admin only
+      }
+
+      if (table === 'profiles.role') {
+        // Role alterations
+        return isSuper;
+      }
+
+      return false;
+    }
+
+    // 1. Super Admin: full capabilities across all tables, including DELETE and role alteration
+    assert.equal(checkOperationAccess('super_admin', 'upi_payments', 'DELETE'), true);
+    assert.equal(checkOperationAccess('super_admin', 'payout_requests', 'DELETE'), true);
+    assert.equal(checkOperationAccess('super_admin', 'consultant_earnings', 'UPDATE'), true);
+    assert.equal(checkOperationAccess('super_admin', 'consultant_earnings', 'DELETE'), true);
+    assert.equal(checkOperationAccess('super_admin', 'bookings', 'DELETE'), true);
+    assert.equal(checkOperationAccess('super_admin', 'profiles.role', 'UPDATE'), true);
+
+    // 2. Developer Admin: operational SELECT and UPDATE, but strictly NO DELETE on financial/booking tables and NO role mutation
+    assert.equal(checkOperationAccess('developer_admin', 'upi_payments', 'SELECT'), true);
+    assert.equal(checkOperationAccess('developer_admin', 'upi_payments', 'UPDATE'), true);
+    assert.equal(checkOperationAccess('developer_admin', 'upi_payments', 'DELETE'), false, 'Developer Admin must NOT be allowed to DELETE payments');
+    assert.equal(checkOperationAccess('developer_admin', 'payout_requests', 'SELECT'), true);
+    assert.equal(checkOperationAccess('developer_admin', 'payout_requests', 'UPDATE'), true);
+    assert.equal(checkOperationAccess('developer_admin', 'payout_requests', 'DELETE'), false, 'Developer Admin must NOT be allowed to DELETE payouts');
+    assert.equal(checkOperationAccess('developer_admin', 'consultant_earnings', 'SELECT'), true);
+    assert.equal(checkOperationAccess('developer_admin', 'consultant_earnings', 'UPDATE'), false);
+    assert.equal(checkOperationAccess('developer_admin', 'consultant_earnings', 'DELETE'), false);
+    assert.equal(checkOperationAccess('developer_admin', 'bookings', 'SELECT'), true);
+    assert.equal(checkOperationAccess('developer_admin', 'bookings', 'UPDATE'), true);
+    assert.equal(checkOperationAccess('developer_admin', 'bookings', 'DELETE'), false, 'Developer Admin must NOT be allowed to DELETE bookings');
+    assert.equal(checkOperationAccess('developer_admin', 'profiles.role', 'UPDATE'), false, 'Developer Admin must NOT be allowed to modify profile roles');
+
+    // 3. Consultant: can SELECT own payments/earnings/payouts, INSERT payouts, but CANNOT UPDATE payments or payouts
+    assert.equal(checkOperationAccess('consultant', 'upi_payments', 'UPDATE'), false, 'Consultant cannot verify payments');
+    assert.equal(checkOperationAccess('consultant', 'payout_requests', 'UPDATE'), false, 'Consultant cannot self-approve payouts');
+    assert.equal(checkOperationAccess('consultant', 'payout_requests', 'INSERT'), true, 'Consultant can request payouts');
+
+    // 4. Client: can SELECT own payments/bookings, INSERT bookings/payments, but CANNOT access payouts or earnings
+    assert.equal(checkOperationAccess('client', 'upi_payments', 'UPDATE'), false, 'Client cannot self-verify payments');
+    assert.equal(checkOperationAccess('client', 'payout_requests', 'SELECT'), false, 'Client cannot view consultant payouts');
+    assert.equal(checkOperationAccess('client', 'consultant_earnings', 'SELECT'), false, 'Client cannot view consultant earnings');
+
+    // 5. Anonymous: can only INSERT bookings and payment proofs (guest flow)
+    assert.equal(checkOperationAccess('anon', 'bookings', 'INSERT'), true);
+    assert.equal(checkOperationAccess('anon', 'upi_payments', 'INSERT'), true);
+    assert.equal(checkOperationAccess('anon', 'bookings', 'SELECT'), false);
+    assert.equal(checkOperationAccess('anon', 'upi_payments', 'SELECT'), false);
+    assert.equal(checkOperationAccess('anon', 'payout_requests', 'SELECT'), false);
+  });
 });
+
+

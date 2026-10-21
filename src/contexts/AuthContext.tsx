@@ -2,11 +2,17 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { secureLog } from '@/utils/security';
-import { isAllowedAdminEmail, isUserAdmin } from '@/lib/authorization';
+import { 
+  isAllowedAdminEmail, 
+  isUserAdmin, 
+  isSuperAdmin, 
+  isDeveloperAdmin, 
+  UserRole 
+} from '@/lib/authorization';
 
-interface Profile {
+export interface Profile {
   id: string;
-  role: 'admin' | 'client' | 'consultant';
+  role: UserRole;
   full_name: string | null;
   is_consultant?: boolean;
 }
@@ -20,10 +26,12 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null; profile: Profile | null }>;
   signInWithGoogle: () => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
+  isSuperAdmin: boolean;
+  isDeveloperAdmin: boolean;
   isAdmin: boolean;
   isClient: boolean;
   isConsultant: boolean;
-  hasRole: (role: 'admin' | 'client' | 'consultant') => boolean;
+  hasRole: (role: UserRole) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -79,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isAllowlistedAdmin = isAllowedAdminEmail(userEmail);
 
       // Query profile row from public.profiles table
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
@@ -87,30 +95,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       let profileData = (data as Profile) || null;
 
-      // 1. Check if user is an allowlisted admin
+      // 1. Check if user is an allowlisted Super Admin
       if (isAllowlistedAdmin) {
         if (!profileData) {
           profileData = {
             id: userId,
-            role: 'admin',
-            full_name: targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Admin',
+            role: 'super_admin',
+            full_name: targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Super Admin',
             is_consultant: false,
           };
         } else {
-          profileData = { ...profileData, role: 'admin' };
+          profileData = { ...profileData, role: 'super_admin' };
         }
-        supabase.from('profiles').upsert({ id: userId, role: 'admin', full_name: profileData.full_name }).then();
+
+        // Ensure database profile is upgraded to super_admin
+        supabase.from('profiles').upsert({ 
+          id: userId, 
+          role: 'super_admin', 
+          full_name: profileData.full_name 
+        }).then();
+        
         setProfile(profileData);
         return profileData;
       }
 
-      // If profile had admin role in DB but email is NOT allowlisted, revoke immediately
-      if (profileData && profileData.role === 'admin' && !isAllowlistedAdmin) {
+      // 2. Check if user is assigned Developer Admin role in DB
+      if (profileData && profileData.role === 'developer_admin') {
+        const resolvedDevProfile: Profile = {
+          id: userId,
+          role: 'developer_admin',
+          full_name: profileData.full_name || targetUser?.user_metadata?.full_name || 'Developer Admin',
+          is_consultant: false,
+        };
+        setProfile(resolvedDevProfile);
+        return resolvedDevProfile;
+      }
+
+      // 3. Defense-in-depth: If profile had super_admin or admin in DB but email is NOT allowlisted, revoke immediately
+      if (profileData && (profileData.role === 'admin' || profileData.role === 'super_admin') && !isAllowlistedAdmin) {
         secureLog.warn(`[Security] Revoking unauthorized admin role for non-allowlist email (${userEmail}).`);
         profileData = { ...profileData, role: 'client' };
       }
 
-      // 2. Check if user is a consultant (by user_id OR email in consultants table)
+      // 4. Check if user is a consultant (by user_id OR email in consultants table)
       let isConsultantUser = Boolean(profileData?.role === 'consultant' || profileData?.is_consultant);
       let consultantName = profileData?.full_name;
 
@@ -156,7 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn('[AuthContext] Consultant check non-fatal warning:', consErr);
       }
 
-      const finalRole: 'client' | 'consultant' = isConsultantUser ? 'consultant' : 'client';
+      const finalRole: UserRole = isConsultantUser ? 'consultant' : 'client';
       const fallbackName = consultantName || targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'User';
 
       const resolvedProfile: Profile = {
@@ -221,7 +248,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('foundarly_admin_auth');
 
     const normalizedEmail = email.trim().toLowerCase();
-
     const { data, error } = await supabase.auth.signInWithPassword({
       email: normalizedEmail,
       password,
@@ -249,7 +275,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (isIframe) {
         // Open target window synchronously during click event to bypass browser popup blockers
         const popup = window.open('about:blank', '_blank');
-
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
@@ -292,11 +317,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(null);
   };
 
+  const isCurrentSuperAdmin = isSuperAdmin(user, profile);
+  const isCurrentDevAdmin = isDeveloperAdmin(user, profile);
   const isCurrentAdmin = isUserAdmin(user, profile);
   const isCurrentConsultant = !isCurrentAdmin && (profile?.role === 'consultant' || profile?.is_consultant === true);
   const isCurrentClient = !isCurrentAdmin && !isCurrentConsultant;
 
-  const hasRole = (role: 'admin' | 'client' | 'consultant') => {
+  const hasRole = (role: UserRole) => {
+    if (role === 'super_admin') return isCurrentSuperAdmin;
+    if (role === 'developer_admin') return isCurrentDevAdmin;
     if (role === 'admin') return isCurrentAdmin;
     if (role === 'consultant') return isCurrentConsultant;
     return isCurrentClient;
@@ -311,6 +340,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signIn,
     signInWithGoogle,
     signOut,
+    isSuperAdmin: isCurrentSuperAdmin,
+    isDeveloperAdmin: isCurrentDevAdmin,
     isAdmin: isCurrentAdmin,
     isClient: isCurrentClient,
     isConsultant: isCurrentConsultant,
@@ -327,4 +358,3 @@ export function useAuth() {
   }
   return context;
 }
-

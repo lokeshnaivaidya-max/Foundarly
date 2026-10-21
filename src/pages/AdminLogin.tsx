@@ -4,9 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
-import { isUserAdmin, isAllowedAdminEmail } from "@/lib/authorization";
+import { isUserAdmin, isSuperAdmin, isDeveloperAdmin } from "@/lib/authorization";
 import { toast } from "sonner";
-import { ArrowLeft, Eye, EyeOff, Lock, Mail } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -21,7 +21,10 @@ export default function AdminLoginPage() {
   useEffect(() => {
     if (!authLoading && user) {
       const fromPath = (location.state as any)?.from?.pathname;
-      if (isUserAdmin(user, profile)) {
+      if (isDeveloperAdmin(user, profile)) {
+        const validDevFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin/developer')) ? fromPath : '/admin/developer';
+        navigate(validDevFrom, { replace: true });
+      } else if (isSuperAdmin(user, profile) || isUserAdmin(user, profile)) {
         const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
         navigate(validAdminFrom, { replace: true });
       } else if (profile?.role === 'consultant' || profile?.is_consultant) {
@@ -47,12 +50,6 @@ export default function AdminLoginPage() {
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
-      if (!isAllowedAdminEmail(normalizedEmail)) {
-        setError("Access denied: This email is not authorized for administrator access.");
-        setLoading(false);
-        return;
-      }
-
       const { error: signInError, profile: userProfile } = await signIn(normalizedEmail, password);
 
       if (signInError) {
@@ -61,14 +58,18 @@ export default function AdminLoginPage() {
       }
 
       const activeProfile = userProfile || profile;
-
       if (!isUserAdmin(user, activeProfile)) {
         setError("Access denied: You do not possess verified administrator privileges.");
         return;
       }
 
-      toast.success("Successfully authenticated as Admin");
+      if (isDeveloperAdmin(user, activeProfile)) {
+        toast.success("Successfully authenticated as Developer Admin");
+        navigate("/admin/developer", { replace: true });
+        return;
+      }
 
+      toast.success("Successfully authenticated as Super Admin");
       const fromPath = (location.state as any)?.from?.pathname;
       const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
       navigate(validAdminFrom, { replace: true });
@@ -81,7 +82,6 @@ export default function AdminLoginPage() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-12 relative overflow-hidden">
-      {/* Decorative subtle background accents */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-primary/5 rounded-full blur-3xl pointer-events-none" />
 
       <Card className="w-full max-w-md border-border/80 bg-card/95 shadow-xl relative z-10">
@@ -106,11 +106,10 @@ export default function AdminLoginPage() {
           <div>
             <CardTitle className="font-display text-2xl tracking-tight">Admin Sign In</CardTitle>
             <CardDescription className="text-sm mt-1">
-              Sign in with your administrator credentials to access the Foundarly management suite.
+              Sign in with your Super Admin or Developer Admin credentials.
             </CardDescription>
           </div>
         </CardHeader>
-
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
             <div className="space-y-2">
@@ -124,8 +123,8 @@ export default function AdminLoginPage() {
                   required
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
-                  placeholder="admin@domain.com"
-                  className="bg-secondary/50 pl-9 border-border/60 focus:border-primary"
+                  placeholder="admin@foundarly.com"
+                  className="bg-secondary/50 pl-9 border-border/60 focus:border-primary text-xs"
                   autoComplete="username"
                 />
               </div>
@@ -143,7 +142,7 @@ export default function AdminLoginPage() {
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder="••••••••"
-                  className="bg-secondary/50 pl-9 pr-10 border-border/60 focus:border-primary"
+                  className="bg-secondary/50 pl-9 pr-10 border-border/60 focus:border-primary text-xs"
                   autoComplete="current-password"
                 />
                 <button
@@ -163,17 +162,16 @@ export default function AdminLoginPage() {
               </div>
             ) : null}
 
-            <Button type="submit" className="w-full h-10 font-medium" disabled={loading}>
+            <Button type="submit" className="w-full h-10 font-medium glow-gold-sm text-xs" disabled={loading}>
               {loading ? "Authenticating..." : "Sign In to Admin Panel"}
             </Button>
           </form>
 
           <p className="mt-6 text-[11px] text-muted-foreground text-center">
-            Secured via Supabase Authentication & Role-Based Access Control.
+            Role hierarchy enforced: Super Admin (Executive) & Developer Admin (Technical).
           </p>
         </CardContent>
       </Card>
     </div>
   );
 }
-

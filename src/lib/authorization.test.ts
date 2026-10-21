@@ -2,14 +2,22 @@ import { describe, expect, it } from 'vitest';
 import {
   getAdminAllowlist,
   isAllowedAdminEmail,
+  isSuperAdmin,
+  isDeveloperAdmin,
   isUserAdmin,
   sanitizeUserRole,
   getUserEffectiveRole,
+  canAccessSection,
+  canManageAdministrators,
+  canAccessFinancials,
+  canManageUsers,
+  canManageSettings,
 } from './authorization';
 
-describe('Authorization & Admin Security Suite', () => {
+describe('Authorization & Admin Role Hierarchy Security Suite', () => {
   const allowlistedAdminEmail = 'admin@foundarly.com';
   const normalUserEmail = 'naivaidya736@gmail.com';
+  const developerEmail = 'developer@foundarly.com';
   const otherNormalEmail = 'random.user@gmail.com';
 
   describe('Allowlist Verification (isAllowedAdminEmail)', () => {
@@ -28,45 +36,105 @@ describe('Authorization & Admin Security Suite', () => {
     });
   });
 
-  describe('Multi-Factor Admin Authorization (isUserAdmin)', () => {
-    it('Scenario A: Verified admin email + database admin role => Authorized Admin', () => {
-      const adminUser = { id: 'admin-1', email: allowlistedAdminEmail };
-      const adminProfile = { id: 'admin-1', role: 'admin' as const, full_name: 'Admin' };
+  describe('Super Admin vs Developer Admin Multi-Factor Authorization', () => {
+    it('Scenario 1: Verified allowlisted email + database super_admin role => Authorized Super Admin', () => {
+      const superUser = { id: 'admin-1', email: allowlistedAdminEmail };
+      const superProfile = { id: 'admin-1', role: 'super_admin' as const, full_name: 'Super Admin' };
 
-      expect(isUserAdmin(adminUser, adminProfile)).toBe(true);
-      expect(getUserEffectiveRole(adminUser, adminProfile)).toBe('admin');
+      expect(isSuperAdmin(superUser, superProfile)).toBe(true);
+      expect(isDeveloperAdmin(superUser, superProfile)).toBe(false);
+      expect(isUserAdmin(superUser, superProfile)).toBe(true);
+      expect(getUserEffectiveRole(superUser, superProfile)).toBe('super_admin');
     });
 
-    it('Scenario B: Normal Google user with client role => Not Admin (Client)', () => {
+    it('Scenario 1b: Backward-compatible admin role + allowlisted email => Recognized Super Admin', () => {
+      const legacyAdminUser = { id: 'admin-1', email: allowlistedAdminEmail };
+      const legacyAdminProfile = { id: 'admin-1', role: 'admin' as const, full_name: 'Admin' };
+
+      expect(isSuperAdmin(legacyAdminUser, legacyAdminProfile)).toBe(true);
+      expect(isUserAdmin(legacyAdminUser, legacyAdminProfile)).toBe(true);
+      expect(getUserEffectiveRole(legacyAdminUser, legacyAdminProfile)).toBe('super_admin');
+    });
+
+    it('Scenario 2: Developer Admin with designated role in database => Authorized Developer Admin only', () => {
+      const devUser = { id: 'dev-1', email: developerEmail };
+      const devProfile = { id: 'dev-1', role: 'developer_admin' as const, full_name: 'Dev Admin' };
+
+      expect(isDeveloperAdmin(devUser, devProfile)).toBe(true);
+      expect(isSuperAdmin(devUser, devProfile)).toBe(false);
+      expect(isUserAdmin(devUser, devProfile)).toBe(true);
+      expect(getUserEffectiveRole(devUser, devProfile)).toBe('developer_admin');
+    });
+
+    it('Scenario 3: Normal client user => Not Admin (Client)', () => {
       const normalUser = { id: 'user-1', email: normalUserEmail };
       const clientProfile = { id: 'user-1', role: 'client' as const, full_name: 'Normal User' };
 
+      expect(isSuperAdmin(normalUser, clientProfile)).toBe(false);
+      expect(isDeveloperAdmin(normalUser, clientProfile)).toBe(false);
       expect(isUserAdmin(normalUser, clientProfile)).toBe(false);
       expect(getUserEffectiveRole(normalUser, clientProfile)).toBe('client');
     });
 
-    it('Defense-in-Depth: Normal Google account with compromised/corrupted DB role "admin" => Rejected and Demoted', () => {
-      // Even if attacker or accidental mutation set role='admin' in DB for a normal email
+    it('Defense-in-Depth: Malicious user setting role="super_admin" without allowlist => Demoted to Client', () => {
       const normalUser = { id: 'user-1', email: normalUserEmail };
-      const corruptedProfile = { id: 'user-1', role: 'admin' as const, full_name: 'Normal User' };
+      const corruptedProfile = { id: 'user-1', role: 'super_admin' as const, full_name: 'Attacker' };
 
-      // Must be rejected
-      expect(isUserAdmin(normalUser, corruptedProfile)).toBe(false);
-      // Sanitizer must demote to 'client'
+      expect(isSuperAdmin(normalUser, corruptedProfile)).toBe(false);
       expect(sanitizeUserRole(normalUser, corruptedProfile)).toBe('client');
       expect(getUserEffectiveRole(normalUser, corruptedProfile)).toBe('client');
     });
+  });
 
-    it('Admin email but DB profile has not been assigned admin role => Not Admin', () => {
-      const adminUser = { id: 'admin-2', email: allowlistedAdminEmail };
-      const nonAdminProfile = { id: 'admin-2', role: 'client' as const, full_name: 'Pending Admin' };
-
-      expect(isUserAdmin(adminUser, nonAdminProfile)).toBe(false);
+  describe('Least-Privilege Section & Capability Enforcement', () => {
+    it('Super Admin can access all operational and technical sections', () => {
+      const superRole = 'super_admin';
+      expect(canAccessSection(superRole, 'administrators')).toBe(true);
+      expect(canAccessSection(superRole, 'users')).toBe(true);
+      expect(canAccessSection(superRole, 'payouts')).toBe(true);
+      expect(canAccessSection(superRole, 'pricing')).toBe(true);
+      expect(canAccessSection(superRole, 'settings')).toBe(true);
+      expect(canAccessSection(superRole, 'developer')).toBe(true);
+      expect(canAccessSection(superRole, 'logs')).toBe(true);
     });
 
-    it('Scenario D: Unauthenticated user (null user) => Not Admin', () => {
-      expect(isUserAdmin(null, null)).toBe(false);
-      expect(getUserEffectiveRole(null, null)).toBe('client');
+    it('Developer Admin is strictly restricted to technical diagnostics', () => {
+      const devRole = 'developer_admin';
+      // Allowed technical areas:
+      expect(canAccessSection(devRole, 'developer')).toBe(true);
+      expect(canAccessSection(devRole, 'logs')).toBe(true);
+      expect(canAccessSection(devRole, 'faqs')).toBe(true);
+      expect(canAccessSection(devRole, 'blog')).toBe(true);
+
+      // FORBIDDEN executive & sensitive areas:
+      expect(canAccessSection(devRole, 'administrators')).toBe(false);
+      expect(canAccessSection(devRole, 'users')).toBe(false);
+      expect(canAccessSection(devRole, 'payouts')).toBe(false);
+      expect(canAccessSection(devRole, 'pricing')).toBe(false);
+      expect(canAccessSection(devRole, 'settings')).toBe(false);
+      expect(canAccessSection(devRole, 'consultants')).toBe(false);
+      expect(canAccessSection(devRole, 'consultant_applications')).toBe(false);
+      expect(canAccessSection(devRole, 'bookings')).toBe(false);
+    });
+
+    it('Permission functions strictly protect executive operations', () => {
+      const superUser = { id: 'admin-1', email: allowlistedAdminEmail };
+      const superProfile = { id: 'admin-1', role: 'super_admin' as const, full_name: 'Super Admin' };
+
+      const devUser = { id: 'dev-1', email: developerEmail };
+      const devProfile = { id: 'dev-1', role: 'developer_admin' as const, full_name: 'Dev Admin' };
+
+      // Super Admin passes all
+      expect(canManageAdministrators(superUser, superProfile)).toBe(true);
+      expect(canAccessFinancials(superUser, superProfile)).toBe(true);
+      expect(canManageUsers(superUser, superProfile)).toBe(true);
+      expect(canManageSettings(superUser, superProfile)).toBe(true);
+
+      // Developer Admin blocked from all executive operations
+      expect(canManageAdministrators(devUser, devProfile)).toBe(false);
+      expect(canAccessFinancials(devUser, devProfile)).toBe(false);
+      expect(canManageUsers(devUser, devProfile)).toBe(false);
+      expect(canManageSettings(devUser, devProfile)).toBe(false);
     });
   });
 });

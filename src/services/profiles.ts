@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
+import type { UserRole } from '@/lib/authorization';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
 type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
@@ -33,7 +34,6 @@ export const profilesService = {
         .select('*')
         .ilike('full_name', `%${email.split('@')[0]}%`)
         .maybeSingle();
-
       return data ? { id: data.id } : null;
     } catch {
       return null;
@@ -52,12 +52,10 @@ export const profilesService = {
       console.error('[Profiles Service] Error updating profile:', error);
       throw error;
     }
-
     return data as Profile;
   },
 
-  async updateRole(id: string, role: 'admin' | 'consultant' | 'client') {
+  async updateRole(id: string, role: UserRole) {
     return this.update(id, { role });
   },
 };
-

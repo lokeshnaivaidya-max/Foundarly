@@ -49,7 +49,7 @@ export default function Header() {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, profile, isAdmin, isConsultant, isClient, signOut } = useAuth();
+  const { user, profile, isAdmin, isSuperAdmin, isDeveloperAdmin, isConsultant, isClient, signOut } = useAuth();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 15);
@@ -229,12 +229,12 @@ export default function Header() {
 
           {/* Primary CTA - Role based */}
           {isAdminRole ? (
-            <Link to="/admin">
+            <Link to={isDeveloperAdmin ? "/admin/developer" : "/admin"}>
               <Button
                 size="sm"
                 className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs xl:text-sm shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 rounded-full px-4 xl:px-5 py-2"
               >
-                Admin Dashboard
+                {isDeveloperAdmin ? "Developer Portal" : "Admin Dashboard"}
               </Button>
             </Link>
           ) : isConsultantRole ? (
@@ -283,9 +283,13 @@ export default function Header() {
                       <p className="text-sm font-semibold leading-none text-foreground truncate">
                         {profile?.full_name || "User Account"}
                       </p>
-                      {isAdminRole ? (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/20 text-primary border border-primary/30 shrink-0">
-                          Admin
+                      {isSuperAdmin ? (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                          Super Admin
+                        </span>
+                      ) : isDeveloperAdmin ? (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 shrink-0">
+                          Developer Admin
                         </span>
                       ) : isConsultantRole ? (
                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/20 text-primary border border-primary/30 shrink-0">
@@ -299,10 +303,9 @@ export default function Header() {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator className="my-1 bg-border/60" />
-
                 <DropdownMenuGroup>
                   <DropdownMenuItem
-                    onClick={() => navigate(isAdminRole ? "/admin" : isConsultantRole ? "/consultant/dashboard" : "/my-bookings")}
+                    onClick={() => navigate(isDeveloperAdmin ? "/admin/developer" : isSuperAdmin ? "/admin" : isConsultantRole ? "/consultant/dashboard" : "/my-bookings")}
                     className="cursor-pointer rounded-lg px-2.5 py-2 text-xs font-medium focus:bg-primary/10 focus:text-primary transition-colors"
                   >
                     <User className="mr-2 h-4 w-4 text-muted-foreground" />

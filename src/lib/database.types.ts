@@ -357,19 +357,19 @@ export interface Database {
       profiles: {
         Row: {
           id: string
-          role: 'admin' | 'consultant' | 'client'
+          role: 'super_admin' | 'developer_admin' | 'admin' | 'consultant' | 'client'
           full_name: string | null
           created_at: string
         }
         Insert: {
           id: string
-          role?: 'admin' | 'consultant' | 'client'
+          role?: 'super_admin' | 'developer_admin' | 'admin' | 'consultant' | 'client'
           full_name?: string | null
           created_at?: string
         }
         Update: {
           id?: string
-          role?: 'admin' | 'consultant' | 'client'
+          role?: 'super_admin' | 'developer_admin' | 'admin' | 'consultant' | 'client'
           full_name?: string | null
           created_at?: string
         }

@@ -116,6 +116,10 @@
 
   <body>
     <div id="root"></div>
+    <script>
+      // Browser-safe process shim to protect against legacy/third-party process references
+      window.process = window.process || { env: {}, version: '', platform: 'browser', browser: true };
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

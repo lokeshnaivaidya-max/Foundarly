@@ -12,6 +12,7 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { bookingsService } from "@/services/bookings";
 import { consultantDashboardService } from "@/services/consultantDashboard";
 import { emailService } from "@/services/email";
+import { followUpService } from "@/services/followUpService";
 import { useNavigate, Link } from "react-router-dom";
 import { SkeletonList } from "@/components/PageLoader";
 import {

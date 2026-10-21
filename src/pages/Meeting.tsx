@@ -562,7 +562,11 @@ export default function MeetingPage() {
       console.log(`[Meeting] Joining signaling channel with canonical room ID: ${canonicalRoom}`);
       await service.joinRoom(canonicalRoom);
 
-      toast.success("Connected to meeting room!");
+      if (stream.getTracks().length === 0) {
+        toast.info("Connected to meeting room in listener mode (camera/mic unavailable).");
+      } else {
+        toast.success("Connected to meeting room!");
+      }
 
       // 3. Automatically notify the other participant if they are not yet present in the room
       if (!hasTriggeredNotificationRef.current && canonicalRoom) {

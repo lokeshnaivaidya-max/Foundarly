@@ -47,6 +47,9 @@ import {
 import { followUpStorage } from "./src/server/followUpStorage.js";
 import { completionEmailStorage } from "./src/server/completionEmailStorage.js";
 import { meetingParticipantStorage } from "./src/server/meetingParticipantStorage.js";
+import agoraAccessToken from "agora-access-token";
+
+const { RtcTokenBuilder, RtcRole } = agoraAccessToken;
 
 dotenv.config();
 
@@ -170,10 +173,10 @@ async function startServer() {
   // Global Security & Defense Headers Middleware
   app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self), geolocation=(self)");
+    // Allow camera, microphone, display-capture for video meetings inside preview/iframes
+    res.setHeader("Permissions-Policy", "camera=*, microphone=*, display-capture=*, geolocation=*");
     if (process.env.NODE_ENV === "production") {
       res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
     }
@@ -931,6 +934,53 @@ async function startServer() {
   // API Endpoint: Send email notification when a participant is waiting in room
   app.post("/api/meeting/notify-waiting", (req, res) => {
     handleMeetingNotifyWaiting(req.body?.roomId, req, res);
+  });
+
+  // API Endpoint: Generate secure Agora RTC Token for video rooms
+  app.post("/api/agora/token", (req, res) => {
+    try {
+      const appId =
+        process.env.AGORA_APP_ID ||
+        process.env.VITE_AGORA_APP_ID ||
+        "d5eaf592322846eab2879d2bc086af78";
+      const appCertificate =
+        process.env.AGORA_APP_CERTIFICATE ||
+        process.env.VITE_AGORA_APP_CERTIFICATE ||
+        "620cccf9c8e94046aa4da9359c6d7275";
+
+      const { channelName, uid } = req.body || {};
+      if (!channelName) {
+        return res.status(400).json({ success: false, error: "channelName is required" });
+      }
+
+      const numericUid = typeof uid === "number" ? uid : (parseInt(uid, 10) || Math.floor(Math.random() * 1000000));
+      const role = RtcRole.PUBLISHER;
+      const expirationTimeInSeconds = 7200; // 2 hours
+      const currentTimestamp = Math.floor(Date.now() / 1000);
+      const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
+
+      const token = RtcTokenBuilder.buildTokenWithUid(
+        appId,
+        appCertificate,
+        String(channelName),
+        numericUid,
+        role,
+        privilegeExpiredTs
+      );
+
+      console.log(`[Agora Server] Generated RTC token for channel: ${channelName}, UID: ${numericUid}`);
+      return res.json({
+        success: true,
+        token,
+        appId,
+        channelName,
+        uid: numericUid,
+        expiresIn: expirationTimeInSeconds,
+      });
+    } catch (err: any) {
+      console.error("[Agora Server] Token generation failed:", err);
+      return res.status(500).json({ success: false, error: err.message || "Failed to generate token" });
+    }
   });
 
   // =========================================================================
@@ -2841,6 +2891,7 @@ async function startServer() {
       /^\/meeting(\/.*)?$/,
       /^\/review(\/.*)?$/,
       /^\/upi-payment\/?$/,
+      /^\/consultant-dashboard\/?$/,
       /^\/login\/?$/,
       /^\/admin(\/.*)?$/,
     ];

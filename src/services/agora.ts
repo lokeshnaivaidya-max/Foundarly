@@ -103,10 +103,14 @@ export class AgoraService {
         try {
           console.log("Attempting to generate Agora token...");
           const uid = config.uid || Math.floor(Math.random() * 1000000);
-          token = generateMeetingToken(config.channel, uid);
-          console.log("Token generated successfully");
-        } catch (tokenError) {
-          console.warn("Token generation failed:", tokenError.message);
+          token = await generateMeetingToken(config.channel, uid);
+          if (token) {
+            console.log("Token generated successfully from server");
+          } else {
+            console.log("No token returned, attempting App ID mode");
+          }
+        } catch (tokenError: any) {
+          console.warn("Token generation failed:", tokenError?.message);
           console.log("Falling back to App ID only mode");
           token = null;
         }

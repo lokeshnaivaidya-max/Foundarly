@@ -12,7 +12,7 @@ export default defineConfig({
   publicDir: "public",
   server: {
     host: "::",
-    port: 8080,
+    port: 3000,
   },
   plugins: [react()],
   resolve: {
@@ -22,6 +22,7 @@ export default defineConfig({
   },
   define: {
     global: 'globalThis',
+    'process.env': {},
   },
   build: {
     outDir: "dist",

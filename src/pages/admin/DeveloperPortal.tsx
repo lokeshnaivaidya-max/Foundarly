@@ -16,7 +16,8 @@ import {
   CreditCard, 
   Sparkles,
   Lock,
-  Download
+  Download,
+  KeyRound
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,14 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription, 
+  DialogFooter 
+} from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
@@ -58,7 +67,7 @@ interface DiagnosticLog {
 }
 
 export default function DeveloperPortal({ defaultTab = "overview" }: { defaultTab?: string }) {
-  const { session, isSuperAdmin, isDeveloperAdmin } = useAuth();
+  const { user, session, isSuperAdmin, isDeveloperAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [healthData, setHealthData] = useState<SystemHealthData | null>(null);
   const [logs, setLogs] = useState<DiagnosticLog[]>([]);
@@ -68,6 +77,20 @@ export default function DeveloperPortal({ defaultTab = "overview" }: { defaultTa
   const [logFilter, setLogFilter] = useState<string>("all");
   const [pingRunning, setPingRunning] = useState(false);
   const [lastPingResult, setLastPingResult] = useState<{ status: string; latency: number } | null>(null);
+
+  // First login password change state
+  const mustChangePassword = Boolean(user?.user_metadata?.must_change_password);
+  const [pwdDialogOpen, setPwdDialogOpen] = useState(mustChangePassword);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordChanged, setPasswordChanged] = useState(false);
+
+  useEffect(() => {
+    if (mustChangePassword && !passwordChanged) {
+      setPwdDialogOpen(true);
+    }
+  }, [mustChangePassword, passwordChanged]);
 
   const fetchHealth = async () => {
     try {
@@ -144,6 +167,44 @@ export default function DeveloperPortal({ defaultTab = "overview" }: { defaultTa
     }
   };
 
+  const handleChangePassword = async () => {
+    if (!newPassword || newPassword.length < 8) {
+      toast.error("Password must be at least 8 characters long.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      const res = await fetch("/api/admin/change-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token || ""}`,
+        },
+        body: JSON.stringify({ newPassword }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast.success("Password updated successfully!");
+        setPasswordChanged(true);
+        setPwdDialogOpen(false);
+        setNewPassword("");
+        setConfirmPassword("");
+      } else {
+        toast.error(data.error || "Failed to update password");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Error changing password");
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
   const formatUptime = (seconds?: number) => {
     if (!seconds) return "0s";
     const d = Math.floor(seconds / (3600 * 24));
@@ -186,6 +247,16 @@ export default function DeveloperPortal({ defaultTab = "overview" }: { defaultTa
           <Button
             variant="outline"
             size="sm"
+            onClick={() => setPwdDialogOpen(true)}
+            className="text-xs"
+          >
+            <KeyRound className="w-3.5 h-3.5 mr-1.5 text-primary" />
+            Change Password
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleRefresh}
             disabled={refreshing}
             className="text-xs"
@@ -195,6 +266,32 @@ export default function DeveloperPortal({ defaultTab = "overview" }: { defaultTa
           </Button>
         </div>
       </div>
+
+      {/* Mandatory Password Change Prompt if flag active */}
+      {mustChangePassword && !passwordChanged && (
+        <Card className="bg-amber-500/10 border-amber-500/30">
+          <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <KeyRound className="w-5 h-5 text-amber-400 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-foreground">
+                  Security Requirement: Initial Password Update Required
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Your Developer Admin account is using an initial temporary password. Please change it to ensure account security.
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setPwdDialogOpen(true)}
+              className="text-xs glow-gold-sm shrink-0"
+            >
+              Update Password Now
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Security Notice for Least Privilege */}
       <Card className="bg-sky-500/5 border-sky-500/20">
@@ -245,7 +342,7 @@ export default function DeveloperPortal({ defaultTab = "overview" }: { defaultTa
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-4 pt-0 text-xs text-muted-foreground">
-                Node runtime: {healthData?.nodeVersion || process.version || "Node.js"}
+                Node runtime: {healthData?.nodeVersion || "Node.js"}
               </CardContent>
             </Card>
 
@@ -623,6 +720,68 @@ export default function DeveloperPortal({ defaultTab = "overview" }: { defaultTa
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Change Password Dialog */}
+      <Dialog open={pwdDialogOpen} onOpenChange={setPwdDialogOpen}>
+        <DialogContent className="bg-card border-border max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-primary" />
+              Update Account Password
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {mustChangePassword && !passwordChanged
+                ? "First-login security requirement: Please enter a new password to replace your temporary credentials."
+                : "Enter a new secure password for your Developer Admin account."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">New Password</label>
+              <Input
+                type="password"
+                placeholder="At least 8 characters..."
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="bg-background text-xs"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-foreground">Confirm New Password</label>
+              <Input
+                type="password"
+                placeholder="Re-enter new password..."
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="bg-background text-xs"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            {!mustChangePassword && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPwdDialogOpen(false)}
+                disabled={changingPassword}
+              >
+                Cancel
+              </Button>
+            )}
+            <Button
+              size="sm"
+              className="glow-gold-sm"
+              onClick={handleChangePassword}
+              disabled={changingPassword}
+            >
+              {changingPassword ? "Updating..." : "Save New Password"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

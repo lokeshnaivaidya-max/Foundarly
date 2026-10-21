@@ -46,6 +46,9 @@ import AdminCategories from "./pages/admin/AdminCategories";
 import AdminReferrals from "./pages/admin/AdminReferrals";
 import DeveloperPortal from "./pages/admin/DeveloperPortal";
 import AdminAdministrators from "./pages/admin/AdminAdministrators";
+import AdminPayouts from "./pages/admin/AdminPayouts";
+import AdminPayments from "./pages/admin/AdminPayments";
+import UPIVerification from "./pages/admin/UPIVerification";
 import ApplyConsultant from "./pages/ApplyConsultant";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
@@ -80,7 +83,7 @@ const App = () => (
                     <Route path="/consultant/profile/:id" element={<ConsultantProfile />} />
                     <Route path="/booking" element={<Booking />} />
                     <Route path="/my-bookings" element={
-                      <ProtectedRoute allowedRoles={['client']}>
+                      <ProtectedRoute>
                         <MyBookings />
                       </ProtectedRoute>
                     } />
@@ -90,6 +93,11 @@ const App = () => (
                       </ProtectedRoute>
                     } />
                     <Route path="/consultant/dashboard" element={
+                      <ProtectedRoute allowedRoles={['consultant', 'admin']}>
+                        <ConsultantDashboard />
+                      </ProtectedRoute>
+                    } />
+                    <Route path="/consultant-dashboard" element={
                       <ProtectedRoute allowedRoles={['consultant', 'admin']}>
                         <ConsultantDashboard />
                       </ProtectedRoute>
@@ -131,6 +139,9 @@ const App = () => (
                       <Route path="settings" element={<ProtectedRoute requireSuperAdmin><AdminSettings /></ProtectedRoute>} />
                       <Route path="pricing" element={<ProtectedRoute requireSuperAdmin><AdminPricing /></ProtectedRoute>} />
                       <Route path="bookings" element={<ProtectedRoute requireSuperAdmin><AdminBookings /></ProtectedRoute>} />
+                      <Route path="payouts" element={<ProtectedRoute requireSuperAdmin><AdminPayouts /></ProtectedRoute>} />
+                      <Route path="payments" element={<ProtectedRoute requireSuperAdmin><AdminPayments /></ProtectedRoute>} />
+                      <Route path="upi-verification" element={<ProtectedRoute requireSuperAdmin><UPIVerification /></ProtectedRoute>} />
                       <Route path="consultants" element={<ProtectedRoute requireSuperAdmin><AdminConsultants /></ProtectedRoute>} />
                       <Route path="consultant-applications" element={<ProtectedRoute requireSuperAdmin><AdminConsultantApplications /></ProtectedRoute>} />
                       <Route path="content" element={<ProtectedRoute requireSuperAdmin><AdminContent /></ProtectedRoute>} />

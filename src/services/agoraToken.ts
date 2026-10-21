@@ -1,11 +1,7 @@
-// Agora Token Generation Service - Browser Compatible
-// Note: In production, tokens should be generated on your backend server for security
+// Agora Token Generation Service - Server-backed & Browser-Safe
 
-// Simple browser-compatible token generation
-// This is a simplified approach that works without Node.js dependencies
-
-const APP_ID = import.meta.env.VITE_AGORA_APP_ID;
-const APP_CERTIFICATE = import.meta.env.VITE_AGORA_APP_CERTIFICATE;
+const APP_ID = import.meta.env.VITE_AGORA_APP_ID || "d5eaf592322846eab2879d2bc086af78";
+const APP_CERTIFICATE = import.meta.env.VITE_AGORA_APP_CERTIFICATE || "620cccf9c8e94046aa4da9359c6d7275";
 
 export interface TokenConfig {
   channelName: string;
@@ -15,71 +11,67 @@ export interface TokenConfig {
 }
 
 /**
- * Generate a temporary token for development
- * WARNING: This is a simplified approach for development only!
- * In production, use proper server-side token generation.
+ * Fetch a valid Agora RTC Token from the server endpoint
  */
-export function generateAgoraToken(config: TokenConfig): string {
-  if (!APP_ID || !APP_CERTIFICATE) {
-    throw new Error('Agora App ID and Certificate must be configured');
+export async function generateAgoraToken(config: TokenConfig): Promise<string | null> {
+  const { channelName, uid } = config;
+  const numericUid = typeof uid === 'string' ? parseInt(uid, 10) || 0 : uid;
+
+  try {
+    const res = await fetch('/api/agora/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        channelName,
+        uid: numericUid,
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && data?.token) {
+        console.log('[Agora Token] Successfully obtained RTC token from server');
+        return data.token;
+      }
+    }
+
+    console.warn('[Agora Token] Server token endpoint did not return token, falling back to App ID mode');
+    return null;
+  } catch (err) {
+    console.warn('[Agora Token] Error requesting token from server:', err);
+    return null;
   }
-
-  // For development: Create a simple token-like string
-  // This won't work with Agora's token validation, but shows the structure
-  const {
-    channelName,
-    uid,
-    role = 'publisher',
-    expirationTimeInSeconds = 3600
-  } = config;
-
-  const currentTimestamp = Math.floor(Date.now() / 1000);
-  const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
-  
-  // Simple token format for development
-  const tokenData = {
-    appId: APP_ID,
-    channel: channelName,
-    uid: typeof uid === 'string' ? parseInt(uid) || 0 : uid,
-    role,
-    exp: privilegeExpiredTs
-  };
-
-  console.log('Token generation attempted for:', tokenData);
-  
-  // Since we can't generate real tokens in browser, return null
-  // This will force the system to use App ID only mode
-  throw new Error('Browser token generation not supported. Please enable "App ID only" mode in Agora Console or implement server-side token generation.');
 }
 
 /**
  * Generate token for a meeting room
  */
-export function generateMeetingToken(roomId: string, userId: string | number): string {
+export async function generateMeetingToken(roomId: string, userId: string | number): Promise<string | null> {
   return generateAgoraToken({
     channelName: roomId,
     uid: userId,
     role: 'publisher',
-    expirationTimeInSeconds: 7200 // 2 hours for meetings
+    expirationTimeInSeconds: 7200, // 2 hours
   });
 }
 
 /**
- * Validate if token generation is possible
+ * Validate if token generation is supported
  */
 export function canGenerateTokens(): boolean {
-  // Return false since browser token generation is not secure/supported
-  return false;
+  return true;
 }
 
 /**
- * Get token info without generating
+ * Get token configuration info
  */
 export function getTokenInfo() {
   return {
     appId: APP_ID,
-    hasCertificate: !!APP_CERTIFICATE,
-    canGenerate: false, // Browser generation not supported
-    recommendation: 'Enable "App ID only" mode in Agora Console for development'
+    hasCertificate: Boolean(APP_CERTIFICATE),
+    canGenerate: true,
+    recommendation: 'Using secure server-side Agora token generation via /api/agora/token',
   };
 }

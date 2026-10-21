@@ -117,14 +117,17 @@ export class WebRTCService {
           console.warn('[WebRTC] Microphone not available:', aErr);
         }
 
-        if (stream.getTracks().length > 0) {
-          this.localStream = stream;
-        } else {
-          throw error;
-        }
+        this.localStream = stream;
+        this.mediaError = stream.getTracks().length === 0 ? error.message : null;
+      } else if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError' || error?.name === 'NotFoundError') {
+        console.warn('[WebRTC] Hardware or permissions unavailable, continuing in listener/screen-share mode:', error);
+        this.localStream = new MediaStream();
+        this.mediaError = error.message;
       } else {
-        // Re-throw authentic browser DOMException error so name, message, and stack trace are unchanged
-        throw error;
+        // Other device access issues
+        console.warn('[WebRTC] getUserMedia failed, creating fallback stream:', error);
+        this.localStream = new MediaStream();
+        this.mediaError = error.message;
       }
     }
 

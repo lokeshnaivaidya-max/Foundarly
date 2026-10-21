@@ -16,7 +16,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1) PROFILES (User accounts and role assignment)
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
-  role TEXT NOT NULL DEFAULT 'client' CHECK (role IN ('admin', 'consultant', 'client')),
+  role TEXT NOT NULL DEFAULT 'client' CHECK (role IN ('super_admin', 'developer_admin', 'admin', 'consultant', 'client')),
   full_name TEXT,
   is_consultant BOOLEAN DEFAULT FALSE,
   consultant_bio TEXT,

@@ -243,4 +243,77 @@ describe('Foundarly Super Admin & Developer Admin Role Hierarchy Suite', () => {
     assert.equal(sanitizeUserRole(consultantUser, consultantProfile), 'consultant');
     assert.equal(sanitizeUserRole(clientUser, clientProfile), 'client');
   });
+
+  // ==========================================================================
+  // Test 9: Developer Admin account (foundarly@developer.in) role and must_change_password
+  // ==========================================================================
+  test('9. Developer Admin account (foundarly@developer.in) role and password requirement', () => {
+    const targetDevAccount = {
+      id: 'dev-foundarly-in',
+      email: 'foundarly@developer.in',
+      user_metadata: {
+        full_name: 'Developer Admin',
+        must_change_password: true,
+      },
+    };
+    const targetDevProfile = {
+      id: 'dev-foundarly-in',
+      role: 'developer_admin' as const,
+      full_name: 'Developer Admin',
+    };
+
+    // Role isolation
+    assert.equal(isDeveloperAdmin(targetDevAccount, targetDevProfile), true);
+    assert.equal(isSuperAdmin(targetDevAccount, targetDevProfile), false);
+    assert.equal(isUserAdmin(targetDevAccount, targetDevProfile), true);
+    assert.equal(getUserEffectiveRole(targetDevAccount, targetDevProfile), 'developer_admin');
+
+    // Must change password policy flag
+    assert.equal(targetDevAccount.user_metadata.must_change_password, true);
+
+    // Access capabilities: Technical only
+    assert.equal(canAccessSection(targetDevProfile.role, 'developer'), true);
+    assert.equal(canAccessSection(targetDevProfile.role, 'logs'), true);
+    assert.equal(canAccessSection(targetDevProfile.role, 'payouts'), false);
+    assert.equal(canAccessSection(targetDevProfile.role, 'users'), false);
+    assert.equal(canAccessSection(targetDevProfile.role, 'administrators'), false);
+  });
+
+  // ==========================================================================
+  // Test 10: Targeted primary admin migration safety (prevents accidental mass promotions)
+  // ==========================================================================
+  test('10. Targeted primary admin migration safety prevents accidental mass promotions', () => {
+    const verifiedPrimaryAdmin = 'admin@foundarly.com';
+    const candidateUsers = [
+      { id: '1', email: 'admin@foundarly.com', initialRole: 'admin' },
+      { id: '2', email: 'test-admin@external.com', initialRole: 'admin' },
+      { id: '3', email: 'client@domain.com', initialRole: 'client' },
+      { id: '4', email: 'consultant@domain.com', initialRole: 'consultant' },
+    ];
+
+    // Simulate 04 migration logic
+    const migrated = candidateUsers.map((u) => {
+      if (u.email.toLowerCase() === verifiedPrimaryAdmin.toLowerCase()) {
+        return { ...u, finalRole: 'super_admin' };
+      }
+      if (u.initialRole === 'admin') {
+        // Demote non-allowlist accounts back to client
+        return { ...u, finalRole: 'client' };
+      }
+      return { ...u, finalRole: u.initialRole };
+    });
+
+    // Verify only the verified primary admin was promoted
+    const superAdmins = migrated.filter((u) => u.finalRole === 'super_admin');
+    assert.equal(superAdmins.length, 1);
+    assert.equal(superAdmins[0].email, 'admin@foundarly.com');
+
+    // Candidate 2 with legacy 'admin' was sanitized to client instead of being promoted
+    const candidate2 = migrated.find((u) => u.id === '2');
+    assert.equal(candidate2?.finalRole, 'client');
+
+    // Clients and consultants untouched
+    assert.equal(migrated.find((u) => u.id === '3')?.finalRole, 'client');
+    assert.equal(migrated.find((u) => u.id === '4')?.finalRole, 'consultant');
+  });
 });

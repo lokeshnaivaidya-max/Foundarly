@@ -2,7 +2,31 @@
 
 ## ⚠️ IMPORTANT: Run in EXACT order!
 
-Open Supabase SQL Editor and run these files one by one:
+Open the Supabase Dashboard SQL Editor (https://supabase.com/dashboard/project/rfyxnshvtfswvaogjzwq/sql) and run the migrations in the sequence outlined below.
+
+---
+
+## 🏆 RECOMMENDED PRODUCTION MIGRATION ORDER (00 TO 05)
+
+If you are maintaining or migrating the live database to the complete Super Admin & Developer Admin role hierarchy:
+
+1. **`00_COMPLETE_SUPABASE_SETUP.sql`**
+   - Core database schema (profiles, consultants, bookings, testimonials, blog, content, networking, pricing)
+2. **`01_SECURE_BOOKINGS_RLS.sql`**
+   - Hardened RLS policies for bookings with customer email matching and admin access
+3. **`02_CATEGORIES_REFERRALS_PROFILES.sql`**
+   - Categories taxonomy, referral codes & usages, extended consultant profile attributes
+4. **`03_FIX_NETWORKING_RLS_POLICIES.sql`**
+   - Complete community networking channels, groups, posts, showcases, and reports RLS
+5. **`04_SUPER_ADMIN_AND_DEVELOPER_ADMIN_HIERARCHY.sql`** ⭐ **CRITICAL FIX**
+   - **Fixes ERROR 23514**: Drops and updates `profiles_role_check` constraint FIRST to allow `'super_admin'`, `'developer_admin'`, `'admin'`, `'consultant'`, `'client'`
+   - Safely promotes ONLY the verified primary admin `admin@foundarly.com` to `super_admin`
+   - Demotes non-allowlisted accounts to prevent privilege escalation
+   - Installs `is_super_admin()`, `is_developer_admin()`, and `is_admin()` helper functions
+   - Protects financial tables (payouts, earnings, UPI) from Developer Admin
+   - Safe to rerun repeatedly (fully idempotent)
+6. **`05_PROVISION_DEVELOPER_ADMIN.sql`**
+   - Provisions technical developer account `foundarly@developer.in` with least-privilege `developer_admin` role and force password change flag
 
 ---
 

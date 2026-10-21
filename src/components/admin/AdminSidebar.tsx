@@ -22,6 +22,8 @@ import {
   ShieldCheck,
   FileCode,
   Terminal,
+  CreditCard,
+  CheckCircle2,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import {
@@ -60,6 +62,9 @@ export default function AdminSidebar() {
     { title: "Manage Consultants", url: "/admin/consultants", icon: Users },
     { title: "Consultant Applications", url: "/admin/consultant-applications", icon: UserPlus },
     { title: "Manage Bookings", url: "/admin/bookings", icon: CalendarCheck },
+    { title: "Consultant Payouts", url: "/admin/payouts", icon: CreditCard },
+    { title: "Payment Records", url: "/admin/payments", icon: DollarSign },
+    { title: "UPI Verification", url: "/admin/upi-verification", icon: CheckCircle2 },
     { title: "Pricing & Plans", url: "/admin/pricing", icon: DollarSign },
     { title: "Content Control", url: "/admin/content", icon: Layers },
     { title: "Categories", url: "/admin/categories", icon: Grid },

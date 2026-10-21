@@ -134,7 +134,7 @@ export const isValidCurrency = (currency: string): boolean => {
 
 // Validate role
 export const isValidRole = (role: string): boolean => {
-  return role === 'admin' || role === 'client';
+  return ['super_admin', 'developer_admin', 'admin', 'consultant', 'client'].includes(role);
 };
 
 // Validate booking status

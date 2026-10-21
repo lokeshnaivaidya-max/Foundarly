@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SEO } from "@/components/SEO";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Video, VideoOff, Mic, MicOff, PhoneOff, Monitor, MonitorOff, User, Clock, ArrowLeft, AlertCircle, Copy, Check, Link2, Maximize, Minimize, Settings, Users, X, Calendar, RotateCcw, ShieldAlert, AlertTriangle, Bell, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { PageLoader } from "@/components/PageLoader";

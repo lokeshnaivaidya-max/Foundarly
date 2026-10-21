@@ -1368,6 +1368,200 @@ async function startServer() {
   });
 
   // =========================================================================
+  // RESCHEDULE REQUEST ENDPOINT (CLIENT REQUEST TO CONSULTANT)
+  // =========================================================================
+  app.post("/api/bookings/reschedule-request", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        error: auth.error || "Authentication required to request a reschedule.",
+        code: "UNAUTHENTICATED",
+      });
+    }
+
+    const { bookingId, newDate, newTime, reason } = req.body || {};
+
+    if (!bookingId || !newDate || !newTime || !reason || typeof reason !== "string" || !reason.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "Booking ID, proposed new date, new time, and reason are required.",
+        code: "MISSING_FIELDS",
+      });
+    }
+
+    // Validate date format and ensure it's not in the past
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid date format. Expected YYYY-MM-DD.",
+        code: "INVALID_DATE",
+      });
+    }
+
+    const todayStr = new Date().toISOString().split("T")[0];
+    if (newDate < todayStr) {
+      return res.status(400).json({
+        success: false,
+        error: "Proposed reschedule date cannot be in the past.",
+        code: "PAST_DATE",
+      });
+    }
+
+    try {
+      const token = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
+      const clientToUse = (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY.trim())
+        ? supabaseAdminClient
+        : createClient(
+            process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co",
+            process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd",
+            {
+              global: {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              },
+              auth: {
+                persistSession: false,
+                autoRefreshToken: false,
+              },
+            }
+          );
+
+      // Fetch booking
+      const { data: booking, error: bErr } = await clientToUse
+        .from("bookings")
+        .select("*, consultants(id, name, email)")
+        .eq("id", bookingId)
+        .maybeSingle();
+
+      if (bErr || !booking) {
+        return res.status(404).json({
+          success: false,
+          error: "Booking record not found.",
+          code: "BOOKING_NOT_FOUND",
+        });
+      }
+
+      // Verify client ownership
+      const user = auth.user;
+      const userEmail = (user.email || "").toLowerCase().trim();
+      const bookingEmail = (booking.email || "").toLowerCase().trim();
+      const isOwner = (booking.user_id && booking.user_id === user.id) || (bookingEmail && userEmail === bookingEmail);
+
+      if (!isOwner && !isAllowedAdminEmail(userEmail)) {
+        return res.status(403).json({
+          success: false,
+          error: "You are not authorized to reschedule this booking.",
+          code: "UNAUTHORIZED_CLIENT",
+        });
+      }
+
+      // Check if already requested or pending
+      if (booking.reschedule_status === "requested" || booking.reschedule_status === "pending") {
+        return res.status(409).json({
+          success: false,
+          error: "A reschedule request is already pending consultant review.",
+          code: "DUPLICATE_REQUEST",
+        });
+      }
+
+      // Format reason to include proposed date and time so all dashboards immediately reflect it
+      const formattedReason = `Proposed: ${newDate} at ${newTime} | Reason: ${reason.trim()}`;
+
+      // Update booking to mark reschedule as requested, PRESERVING original date and time
+      const updatePayload: any = {
+        reschedule_requested_by: user.id,
+        reschedule_requested_at: new Date().toISOString(),
+        reschedule_reason: formattedReason,
+        reschedule_status: "requested",
+        original_date: booking.date,
+        original_time: booking.time,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: updatedBooking, error: updErr } = await clientToUse
+        .from("bookings")
+        .update(updatePayload)
+        .eq("id", bookingId)
+        .select()
+        .single();
+
+      if (updErr) {
+        console.warn("[Reschedule Server] Primary update failed, attempting fallback payload:", updErr);
+        const fallbackPayload: any = {
+          reschedule_reason: formattedReason,
+          reschedule_status: "requested",
+          updated_at: new Date().toISOString(),
+        };
+        const { data: fbUpdated, error: fbErr } = await clientToUse
+          .from("bookings")
+          .update(fallbackPayload)
+          .eq("id", bookingId)
+          .select()
+          .single();
+
+        if (fbErr) {
+          return res.status(400).json({
+            success: false,
+            error: updErr.message || fbErr.message || "Failed to submit reschedule request.",
+            code: updErr.code || "UPDATE_FAILED",
+          });
+        }
+      }
+
+      // Notify consultant via email in background with timeout
+      const consultantObj = Array.isArray(booking.consultants) ? booking.consultants[0] : booking.consultants;
+      if (consultantObj?.email) {
+        (async () => {
+          try {
+            const siteUrl = process.env.VITE_APP_URL || "https://foundarly-delta.vercel.app";
+            const emailHtml = `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #d97706;">Reschedule Request for Consultation #${booking.id.slice(0, 8)}</h2>
+                <p>Hello ${consultantObj.name || "Consultant"},</p>
+                <p>Your client <strong>${booking.name || userEmail}</strong> has requested to reschedule their consultation session.</p>
+                <div style="background-color: #fef3c7; border: 1px solid #fde68a; border-radius: 8px; padding: 15px; margin: 20px 0;">
+                  <p><strong>Original Session:</strong> ${booking.date} at ${booking.time || "10:00 AM"}</p>
+                  <p><strong>Proposed New Schedule:</strong> ${newDate} at ${newTime}</p>
+                  <p><strong>Reason:</strong> ${reason.trim()}</p>
+                </div>
+                <p>Please log in to your Consultant Dashboard to accept or propose an alternative time.</p>
+                <a href="${siteUrl}/consultant-dashboard" style="display: inline-block; background-color: #d97706; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-top: 10px;">Open Consultant Dashboard</a>
+              </div>
+            `;
+            const emailPromise = sendEmail({
+              from: smtpConfig.defaultFrom,
+              to: consultantObj.email,
+              replyTo: booking.email || smtpConfig.replyTo,
+              subject: `Reschedule Request: ${booking.name || "Client"} - Consultation #${booking.id.slice(0, 8)} | Foundarly`,
+              html: emailHtml,
+              text: `Client ${booking.name} requested to reschedule Consultation #${booking.id.slice(0, 8)} to ${newDate} at ${newTime}. Reason: ${reason.trim()}`,
+            });
+            const timeoutPromise = new Promise<{ success: boolean; error: string }>((resolve) =>
+              setTimeout(() => resolve({ success: false, error: "Email delivery timeout" }), 5000)
+            );
+            await Promise.race([emailPromise, timeoutPromise]);
+          } catch (mErr) {
+            console.warn("[Reschedule Server] Background email notification notice:", mErr);
+          }
+        })();
+      }
+
+      return res.json({
+        success: true,
+        message: "Reschedule request submitted successfully! Your consultant has been notified.",
+        booking: updatedBooking || { ...booking, ...updatePayload },
+      });
+    } catch (err: any) {
+      console.error("[Reschedule Server] Unexpected reschedule error:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Internal server error occurred while processing reschedule request.",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  });
+
+  // =========================================================================
   // CONSULTANT DASHBOARD & ROLE ENDPOINTS
   // =========================================================================
 

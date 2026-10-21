@@ -275,6 +275,135 @@ export const bookingsService = {
     return this.update(id, { payment_status: paymentStatus });
   },
 
+  /**
+   * Request a reschedule for a booking.
+   * Preserves existing consultant approval workflow: does NOT directly change confirmed booking date/time.
+   * Tries server proxy /api/bookings/reschedule-request first, with fallback to Supabase RLS.
+   */
+  async requestReschedule(params: {
+    bookingId: string;
+    newDate: string;
+    newTime: string;
+    reason: string;
+  }): Promise<{ success: boolean; booking?: any; error?: string; code?: string; message?: string }> {
+    const { bookingId, newDate, newTime, reason } = params;
+
+    if (!validateUUID(bookingId)) {
+      return { success: false, error: 'Invalid booking ID', code: 'INVALID_ID' };
+    }
+    if (!validateDate(newDate)) {
+      return { success: false, error: 'Invalid date format (must be YYYY-MM-DD)', code: 'INVALID_DATE' };
+    }
+    if (!newTime || typeof newTime !== 'string') {
+      return { success: false, error: 'Invalid time format', code: 'INVALID_TIME' };
+    }
+    if (!reason || !reason.trim()) {
+      return { success: false, error: 'A reason for rescheduling is required', code: 'MISSING_REASON' };
+    }
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    const user = sessionData?.session?.user;
+
+    // Attempt 1: Server proxy route /api/bookings/reschedule-request
+    if (token) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+        const response = await fetch('/api/bookings/reschedule-request', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            bookingId,
+            newDate,
+            newTime,
+            reason: reason.trim(),
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+        const resData = await response.json().catch(() => null);
+        if (response.ok && resData?.success) {
+          return resData;
+        }
+        if (resData && !resData.success) {
+          return { success: false, error: resData.error, code: resData.code };
+        }
+      } catch {
+        // Fall through to direct Supabase client call
+      }
+    }
+
+    // Attempt 2: Direct Supabase client update using RLS
+    try {
+      const { data: booking, error: bErr } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('id', bookingId)
+        .maybeSingle();
+
+      if (bErr || !booking) {
+        return { success: false, error: 'Original booking record not found.', code: 'BOOKING_NOT_FOUND' };
+      }
+
+      if (booking.reschedule_status === 'requested' || booking.reschedule_status === 'pending') {
+        return {
+          success: false,
+          error: 'A reschedule request is already pending consultant approval.',
+          code: 'DUPLICATE_REQUEST',
+        };
+      }
+
+      const formattedReason = `Proposed: ${newDate} at ${newTime} | Reason: ${reason.trim()}`;
+      const payload: any = {
+        reschedule_requested_by: user?.id || null,
+        reschedule_requested_at: new Date().toISOString(),
+        reschedule_reason: formattedReason,
+        reschedule_status: 'requested',
+        original_date: booking.date,
+        original_time: booking.time,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: updated, error: updErr } = await (supabase as any)
+        .from('bookings')
+        .update(payload)
+        .eq('id', bookingId)
+        .select()
+        .single();
+
+      if (updErr) {
+        // Retry with minimal payload if table lacks some newer columns
+        console.warn('[BookingsService.requestReschedule] Primary update failed, trying minimal payload:', updErr);
+        const minimalPayload: any = {
+          reschedule_reason: formattedReason,
+          reschedule_status: 'requested',
+          updated_at: new Date().toISOString(),
+        };
+        const { data: minUpdated, error: minErr } = await (supabase as any)
+          .from('bookings')
+          .update(minimalPayload)
+          .eq('id', bookingId)
+          .select()
+          .single();
+
+        if (minErr) {
+          return { success: false, error: updErr.message || minErr.message, code: updErr.code };
+        }
+        return { success: true, booking: minUpdated, message: 'Reschedule request sent to consultant!' };
+      }
+
+      return { success: true, booking: updated, message: 'Reschedule request sent to consultant!' };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to submit reschedule request.', code: 'UNKNOWN_ERROR' };
+    }
+  },
+
   async reschedule(id: string, newDate: string, newTime: string) {
     if (!validateDate(newDate) || !validateTime(newTime)) {
       throw new Error('Invalid date or time format');

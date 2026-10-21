@@ -14,6 +14,7 @@ import { consultantDashboardService } from "@/services/consultantDashboard";
 import { emailService } from "@/services/email";
 import { followUpService } from "@/services/followUpService";
 import { useNavigate, Link } from "react-router-dom";
+import { toast } from "sonner";
 import { SkeletonList } from "@/components/PageLoader";
 import {
   calculateRejoinEligibility,
@@ -281,6 +282,28 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
               {followUp.declined_reason && <p className="text-muted-foreground text-[11px]">Reason: {followUp.declined_reason}</p>}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Reschedule Workflow Status Card */}
+      {booking.reschedule_status === "requested" && (
+        <div className="mx-6 mb-4 pt-3 border-t border-border/60">
+          <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-1.5 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-amber-500 flex items-center gap-1.5">
+                <RefreshCw className="h-3.5 w-3.5" /> Reschedule Requested (Pending Consultant Confirmation)
+              </span>
+              <span className="text-[11px] text-amber-400 font-medium">Pending Review</span>
+            </div>
+            {booking.reschedule_reason && (
+              <p className="text-foreground">
+                {booking.reschedule_reason}
+              </p>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              Your consultant has been notified via email and will confirm or update your session timing.
+            </p>
+          </div>
         </div>
       )}
 
@@ -646,19 +669,32 @@ export default function MyBookingsPage() {
       toast.error("Please select new date and time");
       return;
     }
+    if (!rescheduleReason.trim()) {
+      toast.error("Please provide a reason for the reschedule request");
+      return;
+    }
 
     try {
-      await bookingsService.reschedule(selectedBooking.id, newDate, newTime);
-      toast.success("Meeting rescheduled successfully!");
+      const res = await bookingsService.requestReschedule({
+        bookingId: selectedBooking.id,
+        newDate,
+        newTime,
+        reason: rescheduleReason.trim(),
+      });
+      if (res && !res.success) {
+        toast.error(res.error || "Failed to submit reschedule request");
+        return;
+      }
+      toast.success(res?.message || "Reschedule request sent to consultant!");
       setRescheduleDialogOpen(false);
       setSelectedBooking(null);
       setRescheduleReason("");
       setNewDate("");
       setNewTime("");
       loadBookings();
-    } catch (error) {
-      console.error("Reschedule error:", error);
-      toast.error("Failed to reschedule meeting");
+    } catch (error: any) {
+      console.error("Reschedule request error:", error);
+      toast.error(error?.message || "Failed to submit reschedule request");
     }
   };
 

@@ -187,6 +187,23 @@ export function calculateRejoinEligibility(
     };
   }
 
+  // If the booking is already marked completed or has an explicit meeting ended timestamp,
+  // it has completed its live consultation and enters the 7-day post-meeting rejoin window.
+  if ((booking.status === 'completed' || Boolean(booking.meeting_ended_at)) && nowMs <= rejoinDeadlineMs) {
+    const remainingMs = Math.max(0, rejoinDeadlineMs - nowMs);
+    const daysRemaining = Math.max(1, Math.ceil(remainingMs / (24 * 60 * 60 * 1000)));
+
+    return {
+      sessionStatus: 'rejoin_eligible',
+      canJoin: true,
+      isRejoin: true,
+      rejoinDeadline,
+      rejoinDaysRemaining: daysRemaining,
+      rejoinTimeRemainingMs: remainingMs,
+      timeUntilStartMs: 0,
+    };
+  }
+
   // 1. Upcoming: Before the 5-minute pre-call join window
   if (nowMs < joinWindowStartMs) {
     return {
@@ -497,7 +514,7 @@ export function checkBookingFollowUpEligibility(
     };
   }
 
-  if (eligibility.sessionStatus === 'upcoming') {
+  if (eligibility.sessionStatus === 'upcoming' && booking.status !== 'completed' && !booking.meeting_ended_at) {
     return {
       eligible: false,
       reason: 'The original consultation session has not taken place yet.',
@@ -515,9 +532,9 @@ export function checkBookingFollowUpEligibility(
     };
   }
 
-  // Must be in rejoin_eligible status
+  // Must be in rejoin_eligible status or completed
   return {
-    eligible: eligibility.sessionStatus === 'rejoin_eligible' || eligibility.sessionStatus === 'live',
+    eligible: eligibility.sessionStatus === 'rejoin_eligible' || eligibility.sessionStatus === 'live' || booking.status === 'completed',
     reason: undefined,
     rejoinDeadline: eligibility.rejoinDeadline,
     daysRemaining: eligibility.rejoinDaysRemaining,

@@ -166,7 +166,10 @@ export class FollowUpStorage {
    */
   async create(record: Omit<FollowUpRequest, 'id' | 'created_at' | 'updated_at'> & { id?: string }): Promise<FollowUpRequest> {
     const now = new Date().toISOString();
-    const id = record.id || `fu_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const isValidUuid = (val?: string) => Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+    const id = (record.id && isValidUuid(record.id))
+      ? record.id
+      : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `fu_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
 
     const newItem: FollowUpRequest = {
       ...record,

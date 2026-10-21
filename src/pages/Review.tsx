@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { bookingsService } from "@/services/bookings";
+import { testimonialsService } from "@/services/testimonials";
 import { supabase } from "@/lib/supabase";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -91,56 +92,45 @@ export default function ReviewPage() {
   const handleSubmit = async () => {
     if (!rating) { toast.error("Please select a star rating"); return; }
     if (!reviewText.trim()) { toast.error("Please write your review"); return; }
+    if (!booking) { toast.error("Booking record not loaded"); return; }
+    if (submitting) return;
+
     setSubmitting(true);
     try {
-      console.log("Submitting review with data:", {
-        client_name: displayName.trim() || booking.name,
-        designation: "Client",
-        review: reviewText.trim(),
+      const clientDisplayName = displayName.trim() || booking.name || "Client";
+
+      const res = await testimonialsService.submitReview({
+        bookingId: bookingId!,
+        consultantId: booking.consultant_id,
         rating,
-        status: "draft",
-        consultant_id: booking.consultant_id,
-        booking_id: bookingId,
+        review: reviewText.trim(),
+        displayName: clientDisplayName,
       });
 
-      const { data, error } = await (supabase as any).from("testimonials").insert({
-        client_name: displayName.trim() || booking.name,
-        designation: "Client",
-        review: reviewText.trim(),
-        rating,
-        status: "draft",
-        consultant_id: booking.consultant_id || null,
-        booking_id: bookingId,
-      }).select();
-
-      if (error) {
-        console.error("Review submission error:", error);
-        throw error;
+      if (!res.success) {
+        if (res.code === "DUPLICATE_REVIEW" || res.code === "23505" || res.error?.includes("already submitted")) {
+          toast.error("You have already submitted a review for this session.");
+          setAlreadyReviewed(true);
+        } else {
+          toast.error(res.error || "Failed to submit review. Please try again.");
+        }
+        return;
       }
 
-      console.log("Review submitted successfully:", data);
-      
-      // Try to update booking status, but don't fail if it errors
+      // Try to mark booking status completed if not already completed
       try {
-        await bookingsService.update(bookingId!, { status: "completed" });
+        if (booking.status !== "completed") {
+          await bookingsService.update(bookingId!, { status: "completed" });
+        }
       } catch (updateError) {
         console.warn("Could not update booking status:", updateError);
-        // Continue anyway - review was submitted successfully
       }
-      
+
       setSubmitted(true);
-      toast.success("Review submitted successfully!");
+      toast.success("Review submitted successfully! It will be displayed after moderation.");
     } catch (err: any) {
-      console.error("Full error object:", err);
-      if (err?.code === "23505") {
-        toast.error("You have already submitted a review for this session.");
-        setAlreadyReviewed(true);
-      } else if (err?.code === "42703") {
-        toast.error("Database schema issue. Please run the review fields migration.");
-        console.error("Missing columns in testimonials table. Run database/add-review-fields.sql");
-      } else {
-        toast.error(`Failed to submit review: ${err?.message || "Please try again"}`);
-      }
+      console.error("Review submission error:", err);
+      toast.error(err?.message || "Failed to submit review. Please try again.");
     } finally {
       setSubmitting(false);
     }

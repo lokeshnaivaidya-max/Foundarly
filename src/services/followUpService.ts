@@ -32,6 +32,9 @@ export const followUpService = {
       };
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
     try {
       const response = await fetch('/api/follow-ups/request', {
         method: 'POST',
@@ -40,7 +43,10 @@ export const followUpService = {
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify(params),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       const data = await response.json().catch(() => null);
       if (response.ok && data?.success) {
@@ -56,14 +62,15 @@ export const followUpService = {
         };
       }
     } catch {
-      // Server route unreachable, proceed to Supabase fallback
+      clearTimeout(timeoutId);
+      // Server route unreachable or timed out, proceed to Supabase fallback
     }
 
     // Resilient Fallback: Create directly via Supabase using RLS
     try {
       const { data: booking, error: bErr } = await supabase
         .from('bookings')
-        .select('*, consultants(id, name, email)')
+        .select('*')
         .eq('id', params.bookingId)
         .maybeSingle();
 
@@ -71,18 +78,33 @@ export const followUpService = {
         return { success: false, error: 'Original booking record not found.', code: 'BOOKING_NOT_FOUND' };
       }
 
-      const consultantObj = Array.isArray(booking.consultants) ? booking.consultants[0] : booking.consultants;
+      let consultantName = 'Consultant';
+      let consultantEmail: string | null = null;
+      if (booking.consultant_id) {
+        const { data: cData } = await supabase
+          .from('consultants')
+          .select('id, name, email')
+          .eq('id', booking.consultant_id)
+          .maybeSingle();
+        if (cData) {
+          consultantName = cData.name || consultantName;
+          consultantEmail = cData.email || null;
+        }
+      }
+
       const scheduledStart = new Date(`${booking.date}T${booking.time || '10:00:00'}`);
       const rejoinDeadline = new Date(scheduledStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const newUuid = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined;
 
-      const payload = {
+      const payload: any = {
+        ...(newUuid ? { id: newUuid } : {}),
         booking_id: booking.id,
         client_id: user.id,
         client_name: booking.name || user.email || 'Client',
         client_email: booking.email || user.email,
         consultant_id: booking.consultant_id,
-        consultant_name: consultantObj?.name || 'Consultant',
-        consultant_email: consultantObj?.email || null,
+        consultant_name: consultantName,
+        consultant_email: consultantEmail,
         meeting_room_id: booking.meeting_room_id || `foundarly-${booking.id}`,
         reason: params.reason,
         preferred_date: params.preferredDate,
@@ -98,6 +120,13 @@ export const followUpService = {
         .single();
 
       if (insErr) {
+        if (insErr.code === '23505' || insErr.message?.includes('duplicate') || insErr.message?.includes('idx_active_follow_up_per_booking')) {
+          return {
+            success: false,
+            error: 'A follow-up request is already pending or confirmed for this consultation.',
+            code: 'DUPLICATE_REQUEST',
+          };
+        }
         return {
           success: false,
           error: insErr.message || 'Failed to persist follow-up request in Supabase. Check if database migration is applied.',

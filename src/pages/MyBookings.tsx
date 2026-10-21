@@ -69,12 +69,13 @@ const PARTICLES = [
   { x: "8%",  y: "68%", size: 3, delay: 0.7, dur: 5   },
 ];
 
-function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule, onRequestFollowUp, onRespondFollowUp, followUp, retryingId, formatPrice, navigate }: {
+function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule, onRequestFollowUp, onRespondFollowUp, followUp, isResponding, retryingId, formatPrice, navigate }: {
   booking: Booking; index: number; onRetry: (b: Booking) => void; onCancel: (id: string) => void;
   onRemove: (id: string) => void; onReschedule: (b: Booking) => void;
   onRequestFollowUp: (b: Booking, maxDate: string) => void;
   onRespondFollowUp: (followUpId: string, action: 'accept' | 'decline') => void;
   followUp?: FollowUpRequest;
+  isResponding?: boolean;
   retryingId: string | null; formatPrice: (v: number) => string; navigate: any;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -240,14 +241,16 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
                   size="sm"
                   className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 text-xs h-8"
                   onClick={() => onRespondFollowUp(followUp.id, "accept")}
+                  disabled={isResponding}
                 >
-                  <CheckCircle className="h-3.5 w-3.5" /> Accept Proposed Time
+                  <CheckCircle className="h-3.5 w-3.5" /> {isResponding ? "Updating..." : "Accept Proposed Time"}
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   className="text-xs h-8 text-destructive hover:bg-destructive/10 border-destructive/30"
                   onClick={() => onRespondFollowUp(followUp.id, "decline")}
+                  disabled={isResponding}
                 >
                   Decline
                 </Button>
@@ -499,8 +502,14 @@ export default function MyBookingsPage() {
     setFollowUpDialogOpen(true);
   };
 
+  const [respondingFollowUpId, setRespondingFollowUpId] = useState<string | null>(null);
+
   const handleSubmitFollowUp = async () => {
-    if (!selectedFollowUpBooking) return;
+    if (followUpSubmitting) return; // Prevent accidental duplicate submissions
+    if (!selectedFollowUpBooking) {
+      toast.error("Please select a booking to request a follow-up.");
+      return;
+    }
     if (!followUpReason.trim()) {
       toast.error("Please enter a reason or clarification for the follow-up.");
       return;
@@ -530,17 +539,24 @@ export default function MyBookingsPage() {
           [selectedFollowUpBooking.id]: res.followUp!,
         }));
         setFollowUpDialogOpen(false);
+        setSelectedFollowUpBooking(null);
+        setFollowUpReason("");
+        setFollowUpDate("");
+        setFollowUpTime("");
       } else {
         toast.error(res.error || "Failed to submit follow-up request.");
       }
     } catch (err: any) {
-      toast.error(err?.message || "Error submitting follow-up request.");
+      console.error("Follow-up request failed:", err);
+      toast.error(err?.message || "Error submitting follow-up request. Please try again.");
     } finally {
       setFollowUpSubmitting(false);
     }
   };
 
   const handleRespondFollowUp = async (followUpId: string, action: 'accept' | 'decline') => {
+    if (respondingFollowUpId) return;
+    setRespondingFollowUpId(followUpId);
     try {
       const res = await followUpService.clientRespond(followUpId, { action });
       if (res.success && res.followUp) {
@@ -553,7 +569,10 @@ export default function MyBookingsPage() {
         toast.error(res.error || "Failed to update response.");
       }
     } catch (err: any) {
-      toast.error("Network error responding to follow-up.");
+      console.error("Follow-up respond error:", err);
+      toast.error("Network error responding to follow-up. Please try again.");
+    } finally {
+      setRespondingFollowUpId(null);
     }
   };
 
@@ -757,6 +776,7 @@ export default function MyBookingsPage() {
                   onRequestFollowUp={openFollowUpDialog}
                   onRespondFollowUp={handleRespondFollowUp}
                   followUp={followUps[booking.id]}
+                  isResponding={respondingFollowUpId === followUps[booking.id]?.id}
                   retryingId={retryingId} formatPrice={formatPrice} navigate={navigate} />
               ))}
             </div>

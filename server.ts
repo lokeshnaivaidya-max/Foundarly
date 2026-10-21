@@ -1028,10 +1028,27 @@ async function startServer() {
     }
 
     try {
-      // Fetch booking from Supabase
-      const { data: booking, error: bookingErr } = await supabaseAdminClient
+      const token = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
+      const clientToUse = (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY.trim())
+        ? supabaseAdminClient
+        : createClient(
+            process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co",
+            process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd",
+            {
+              global: {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              },
+              auth: {
+                persistSession: false,
+                autoRefreshToken: false,
+              },
+            }
+          );
+
+      // Fetch booking from Supabase using scoped client and flat select
+      const { data: booking, error: bookingErr } = await clientToUse
         .from("bookings")
-        .select("*, consultants(id, name, title, email, user_id)")
+        .select("*")
         .eq("id", bookingId)
         .maybeSingle();
 
@@ -1091,9 +1108,9 @@ async function startServer() {
       }
 
       // Resolve consultant details
-      let consultantObj = Array.isArray(booking.consultants) ? booking.consultants[0] : booking.consultants;
-      if (!consultantObj && booking.consultant_id) {
-        const { data: directC } = await supabaseAdminClient
+      let consultantObj: any = null;
+      if (booking.consultant_id) {
+        const { data: directC } = await clientToUse
           .from("consultants")
           .select("id, name, title, email, user_id")
           .eq("id", booking.consultant_id)
@@ -1103,7 +1120,7 @@ async function startServer() {
 
       const meetingRoomId = booking.meeting_room_id || `foundarly-${booking.id}`;
 
-      // Create new follow-up record
+      // Create new follow-up record with guaranteed UUID
       const followUp = await followUpStorage.create({
         booking_id: booking.id,
         client_id: user.id,
@@ -1120,58 +1137,65 @@ async function startServer() {
         rejoin_deadline: eligibility.rejoinDeadline.toISOString(),
       });
 
-      // Send email notification to consultant (reusing working email infrastructure)
-      const siteUrl = getSiteUrl(req);
-      const smtpConfig = getSmtpConfig();
-      if (smtpConfig.pass && consultantObj?.email) {
+      // Send email notification in the background so HTTP response is returned immediately
+      (async () => {
         try {
-          const emailHtml = generateFollowUpRequestedEmailHTML({
-            bookingId: booking.id,
-            clientName: followUp.client_name || "Client",
-            clientEmail: followUp.client_email || "",
-            consultantName: followUp.consultant_name || "Consultant",
-            consultantEmail: consultantObj.email,
-            reason: followUp.reason,
-            preferredDate: followUp.preferred_date,
-            preferredTime: followUp.preferred_time,
-            originalDate: booking.date,
-            originalTime: booking.time || "10:00 AM",
-            rejoinDeadline: eligibility.rejoinDeadline.toISOString(),
-            dashboardUrl: `${siteUrl}/consultant-dashboard`,
-          });
-          const emailText = generateFollowUpRequestedEmailText({
-            bookingId: booking.id,
-            clientName: followUp.client_name || "Client",
-            clientEmail: followUp.client_email || "",
-            consultantName: followUp.consultant_name || "Consultant",
-            consultantEmail: consultantObj.email,
-            reason: followUp.reason,
-            preferredDate: followUp.preferred_date,
-            preferredTime: followUp.preferred_time,
-            originalDate: booking.date,
-            originalTime: booking.time || "10:00 AM",
-            rejoinDeadline: eligibility.rejoinDeadline.toISOString(),
-            dashboardUrl: `${siteUrl}/consultant-dashboard`,
-          });
-
-          const mailRes = await sendEmail({
-            from: smtpConfig.defaultFrom,
-            to: consultantObj.email,
-            replyTo: followUp.client_email || smtpConfig.replyTo,
-            subject: `Follow-up Request: ${followUp.client_name} - Consultation #${booking.id.slice(0, 8)} | Foundarly`,
-            html: emailHtml,
-            text: emailText,
-          });
-
-          if (mailRes.success) {
-            await followUpStorage.update(followUp.id, {
-              consultant_notified_at: new Date().toISOString(),
+          const siteUrl = getSiteUrl(req);
+          const smtpConfig = getSmtpConfig();
+          if (smtpConfig.pass && consultantObj?.email) {
+            const emailHtml = generateFollowUpRequestedEmailHTML({
+              bookingId: booking.id,
+              clientName: followUp.client_name || "Client",
+              clientEmail: followUp.client_email || "",
+              consultantName: followUp.consultant_name || "Consultant",
+              consultantEmail: consultantObj.email,
+              reason: followUp.reason,
+              preferredDate: followUp.preferred_date,
+              preferredTime: followUp.preferred_time,
+              originalDate: booking.date,
+              originalTime: booking.time || "10:00 AM",
+              rejoinDeadline: eligibility.rejoinDeadline.toISOString(),
+              dashboardUrl: `${siteUrl}/consultant-dashboard`,
             });
+            const emailText = generateFollowUpRequestedEmailText({
+              bookingId: booking.id,
+              clientName: followUp.client_name || "Client",
+              clientEmail: followUp.client_email || "",
+              consultantName: followUp.consultant_name || "Consultant",
+              consultantEmail: consultantObj.email,
+              reason: followUp.reason,
+              preferredDate: followUp.preferred_date,
+              preferredTime: followUp.preferred_time,
+              originalDate: booking.date,
+              originalTime: booking.time || "10:00 AM",
+              rejoinDeadline: eligibility.rejoinDeadline.toISOString(),
+              dashboardUrl: `${siteUrl}/consultant-dashboard`,
+            });
+
+            // Set 5-second timeout on background email send to prevent open connections
+            const mailPromise = sendEmail({
+              from: smtpConfig.defaultFrom,
+              to: consultantObj.email,
+              replyTo: followUp.client_email || smtpConfig.replyTo,
+              subject: `Follow-up Request: ${followUp.client_name} - Consultation #${booking.id.slice(0, 8)} | Foundarly`,
+              html: emailHtml,
+              text: emailText,
+            });
+            const timeoutPromise = new Promise<{ success: boolean; error: string }>((resolve) =>
+              setTimeout(() => resolve({ success: false, error: "Email delivery timeout" }), 5000)
+            );
+            const mailRes = await Promise.race([mailPromise, timeoutPromise]);
+
+            if (mailRes.success) {
+              await followUpStorage.update(followUp.id, {
+                consultant_notified_at: new Date().toISOString(),
+              });
+            }
           }
         } catch (emailErr) {
-          console.warn("[FollowUp Email] Failed to notify consultant:", emailErr);
+          console.warn("[FollowUp Email] Background notification notice:", emailErr);
         }
-      }
+      })();
 
       return res.json({
         success: true,
@@ -1183,6 +1207,161 @@ async function startServer() {
       return res.status(500).json({
         success: false,
         error: "Internal server error occurred while creating follow-up request.",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  });
+
+  // =========================================================================
+  // REVIEW & TESTIMONIAL SUBMISSION (RESILIENT ENDPOINT FOR COMPLETED SESSIONS)
+  // =========================================================================
+  app.post("/api/reviews/submit", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        error: auth.error || "Authentication required to submit a review.",
+        code: "UNAUTHENTICATED",
+      });
+    }
+
+    const { bookingId, consultantId, rating, review, displayName } = req.body || {};
+
+    if (!bookingId || !rating || !review || typeof review !== "string" || !review.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "Booking ID, rating (1-5), and review text are required.",
+        code: "MISSING_FIELDS",
+      });
+    }
+
+    const numericRating = Number(rating);
+    if (isNaN(numericRating) || numericRating < 1 || numericRating > 5) {
+      return res.status(400).json({
+        success: false,
+        error: "Rating must be a whole number between 1 and 5.",
+        code: "INVALID_RATING",
+      });
+    }
+
+    try {
+      const token = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
+      const clientToUse = (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY.trim())
+        ? supabaseAdminClient
+        : createClient(
+            process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co",
+            process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd",
+            {
+              global: {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              },
+              auth: {
+                persistSession: false,
+                autoRefreshToken: false,
+              },
+            }
+          );
+
+      // Fetch booking record
+      const { data: booking, error: bErr } = await clientToUse
+        .from("bookings")
+        .select("*")
+        .eq("id", bookingId)
+        .maybeSingle();
+
+      if (bErr || !booking) {
+        return res.status(404).json({
+          success: false,
+          error: "Booking record not found.",
+          code: "BOOKING_NOT_FOUND",
+        });
+      }
+
+      // Verify ownership
+      const user = auth.user;
+      const userEmail = (user.email || "").toLowerCase().trim();
+      const bookingEmail = (booking.email || "").toLowerCase().trim();
+      const isOwner = (booking.user_id && booking.user_id === user.id) || (bookingEmail && userEmail === bookingEmail);
+
+      if (!isOwner && !isAllowedAdminEmail(userEmail)) {
+        return res.status(403).json({
+          success: false,
+          error: "You are not authorized to submit a review for this booking.",
+          code: "UNAUTHORIZED_CLIENT",
+        });
+      }
+
+      // Check for existing review (enforce single review per consultation)
+      const { data: existingReview } = await clientToUse
+        .from("testimonials")
+        .select("id")
+        .eq("booking_id", bookingId)
+        .maybeSingle();
+
+      if (existingReview) {
+        return res.status(409).json({
+          success: false,
+          error: "You have already submitted a review for this session.",
+          code: "DUPLICATE_REVIEW",
+        });
+      }
+
+      // Insert review in draft status (preserving moderation)
+      const clientName = (displayName && displayName.trim()) || booking.name || userEmail.split("@")[0] || "Client";
+      const payload = {
+        client_name: clientName,
+        designation: "Client",
+        review: review.trim(),
+        rating: numericRating,
+        status: "draft",
+        consultant_id: consultantId || booking.consultant_id || null,
+        booking_id: bookingId,
+      };
+
+      const { data: inserted, error: insErr } = await clientToUse
+        .from("testimonials")
+        .insert(payload)
+        .select()
+        .single();
+
+      if (insErr) {
+        // If unique constraint violation
+        if (insErr.code === "23505") {
+          return res.status(409).json({
+            success: false,
+            error: "You have already submitted a review for this session.",
+            code: "DUPLICATE_REVIEW",
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          error: insErr.message || "Failed to submit review due to database policy.",
+          code: insErr.code || "INSERT_FAILED",
+        });
+      }
+
+      // Mark booking status as completed
+      try {
+        if (booking.status !== "completed") {
+          await clientToUse
+            .from("bookings")
+            .update({ status: "completed" })
+            .eq("id", bookingId);
+        }
+      } catch (updErr) {
+        console.warn("[Review Server] Notice updating booking status:", updErr);
+      }
+
+      return res.json({
+        success: true,
+        message: "Review submitted successfully! It will appear on the platform once approved.",
+        review: inserted,
+      });
+    } catch (err: any) {
+      console.error("[Review Server] Unexpected review submission error:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Internal error occurred while submitting review.",
         code: "INTERNAL_ERROR",
       });
     }

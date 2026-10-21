@@ -1203,6 +1203,16 @@ async function startServer() {
     const userEmail = (user.email || "").toLowerCase().trim();
 
     try {
+      // Check existing profile role to avoid demoting administrators
+      const { data: userProfile } = await supabaseAdminClient
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      const isSuper = (userProfile?.role === "super_admin" || userProfile?.role === "admin") && isAllowedAdminEmail(userEmail);
+      const isDev = userProfile?.role === "developer_admin";
+
       let query = supabaseAdminClient
         .from("consultants")
         .select("*")
@@ -1230,14 +1240,16 @@ async function startServer() {
         consultant.user_id = user.id;
       }
 
-      // Self-heal profile role
-      await supabaseAdminClient
-        .from("profiles")
-        .upsert({
-          id: user.id,
-          role: "consultant",
-          full_name: consultant.name,
-        });
+      // Self-heal profile role ONLY for non-administrator accounts
+      if (!isSuper && !isDev) {
+        await supabaseAdminClient
+          .from("profiles")
+          .upsert({
+            id: user.id,
+            role: "consultant",
+            full_name: consultant.name,
+          });
+      }
 
       return res.json({
         success: true,

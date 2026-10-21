@@ -17,7 +17,15 @@ import {
   Sparkles,
   Lock,
   Download,
-  KeyRound
+  KeyRound,
+  Eye,
+  Users,
+  Calendar,
+  ShieldCheck,
+  ArrowRight,
+  ExternalLink,
+  ChevronDown,
+  Check
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +42,7 @@ import {
   DialogFooter 
 } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRolePreview } from "@/contexts/RolePreviewContext";
 import { toast } from "sonner";
 
 interface SystemHealthData {
@@ -68,6 +77,15 @@ interface DiagnosticLog {
 
 export default function DeveloperPortal({ defaultTab = "overview" }: { defaultTab?: string }) {
   const { user, session, isSuperAdmin, isDeveloperAdmin } = useAuth();
+  const {
+    previewRole,
+    previewConsultant,
+    availableConsultants,
+    setPreviewConsultant,
+    switchToRole,
+    exitPreview,
+    isRolePreviewActive,
+  } = useRolePreview();
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [healthData, setHealthData] = useState<SystemHealthData | null>(null);
   const [logs, setLogs] = useState<DiagnosticLog[]>([]);
@@ -715,6 +733,111 @@ export default function DeveloperPortal({ defaultTab = "overview" }: { defaultTa
                 >
                   Re-verify Subsystem Health
                 </Button>
+              </CardContent>
+            </Card>
+
+            {/* Role & Persona Preview Tool */}
+            <Card className="bg-card border-border md:col-span-2">
+              <CardHeader className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Eye className="w-5 h-5 text-amber-400" />
+                    <CardTitle className="text-base">Role & Persona Preview Sandbox</CardTitle>
+                  </div>
+                  {isRolePreviewActive ? (
+                    <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/40">
+                      Preview Active: {previewRole?.replace("_", " ")}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-xs text-muted-foreground">
+                      Ready
+                    </Badge>
+                  )}
+                </div>
+                <CardDescription className="text-xs">
+                  Inspect and preview user experiences across Consultant, Client, and Super Admin dashboards in real-time without modifying your account permissions in the database.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 pt-0 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="p-3 bg-secondary/30 rounded-lg border border-border flex flex-col justify-between space-y-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+                        <Users className="w-4 h-4 text-amber-400" />
+                        <span>Consultant View</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Preview consultant bookings, earnings, session controls, and profile management.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => switchToRole("consultant")}
+                      className="w-full text-xs bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold gap-1.5"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      Preview Consultant
+                    </Button>
+                  </div>
+
+                  <div className="p-3 bg-secondary/30 rounded-lg border border-border flex flex-col justify-between space-y-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+                        <Calendar className="w-4 h-4 text-sky-400" />
+                        <span>Client View</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Preview client bookings, upcoming calls, meeting rejoin flows, and payment history.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => switchToRole("client")}
+                      className="w-full text-xs border-sky-500/40 text-sky-400 hover:bg-sky-500/10 gap-1.5"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      Preview Client
+                    </Button>
+                  </div>
+
+                  <div className="p-3 bg-secondary/30 rounded-lg border border-border flex flex-col justify-between space-y-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+                        <ShieldCheck className="w-4 h-4 text-purple-400" />
+                        <span>Super Admin View</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Preview full management overview, administrator rosters, financial reports, and settings.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => switchToRole("super_admin")}
+                      className="w-full text-xs border-purple-500/40 text-purple-400 hover:bg-purple-500/10 gap-1.5"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      Preview Super Admin
+                    </Button>
+                  </div>
+                </div>
+
+                {isRolePreviewActive && (
+                  <div className="flex items-center justify-between p-2.5 rounded bg-amber-500/10 border border-amber-500/20 text-xs">
+                    <span className="text-amber-300">
+                      Role preview banner is active across all pages. Click below or use the top banner to return.
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={exitPreview}
+                      className="text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 h-7"
+                    >
+                      Exit Preview
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

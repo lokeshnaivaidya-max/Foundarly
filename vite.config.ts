@@ -23,6 +23,12 @@ export default defineConfig({
   define: {
     global: 'globalThis',
     'process.env': {},
+    process: {
+      env: {},
+      version: '',
+      platform: 'browser',
+      browser: true,
+    },
   },
   build: {
     outDir: "dist",

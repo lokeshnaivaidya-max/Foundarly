@@ -60,6 +60,9 @@ import UPIPaymentPage from "./pages/UPIPayment";
 import ConsultantDashboard from "./pages/ConsultantDashboard";
 import ConsultantProfile from "./pages/ConsultantProfile";
 
+import { RolePreviewProvider } from "@/contexts/RolePreviewContext";
+import RolePreviewBanner from "@/components/RolePreviewBanner";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -73,9 +76,11 @@ const App = () => (
                 <Toaster />
                 <Sonner />
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-                  <AIChatWidget />
-                  <CookieConsent />
-                  <Routes>
+                  <RolePreviewProvider>
+                    <RolePreviewBanner />
+                    <AIChatWidget />
+                    <CookieConsent />
+                    <Routes>
                     <Route path="/" element={<Consultants />} />
                     <Route path="/home" element={<Index />} />
                     <Route path="/consultants" element={<Consultants />} />
@@ -159,7 +164,8 @@ const App = () => (
                     <Route path="/404" element={<NotFound />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
-                </BrowserRouter>
+                </RolePreviewProvider>
+              </BrowserRouter>
               </TooltipProvider>
             </CurrencyProvider>
           </ThemeProvider>

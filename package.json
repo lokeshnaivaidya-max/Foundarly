@@ -9,8 +9,8 @@
     "start": "node dist/server.cjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "tsx --test test/meeting-rejoin-and-email.test.ts",
+    "test:watch": "tsx --test --watch test/meeting-rejoin-and-email.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.45.0",

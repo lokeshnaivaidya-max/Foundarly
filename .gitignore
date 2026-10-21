@@ -25,3 +25,4 @@ dist-ssr
 *.sw?
 node-compile-cache
 *.hm
+data/

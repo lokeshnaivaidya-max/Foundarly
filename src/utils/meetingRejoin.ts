@@ -523,3 +523,185 @@ export function checkBookingFollowUpEligibility(
     daysRemaining: eligibility.rejoinDaysRemaining,
   };
 }
+
+/* ==========================================================================
+   PARTICIPANT JOIN HISTORY & ACTION LABEL DETERMINATION
+   ========================================================================== */
+
+export interface ParticipantJoinRecord {
+  bookingId: string;
+  participantId?: string | null;
+  participantEmail?: string | null;
+  role?: string | null;
+  firstJoinedAt: string;
+  lastJoinedAt: string;
+  joinCount: number;
+}
+
+const LOCAL_JOIN_PREFIX = 'foundarly_meeting_joined_';
+
+/**
+ * Returns consistent storage key for participant join history
+ */
+export function getParticipantJoinStorageKey(
+  bookingId: string,
+  participantId?: string | null
+): string {
+  const cleanBooking = (bookingId || '').trim().replace(/^foundarly-/, '');
+  const cleanParticipant = (participantId || 'unknown').trim().toLowerCase();
+  return `${LOCAL_JOIN_PREFIX}${cleanBooking}_${cleanParticipant}`;
+}
+
+/**
+ * Checks whether a specific participant has previously joined this meeting in local client history.
+ * Isolates participants by ID, email, or role so a client join does not mark a consultant as joined.
+ */
+export function hasParticipantJoinedLocal(
+  bookingId: string,
+  participantId?: string | null,
+  participantEmail?: string | null,
+  role?: string | null
+): boolean {
+  if (typeof window === 'undefined' || !window.localStorage || !bookingId) {
+    return false;
+  }
+  const cleanBooking = (bookingId || '').trim().replace(/^foundarly-/, '');
+  if (!cleanBooking) return false;
+
+  try {
+    // 1. Check by participant ID (e.g. Supabase Auth UUID)
+    if (participantId && participantId.trim()) {
+      const keyId = `${LOCAL_JOIN_PREFIX}${cleanBooking}_${participantId.trim().toLowerCase()}`;
+      if (window.localStorage.getItem(keyId)) return true;
+    }
+
+    // 2. Check by participant email
+    if (participantEmail && participantEmail.trim()) {
+      const keyEmail = `${LOCAL_JOIN_PREFIX}${cleanBooking}_${participantEmail.trim().toLowerCase()}`;
+      if (window.localStorage.getItem(keyEmail)) return true;
+    }
+
+    // 3. Check by participant role for this specific booking (e.g. role_client vs role_consultant)
+    if (role && (role === 'client' || role === 'consultant')) {
+      const keyRole = `${LOCAL_JOIN_PREFIX}${cleanBooking}_role_${role.toLowerCase()}`;
+      if (window.localStorage.getItem(keyRole)) return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Records in local client history that a participant has joined the meeting.
+ * Sets specific entries for ID, email, and role for reliable lookup across refreshes.
+ */
+export function recordParticipantJoinLocal(
+  bookingId: string,
+  participantId?: string | null,
+  participantEmail?: string | null,
+  role?: string | null
+): void {
+  if (typeof window === 'undefined' || !window.localStorage || !bookingId) {
+    return;
+  }
+  const cleanBooking = (bookingId || '').trim().replace(/^foundarly-/, '');
+  if (!cleanBooking) return;
+
+  try {
+    const nowIso = new Date().toISOString();
+    const cleanId = participantId?.trim().toLowerCase() || null;
+    const cleanEmail = participantEmail?.trim().toLowerCase() || null;
+    const cleanRole = role?.trim().toLowerCase() || null;
+
+    const baseKey = cleanId
+      ? `${LOCAL_JOIN_PREFIX}${cleanBooking}_${cleanId}`
+      : (cleanEmail ? `${LOCAL_JOIN_PREFIX}${cleanBooking}_${cleanEmail}` : null);
+
+    let existingRecord: ParticipantJoinRecord | null = null;
+    if (baseKey) {
+      const raw = window.localStorage.getItem(baseKey);
+      if (raw) {
+        try { existingRecord = JSON.parse(raw); } catch { existingRecord = null; }
+      }
+    }
+
+    const record: ParticipantJoinRecord = {
+      bookingId: cleanBooking,
+      participantId: cleanId || existingRecord?.participantId || null,
+      participantEmail: cleanEmail || existingRecord?.participantEmail || null,
+      role: cleanRole || existingRecord?.role || null,
+      firstJoinedAt: existingRecord?.firstJoinedAt || nowIso,
+      lastJoinedAt: nowIso,
+      joinCount: (existingRecord?.joinCount || 0) + 1,
+    };
+    const recordStr = JSON.stringify(record);
+
+    if (cleanId) {
+      window.localStorage.setItem(`${LOCAL_JOIN_PREFIX}${cleanBooking}_${cleanId}`, recordStr);
+    }
+    if (cleanEmail) {
+      window.localStorage.setItem(`${LOCAL_JOIN_PREFIX}${cleanBooking}_${cleanEmail}`, recordStr);
+    }
+    if (cleanRole && (cleanRole === 'client' || cleanRole === 'consultant')) {
+      window.localStorage.setItem(`${LOCAL_JOIN_PREFIX}${cleanBooking}_role_${cleanRole}`, recordStr);
+    }
+  } catch (err) {
+    console.warn('[MeetingRejoin] Failed to save participant join in localStorage:', err);
+  }
+}
+
+/**
+ * Formats a rejoin deadline into an authoritative, human-readable date & time
+ * e.g., "October 28, 2026 at 3:30 PM UTC"
+ */
+export function formatRejoinExpiryDateTime(dateInput: Date | string): string {
+  const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  if (!d || isNaN(d.getTime())) return 'Within 7 days';
+
+  return d.toLocaleString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+}
+
+/**
+ * Authoritatively determines whether the meeting action should display "Join Meeting" or "Rejoin Meeting".
+ * 
+ * Rules:
+ * - If the participant has NEVER joined before: always "Join Meeting".
+ * - If the participant has PREVIOUSLY joined and is returning: "Rejoin Meeting".
+ */
+export function getMeetingActionLabel(options: {
+  hasJoined: boolean;
+  isConnecting?: boolean;
+  isFollowUp?: boolean;
+  variant?: 'button' | 'lobby' | 'dashboard';
+  daysRemaining?: number;
+}): string {
+  const { hasJoined, isConnecting, isFollowUp, variant, daysRemaining } = options;
+
+  if (isConnecting) {
+    return 'Connecting to Room...';
+  }
+
+  if (variant === 'dashboard') {
+    const daysSuffix = typeof daysRemaining === 'number' && daysRemaining > 0 ? ` (${daysRemaining}d left)` : '';
+    if (hasJoined) {
+      return `Rejoin Meeting${daysSuffix}`;
+    }
+    return `Join Meeting${daysSuffix}`;
+  }
+
+  if (isFollowUp) {
+    return hasJoined ? 'Rejoin Confirmed Follow-up' : 'Join Confirmed Follow-up Call';
+  }
+
+  return hasJoined ? 'Rejoin Meeting' : 'Join Meeting';
+}
+

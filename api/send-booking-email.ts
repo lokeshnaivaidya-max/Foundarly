@@ -6,9 +6,18 @@ import {
   generateConsultantEmailText,
   generateBookingRejectedEmailHTML,
   generateBookingRejectedEmailText,
+  generateSessionCompletedEmailHTML,
+  generateSessionCompletedEmailText,
   EmailBookingData,
   EmailBookingRejectedData,
+  EmailSessionCompletedData,
 } from '../src/utils/emailTemplates.js';
+import {
+  parseSessionTimes,
+  calculateRejoinEligibility,
+  formatRejoinExpiryDateTime,
+} from '../src/utils/meetingRejoin.js';
+import { completionEmailStorage } from '../src/server/completionEmailStorage.js';
 import { sendEmail, getSmtpConfig } from '../src/server/mailer.js';
 import { checkDistributedRateLimit, extractClientIp } from '../src/server/rateLimiter.js';
 
@@ -162,7 +171,168 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }
 
     // =========================================================================
-    // B. BOOKING CONFIRMATION FLOW (CLIENT + CONSULTANT)
+    // B. POST-SESSION COMPLETION EMAIL FLOW (WITH 7-DAY REJOIN & DEDUPLICATION)
+    // =========================================================================
+    if (type === 'completed') {
+      const targetBookingId = bookingId || emailData?.bookingId;
+      if (!targetBookingId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Booking ID is required to send completion email',
+        });
+      }
+
+      // Check idempotency: avoid sending duplicate emails when completion event triggers multiple times
+      if (completionEmailStorage.isSent(targetBookingId)) {
+        console.log(`[Email API] Post-session completion email already sent for booking: ${targetBookingId}. Skipping duplicate.`);
+        return res.status(200).json({
+          success: true,
+          message: 'Post-session completion email already sent (idempotent)',
+          alreadySent: true,
+          bookingId: targetBookingId,
+        });
+      }
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://rfyxnshvtfswvaogjzwq.supabase.co';
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd';
+
+      let bookingRecord: any = null;
+      let consultantRecord: any = null;
+
+      try {
+        const fetchRes = await fetch(`${supabaseUrl}/rest/v1/bookings?id=eq.${targetBookingId}&select=*,consultants(name,email,title)`, {
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (fetchRes.ok) {
+          const records = (await fetchRes.json()) as any[];
+          bookingRecord = records?.[0];
+          consultantRecord = Array.isArray(bookingRecord?.consultants) ? bookingRecord.consultants[0] : bookingRecord?.consultants;
+        }
+      } catch (fetchErr) {
+        console.warn('[Email API] Failed to fetch booking via REST, using payload data if available:', fetchErr);
+      }
+
+      const clientEmail = (bookingRecord?.email || emailData?.userEmail || '').toLowerCase().trim();
+      const clientName = bookingRecord?.name || emailData?.userName || 'Client';
+      const consultantName = consultantRecord?.name || emailData?.consultantName || 'Consultant';
+      const consultantEmail = (consultantRecord?.email || emailData?.consultantEmail || '').toLowerCase().trim();
+      const date = bookingRecord?.date || emailData?.date || new Date().toISOString().split('T')[0];
+      const time = bookingRecord?.time || emailData?.time || 'Flexible';
+      const sessionDuration = bookingRecord?.session_duration || emailData?.duration || 60;
+      const meetingRoomId = bookingRecord?.meeting_room_id || emailData?.meetingRoomId || `foundarly-${targetBookingId}`;
+      const meetingLink = `${siteUrl}/meeting/${meetingRoomId}`;
+
+      // Calculate 7-day rejoin deadline
+      const timing = parseSessionTimes({
+        date,
+        time,
+        session_duration: sessionDuration,
+        meeting_started_at: bookingRecord?.meeting_started_at,
+        meeting_ended_at: bookingRecord?.meeting_ended_at,
+      });
+      const rejoinDeadlineIso = timing.rejoinDeadline.toISOString();
+      const rejoinExpiryFormatted = formatRejoinExpiryDateTime(timing.rejoinDeadline);
+
+      if (!clientEmail || !clientEmail.includes('@')) {
+        return res.status(400).json({
+          success: false,
+          error: 'Recipient client email address is missing or invalid.',
+        });
+      }
+
+      // 1. Send Completion & 7-Day Rejoin Email to Client
+      const clientPayload: EmailSessionCompletedData = {
+        bookingId: targetBookingId,
+        userName: clientName,
+        userEmail: clientEmail,
+        consultantName,
+        consultantEmail: consultantEmail || null,
+        recipientRole: 'client',
+        recipientName: clientName,
+        recipientEmail: clientEmail,
+        date,
+        time,
+        sessionDuration,
+        meetingRoomId,
+        meetingLink,
+        rejoinDeadline: rejoinDeadlineIso,
+        rejoinExpiryFormatted,
+        rejoinDaysRemaining: 7,
+      };
+
+      const clientHtml = generateSessionCompletedEmailHTML(clientPayload);
+      const clientText = generateSessionCompletedEmailText(clientPayload);
+      const clientSubject = `Thank You for Attending Your Consultation with ${consultantName} | 7-Day Follow-Up Access Active`;
+
+      const clientMailRes = await sendEmail({
+        from: smtpConfig.defaultFrom,
+        to: clientEmail,
+        replyTo: smtpConfig.replyTo,
+        subject: clientSubject,
+        html: clientHtml,
+        text: clientText,
+      });
+
+      if (!clientMailRes.success) {
+        return res.status(500).json({
+          success: false,
+          error: clientMailRes.error || 'Failed to send post-session completion email to client',
+          diagnostic: clientMailRes.diagnostic,
+          details: clientMailRes.details,
+        });
+      }
+
+      // 2. Also send Completion Email to Consultant if consultant email is available
+      let consultantEmailId = null;
+      if (consultantEmail && consultantEmail.includes('@') && consultantEmail !== clientEmail) {
+        try {
+          const consultantPayload: EmailSessionCompletedData = {
+            ...clientPayload,
+            recipientRole: 'consultant',
+            recipientName: consultantName,
+            recipientEmail: consultantEmail,
+          };
+          const consHtml = generateSessionCompletedEmailHTML(consultantPayload);
+          const consText = generateSessionCompletedEmailText(consultantPayload);
+          const consSubject = `Session Completed: Consultation with ${clientName} | 7-Day Follow-Up Active`;
+
+          const consMailRes = await sendEmail({
+            from: smtpConfig.defaultFrom,
+            to: consultantEmail,
+            replyTo: smtpConfig.replyTo,
+            subject: consSubject,
+            html: consHtml,
+            text: consText,
+          });
+          if (consMailRes.success) {
+            consultantEmailId = consMailRes.messageId;
+          }
+        } catch (consErr) {
+          console.warn('[Email API] Consultant completion notification warning:', consErr);
+        }
+      }
+
+      // Mark as sent in persistent storage to prevent duplicates
+      completionEmailStorage.markSent(targetBookingId);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Post-session completion email sent successfully',
+        clientEmailId: clientMailRes.messageId,
+        consultantEmailId,
+        recipient: clientEmail,
+        rejoinDeadline: rejoinDeadlineIso,
+        rejoinExpiryFormatted,
+      });
+    }
+
+    // =========================================================================
+    // C. BOOKING CONFIRMATION FLOW (CLIENT + CONSULTANT)
     // =========================================================================
     let dataToSend: EmailBookingData = emailData;
 

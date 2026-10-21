@@ -5,6 +5,7 @@ import {
   validateParticipantAccess,
   parseSessionTimes,
 } from '../../src/utils/meetingRejoin.js';
+import { meetingParticipantStorage } from '../../src/server/meetingParticipantStorage.js';
 import { checkDistributedRateLimit, extractClientIp } from '../../src/server/rateLimiter.js';
 
 dotenv.config();
@@ -289,12 +290,19 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     const sessionTimes = parseSessionTimes(booking);
     const timingResult = calculateRejoinEligibility(booking);
 
+    const participantIdentifier = (user.id || user.email || 'unknown').trim().toLowerCase();
+    const hasJoined = meetingParticipantStorage.hasJoined(booking.id, participantIdentifier, authResult.role);
+    const participantHistory = meetingParticipantStorage.getParticipantHistory(booking.id, participantIdentifier, authResult.role);
+
     return res.status(200).json({
       success: true,
       authorized: true,
       canJoin: timingResult.canJoin,
-      isRejoin: timingResult.isRejoin,
+      hasJoined: Boolean(hasJoined),
+      isRejoin: Boolean(hasJoined),
+      isRejoinWindow: timingResult.isRejoin,
       sessionStatus: timingResult.sessionStatus,
+      participantHistory,
       role: authResult.role,
       followUp: followUp || null,
       timing: {

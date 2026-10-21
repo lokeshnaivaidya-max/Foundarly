@@ -1212,4 +1212,206 @@ ${data.meetingLink}
 Foundarly Consultation Platform`;
 }
 
+/* ==========================================================================
+   POST-SESSION MEETING COMPLETED NOTIFICATION EMAIL (WITH 7-DAY REJOIN)
+   ========================================================================== */
+
+export interface EmailSessionCompletedData {
+  bookingId: string;
+  userName: string;
+  userEmail: string;
+  consultantName: string;
+  consultantEmail?: string | null;
+  recipientRole: 'client' | 'consultant';
+  recipientName: string;
+  recipientEmail: string;
+  date: string;
+  time: string;
+  sessionDuration: number;
+  meetingRoomId: string;
+  meetingLink: string;
+  rejoinDeadline: string; // ISO date string
+  rejoinExpiryFormatted: string; // Human-readable date & time (e.g. October 28, 2026 at 3:30 PM UTC)
+  rejoinDaysRemaining?: number;
+}
+
+export function generateSessionCompletedEmailHTML(data: EmailSessionCompletedData): string {
+  const isClient = data.recipientRole === 'client';
+  const partnerName = isClient ? data.consultantName : data.userName;
+  const partnerRole = isClient ? 'Consultant' : 'Client';
+  const dashboardName = isClient ? 'My Bookings' : 'Consultant Dashboard';
+  const dashboardPath = isClient ? '/my-bookings' : '/consultant/dashboard';
+  const siteUrl = 'https://www.foundarlybusinessworld.in';
+  const dashboardFullUrl = `${siteUrl}${dashboardPath}`;
+
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Consultation Completed & 7-Day Follow-Up Access - Foundarly</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.07); border: 1px solid #e2e8f0;">
+          <!-- Top Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 36px 32px; text-align: center; border-bottom: 3px solid #f59e0b;">
+              <p style="margin: 0 0 8px 0; font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #f59e0b;">Foundarly • Session Summary</p>
+              <h1 style="margin: 0 0 8px 0; color: #ffffff; font-size: 24px; font-weight: 700; line-height: 30px;">Thank You for Attending Your Consultation</h1>
+              <p style="margin: 0; color: #94a3b8; font-size: 14px;">Your session with <strong>${escapeHTML(partnerName)}</strong> has successfully completed</p>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 36px 32px;">
+              <p style="font-size: 16px; line-height: 24px; margin: 0 0 16px 0;">Hello <strong>${escapeHTML(data.recipientName)}</strong>,</p>
+              <p style="font-size: 15px; line-height: 24px; color: #334155; margin: 0 0 20px 0;">
+                Thank you for participating in your professional consultation with <strong>${escapeHTML(partnerName)}</strong> (${escapeHTML(partnerRole)}) today. We trust the session was productive and provided actionable guidance.
+              </p>
+
+              <!-- 7-Day Follow-Up Policy Box -->
+              <div style="background-color: #fef3c7; border: 1px solid #fcd34d; border-radius: 12px; padding: 20px; margin-bottom: 28px;">
+                <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                  <span style="font-size: 18px; margin-right: 8px;">✨</span>
+                  <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #92400e;">7-Day Follow-Up Clarification Policy</h3>
+                </div>
+                <p style="margin: 0 0 12px 0; font-size: 14px; line-height: 22px; color: #78350f;">
+                  At Foundarly, your engagement doesn't end when the call disconnects. You can <strong>rejoin the exact same meeting room</strong> at any time over the next <strong>7 days</strong> for follow-up questions, additional clarifications, or quick check-ins.
+                </p>
+                <div style="background-color: #ffffff; border-radius: 8px; padding: 12px 16px; border: 1px dashed #f59e0b;">
+                  <p style="margin: 0; font-size: 13px; color: #78350f;">
+                    <strong>Rejoin Window Expiry:</strong> <span style="font-weight: 700; color: #b45309;">${escapeHTML(data.rejoinExpiryFormatted)}</span>
+                  </p>
+                </div>
+              </div>
+
+              <!-- Completed Session Details -->
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 22px; margin-bottom: 28px;">
+                <h4 style="margin: 0 0 14px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: #475569;">Session Details</h4>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td style="padding-bottom: 10px; font-size: 14px; color: #64748b; width: 150px;">Consultation Date:</td>
+                    <td style="padding-bottom: 10px; font-size: 14px; font-weight: 600; color: #1e293b;">${escapeHTML(data.date)} at ${escapeHTML(data.time)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding-bottom: 10px; font-size: 14px; color: #64748b;">Scheduled Duration:</td>
+                    <td style="padding-bottom: 10px; font-size: 14px; font-weight: 600; color: #1e293b;">${data.sessionDuration} minutes</td>
+                  </tr>
+                  <tr>
+                    <td style="padding-bottom: 10px; font-size: 14px; color: #64748b;">Consultant:</td>
+                    <td style="padding-bottom: 10px; font-size: 14px; font-weight: 600; color: #1e293b;">${escapeHTML(data.consultantName)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding-bottom: 10px; font-size: 14px; color: #64748b;">Client:</td>
+                    <td style="padding-bottom: 10px; font-size: 14px; font-weight: 600; color: #1e293b;">${escapeHTML(data.userName)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding-bottom: 10px; font-size: 14px; color: #64748b;">Meeting Room ID:</td>
+                    <td style="padding-bottom: 10px; font-size: 14px; font-family: monospace; color: #334155; font-weight: 600;">${escapeHTML(data.meetingRoomId)}</td>
+                  </tr>
+                  <tr>
+                    <td style="font-size: 14px; color: #64748b;">Booking Reference:</td>
+                    <td style="font-size: 14px; font-family: monospace; color: #64748b;">${escapeHTML(data.bookingId)}</td>
+                  </tr>
+                </table>
+              </div>
+
+              <!-- How to Rejoin Instructions -->
+              <div style="background-color: #f1f5f9; border-radius: 12px; padding: 22px; margin-bottom: 28px;">
+                <h4 style="margin: 0 0 12px 0; font-size: 15px; font-weight: 700; color: #0f172a;">How to Rejoin for Follow-up Clarifications</h4>
+                <ol style="margin: 0; padding-left: 20px; font-size: 14px; line-height: 24px; color: #334155;">
+                  <li>Log in to your <strong>Foundarly</strong> account at <a href="${siteUrl}/login" style="color: #d97706; text-decoration: underline;">${siteUrl}/login</a>.</li>
+                  <li>Open your <strong>${escapeHTML(dashboardName)}</strong> from the navigation menu or visit <a href="${dashboardFullUrl}" style="color: #d97706; text-decoration: underline;">${dashboardFullUrl}</a>.</li>
+                  <li>Find this booking (Ref: <code>${escapeHTML(data.bookingId.slice(0, 8))}...</code>) with <strong>${escapeHTML(partnerName)}</strong>.</li>
+                  <li>Click <strong>"Rejoin Meeting"</strong> to immediately re-enter your private video room.</li>
+                </ol>
+              </div>
+
+              <!-- Primary CTA Button -->
+              <div style="text-align: center; margin: 32px 0 24px 0;">
+                <a href="${escapeHTML(data.meetingLink)}" style="display: inline-block; background: linear-gradient(135deg, #d97706 0%, #b45309 100%); color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 700; padding: 15px 40px; border-radius: 8px; box-shadow: 0 4px 14px rgba(217, 119, 6, 0.35);">
+                  Rejoin Consultation Room &rarr;
+                </a>
+              </div>
+
+              <p style="font-size: 12px; line-height: 18px; color: #64748b; text-align: center; margin: 0 0 8px 0;">
+                Direct Rejoin Link:
+              </p>
+              <p style="font-size: 12px; font-family: monospace; color: #d97706; text-align: center; word-break: break-all; margin: 0 0 24px 0;">
+                <a href="${escapeHTML(data.meetingLink)}" style="color: #d97706; text-decoration: underline;">${escapeHTML(data.meetingLink)}</a>
+              </p>
+
+              <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+              <p style="font-size: 12px; color: #94a3b8; line-height: 18px; margin: 0; text-align: center;">
+                Security Note: Rejoin access uses your original authenticated room. Only the verified client (${escapeHTML(data.userEmail)}) and assigned consultant can access this session.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #0f172a; padding: 24px 32px; text-align: center;">
+              <p style="margin: 0 0 8px 0; color: #ffffff; font-size: 14px; font-weight: 700;">Foundarly</p>
+              <p style="margin: 0; color: #94a3b8; font-size: 12px; line-height: 18px;">
+                Expert Business Consultation Platform • <a href="${siteUrl}" style="color: #f59e0b; text-decoration: none;">www.foundarlybusinessworld.in</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export function generateSessionCompletedEmailText(data: EmailSessionCompletedData): string {
+  const isClient = data.recipientRole === 'client';
+  const partnerName = isClient ? data.consultantName : data.userName;
+  const partnerRole = isClient ? 'Consultant' : 'Client';
+  const dashboardName = isClient ? 'My Bookings' : 'Consultant Dashboard';
+  const dashboardPath = isClient ? '/my-bookings' : '/consultant/dashboard';
+  const siteUrl = 'https://www.foundarlybusinessworld.in';
+
+  return `Consultation Completed & 7-Day Follow-Up Access - Foundarly
+
+Dear ${data.recipientName},
+
+Thank you for attending your consultation session with ${partnerName} (${partnerRole}) today.
+
+7-DAY FOLLOW-UP CLARIFICATION POLICY:
+At Foundarly, your engagement does not end when the call disconnects. You can rejoin the exact same meeting room at any time over the next 7 days for follow-up questions, additional clarifications, or quick check-ins.
+
+REJOIN EXPIRY DATE & TIME:
+${data.rejoinExpiryFormatted} (7 days after session completion)
+
+SESSION DETAILS:
+- Consultation Date: ${data.date} at ${data.time}
+- Scheduled Duration: ${data.sessionDuration} minutes
+- Consultant: ${data.consultantName}
+- Client: ${data.userName}
+- Meeting Room ID: ${data.meetingRoomId}
+- Booking Reference: ${data.bookingId}
+
+HOW TO REJOIN FOR FOLLOW-UP CLARIFICATIONS:
+1. Log in to your Foundarly account at ${siteUrl}/login
+2. Open your ${dashboardName} (${siteUrl}${dashboardPath})
+3. Select your booking with ${partnerName}
+4. Click "Rejoin Meeting" to re-enter your meeting room.
+
+Or access the meeting directly using this link:
+${data.meetingLink}
+
+Note: Rejoin access uses your existing secure meeting room and is authorized only for you and your consultant.
+
+---
+Foundarly Consultation Platform
+https://www.foundarlybusinessworld.in`;
+}
+
+
 

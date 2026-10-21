@@ -1,4 +1,9 @@
 import { supabase } from '@/lib/supabase';
+import { emailService } from '@/services/email';
+import {
+  hasParticipantJoinedLocal,
+  recordParticipantJoinLocal,
+} from '@/utils/meetingRejoin';
 
 interface BookingData {
   id: string;
@@ -10,6 +15,74 @@ interface BookingData {
 }
 
 export const meetingTrackingService = {
+  /**
+   * Checks whether a participant has joined this meeting before (local or cached)
+   */
+  hasJoined(
+    bookingId: string,
+    participantId?: string | null,
+    email?: string | null,
+    role?: string | null
+  ): boolean {
+    if (!bookingId) return false;
+    return hasParticipantJoinedLocal(bookingId, participantId, email, role);
+  },
+
+  /**
+   * Record when a participant joins the meeting room.
+   * Records both locally and authoritatively via the server endpoint.
+   */
+  async recordJoin(
+    bookingId: string,
+    participantId: string,
+    role?: string,
+    roomId?: string,
+    email?: string | null
+  ): Promise<{ success: boolean; hasJoined: boolean; isFirstJoin: boolean }> {
+    if (!bookingId) return { success: false, hasJoined: false, isFirstJoin: false };
+
+    // 1. Record immediately in local storage for zero-latency UI consistency
+    const previouslyJoinedLocally = hasParticipantJoinedLocal(bookingId, participantId, email, role);
+    recordParticipantJoinLocal(bookingId, participantId, email, role);
+
+    // 2. Dispatch to server API
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch('/api/meeting/record-join', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          bookingId,
+          roomId: roomId || bookingId,
+          role,
+          email: email || undefined,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          success: true,
+          hasJoined: true,
+          isFirstJoin: Boolean(data?.isFirstJoin),
+        };
+      }
+    } catch (err) {
+      console.warn('[MeetingTracking] Network error recording join on server:', err);
+    }
+
+    return {
+      success: true,
+      hasJoined: true,
+      isFirstJoin: !previouslyJoinedLocally,
+    };
+  },
+
   /**
    * Update participant count when someone joins
    */
@@ -39,38 +112,86 @@ export const meetingTrackingService = {
   },
 
   /**
-   * Mark meeting as ended
+   * Mark meeting as ended and trigger post-session email if genuinely completed
    */
-  async endMeeting(bookingId: string, participantCount: number): Promise<void> {
+  async endMeeting(bookingId: string, participantCount: number, durationMinutes?: number): Promise<void> {
+    if (!bookingId) return;
+
     const updates: Record<string, any> = {
       meeting_ended_at: new Date().toISOString(),
       participants_count: participantCount,
     };
 
-    // If 2+ people joined and meeting lasted 10+ minutes, mark as completed
+    let genuinelyCompleted = false;
+
+    // Check meeting history in Supabase
     const { data: booking } = await supabase
       .from('bookings')
-      .select('meeting_started_at')
+      .select('meeting_started_at, participants_count, status')
       .eq('id', bookingId)
       .maybeSingle();
 
-    if (!booking) return;
+    const bookingData = (booking as BookingData) || {};
+    const effectiveParticipants = Math.max(participantCount, bookingData.participants_count || 0);
 
-    const bookingData = booking as BookingData;
-    if (bookingData.meeting_started_at && participantCount >= 2) {
+    // Calculate duration if start time exists
+    let elapsedMinutes = durationMinutes || 0;
+    if (!elapsedMinutes && bookingData.meeting_started_at) {
       const startTime = new Date(bookingData.meeting_started_at);
       const endTime = new Date();
-      const durationMinutes = (endTime.getTime() - startTime.getTime()) / (1000 * 60);
-
-      if (durationMinutes >= 10) {
-        updates.status = 'completed';
-      }
+      elapsedMinutes = (endTime.getTime() - startTime.getTime()) / (1000 * 60);
     }
 
-    await supabase
-      .from('bookings')
-      .update(updates as any)
-      .eq('id', bookingId);
+    // A meeting is genuinely completed if:
+    // 1. Two or more participants joined and session was conducted, OR
+    // 2. Already marked completed, OR
+    // 3. Lasted a legitimate consultation duration (>= 5 minutes with active participant)
+    if ((effectiveParticipants >= 2 && elapsedMinutes >= 3) || elapsedMinutes >= 10 || bookingData.status === 'completed') {
+      updates.status = 'completed';
+      genuinelyCompleted = true;
+    }
+
+    try {
+      await supabase
+        .from('bookings')
+        .update(updates as any)
+        .eq('id', bookingId);
+    } catch (e) {
+      console.warn('[MeetingTracking] Error updating booking end:', e);
+    }
+
+    // Send post-session completion email immediately if meeting was genuinely completed
+    if (genuinelyCompleted) {
+      console.log(`[MeetingTracking] Meeting ${bookingId} genuinely completed. Dispatching post-session email.`);
+      emailService.sendSessionCompletedEmail(bookingId).catch((err) => {
+        console.warn('[MeetingTracking] Warning sending post-session email:', err);
+      });
+    }
+  },
+
+  /**
+   * Explicitly marks a meeting as completed (e.g. from admin panel or explicit end session)
+   * and dispatches the post-session email immediately.
+   */
+  async completeMeeting(bookingId: string): Promise<{ success: boolean; emailSent?: boolean }> {
+    if (!bookingId) return { success: false };
+
+    try {
+      await supabase
+        .from('bookings')
+        .update({
+          status: 'completed',
+          meeting_ended_at: new Date().toISOString(),
+        })
+        .eq('id', bookingId);
+
+      // Send post-session completion email immediately
+      const emailResult = await emailService.sendSessionCompletedEmail(bookingId);
+      return { success: true, emailSent: emailResult.success };
+    } catch (err) {
+      console.error('[MeetingTracking] Error completing meeting:', err);
+      return { success: false };
+    }
   },
 
   /**

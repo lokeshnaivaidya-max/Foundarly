@@ -14,9 +14,11 @@ import { consultantDashboardService } from "@/services/consultantDashboard";
 import { emailService } from "@/services/email";
 import { useNavigate, Link } from "react-router-dom";
 import { SkeletonList } from "@/components/PageLoader";
-import { toast } from "sonner";
-import { calculateRejoinEligibility, FollowUpRequest } from "@/utils/meetingRejoin";
-import { followUpService } from "@/services/followUpService";
+import {
+  calculateRejoinEligibility,
+  hasParticipantJoinedLocal,
+  FollowUpRequest,
+} from "@/utils/meetingRejoin";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -304,13 +306,20 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
 
             const eligibility = calculateRejoinEligibility(booking, new Date());
             const sessionStatus = eligibility.sessionStatus;
+            const hasJoined = hasParticipantJoinedLocal(
+              booking.id,
+              (booking as any)?.user_id,
+              booking?.email,
+              'client'
+            );
 
             if (sessionStatus === "live") {
               return (
                 <Link to={`/meeting/${effectiveRoomId}`}>
                   <Button size="sm" className="gap-2 glow-gold-sm">
                     <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                    <Video className="h-3.5 w-3.5" /> Join Call
+                    {hasJoined ? <RotateCcw className="h-3.5 w-3.5" /> : <Video className="h-3.5 w-3.5" />}
+                    {hasJoined ? "Rejoin Call" : "Join Call"}
                   </Button>
                 </Link>
               );
@@ -321,7 +330,8 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
                 return (
                   <Link to={`/meeting/${effectiveRoomId}`}>
                     <Button size="sm" className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium">
-                      <Video className="h-3.5 w-3.5" /> Join Confirmed Follow-up
+                      {hasJoined ? <RotateCcw className="h-3.5 w-3.5" /> : <Video className="h-3.5 w-3.5" />}
+                      {hasJoined ? "Rejoin Confirmed Follow-up" : "Join Confirmed Follow-up"}
                     </Button>
                   </Link>
                 );
@@ -348,7 +358,8 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
                   </Button>
                   <Link to={`/meeting/${effectiveRoomId}`}>
                     <Button size="sm" variant="ghost" className="gap-1.5 text-xs text-muted-foreground hover:bg-secondary">
-                      <Video className="h-3.5 w-3.5" /> Quick Rejoin
+                      {hasJoined ? <RotateCcw className="h-3.5 w-3.5" /> : <Video className="h-3.5 w-3.5" />}
+                      {hasJoined ? "Rejoin Meeting" : "Join Meeting"}
                     </Button>
                   </Link>
                 </>

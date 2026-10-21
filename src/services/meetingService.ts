@@ -4,13 +4,16 @@ import {
   calculateRejoinEligibility,
   validateParticipantAccess,
   FollowUpRequest,
+  hasParticipantJoinedLocal,
 } from '@/utils/meetingRejoin';
 
 export interface MeetingAccessResponse {
   success: boolean;
   authorized: boolean;
   canJoin: boolean;
+  hasJoined?: boolean;
   isRejoin: boolean;
+  isRejoinWindow?: boolean;
   sessionStatus: MeetingSessionStatus;
   role?: 'client' | 'consultant' | 'admin' | null;
   error?: string;
@@ -192,12 +195,20 @@ export const meetingService = {
         }
 
         const eligibility = calculateRejoinEligibility(booking, new Date());
+        const hasJoined = hasParticipantJoinedLocal(
+          booking.id,
+          currentUser.id,
+          currentUser.email,
+          authCheck.role
+        );
 
         return {
           success: true,
           authorized: true,
           canJoin: eligibility.canJoin,
-          isRejoin: eligibility.isRejoin,
+          hasJoined,
+          isRejoin: Boolean(hasJoined),
+          isRejoinWindow: eligibility.isRejoin,
           sessionStatus: eligibility.sessionStatus,
           role: authCheck.role,
           booking: {

@@ -21,7 +21,12 @@ import { toast } from "sonner";
 import { PageLoader } from "@/components/PageLoader";
 import { motion } from "framer-motion";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { calculateRejoinEligibility, FollowUpRequest } from "@/utils/meetingRejoin";
+import {
+  calculateRejoinEligibility,
+  hasParticipantJoinedLocal,
+  getMeetingActionLabel,
+  FollowUpRequest,
+} from "@/utils/meetingRejoin";
 import { followUpService } from "@/services/followUpService";
 
 export default function ConsultantDashboard() {
@@ -617,6 +622,13 @@ export default function ConsultantDashboard() {
                           if (!effectiveRoomId) return null;
 
                           const eligibility = calculateRejoinEligibility(booking, new Date());
+                          const hasJoined = hasParticipantJoinedLocal(
+                            booking.id,
+                            user?.id,
+                            user?.email,
+                            'consultant'
+                          );
+
                           if (eligibility.sessionStatus === "rejoin_eligible") {
                             return (
                               <>
@@ -624,10 +636,18 @@ export default function ConsultantDashboard() {
                                   size="sm"
                                   onClick={() => navigate(`/meeting/${effectiveRoomId}`)}
                                   className="gap-2 bg-amber-500/15 text-amber-500 hover:bg-amber-500/25 border border-amber-500/30 text-xs font-medium"
-                                  title={`Follow-up rejoin available until ${eligibility.rejoinDeadline.toLocaleDateString()}`}
+                                  title={`Follow-up access available until ${eligibility.rejoinDeadline.toLocaleDateString()}`}
                                 >
-                                  <RotateCcw className="h-3.5 w-3.5 text-amber-500" />
-                                  Rejoin Meeting ({eligibility.rejoinDaysRemaining}d left)
+                                  {hasJoined ? (
+                                    <RotateCcw className="h-3.5 w-3.5 text-amber-500" />
+                                  ) : (
+                                    <Video className="h-3.5 w-3.5 text-amber-500" />
+                                  )}
+                                  {getMeetingActionLabel({
+                                    hasJoined,
+                                    variant: 'dashboard',
+                                    daysRemaining: eligibility.rejoinDaysRemaining,
+                                  })}
                                 </Button>
                                 <Button
                                   size="sm"
@@ -654,8 +674,8 @@ export default function ConsultantDashboard() {
                                   onClick={() => navigate(`/meeting/${effectiveRoomId}`)}
                                   className="gap-2"
                                 >
-                                  <Video className="h-4 w-4" />
-                                  Join Meeting
+                                  {hasJoined ? <RotateCcw className="h-4 w-4" /> : <Video className="h-4 w-4" />}
+                                  {hasJoined ? "Rejoin Meeting" : "Join Meeting"}
                                 </Button>
                                 <Button
                                   size="sm"

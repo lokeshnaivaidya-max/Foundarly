@@ -1,6 +1,8 @@
 {
   "name": "Foundarly",
-  "description": "Foundarly - Consultation Booking & Admin Management Platform",
-  "requestFramePermissions": ["camera", "microphone"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "description": "Foundarly Business World - 1-on-1 Business Mentorship and Consulting Platform with verified consultants, video sessions, and 7-day post-meeting rejoin.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

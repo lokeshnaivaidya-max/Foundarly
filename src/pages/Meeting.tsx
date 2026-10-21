@@ -11,9 +11,10 @@ import { toast } from "sonner";
 import { PageLoader } from "@/components/PageLoader";
 import { motion, AnimatePresence } from "framer-motion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { WebRTCService } from "@/services/webrtcService";
 import { meetingService, MeetingAccessResponse } from "@/services/meetingService";
+import { meetingTrackingService } from "@/services/meetingTracking";
+import { hasParticipantJoinedLocal, recordParticipantJoinLocal, getMeetingActionLabel } from "@/utils/meetingRejoin";
 
 interface BookingWithConsultant {
   id: string;
@@ -303,6 +304,7 @@ export default function MeetingPage() {
     code?: string;
     rejoinDeadline?: string;
   } | null>(null);
+  const [hasJoinedBefore, setHasJoinedBefore] = useState(false);
   const [isRejoinSession, setIsRejoinSession] = useState(false);
   const [canJoin, setCanJoin] = useState(false);
   const [rejoinDaysRemaining, setRejoinDaysRemaining] = useState<number | null>(null);
@@ -391,7 +393,15 @@ export default function MeetingPage() {
 
       setAccessError(null);
       setBooking(accessResult.booking);
-      setIsRejoinSession(Boolean(accessResult.isRejoin));
+      
+      const bookingId = accessResult.booking?.id || '';
+      const joinedBefore = Boolean(
+        accessResult.hasJoined ||
+        (bookingId && hasParticipantJoinedLocal(bookingId, user?.id, user?.email, accessResult.role))
+      );
+      setHasJoinedBefore(joinedBefore);
+      setIsRejoinSession(joinedBefore);
+
       setCanJoin(Boolean(accessResult.canJoin));
       setStatus(accessResult.sessionStatus as any);
       setUserRole(accessResult.role || null);
@@ -486,10 +496,27 @@ export default function MeetingPage() {
     try {
       setCallStarted(true);
       setCallStartTime(new Date());
-      toast.info(isRejoinSession 
-        ? "Rejoining 7-day follow-up video call..." 
+      toast.info(hasJoinedBefore 
+        ? "Rejoining video call..." 
         : "Connecting to real-time WebRTC video call..."
       );
+
+      const canonicalRoom = getCanonicalRoomId(roomId, booking);
+
+      // Record participant join locally and on server
+      if (booking) {
+        const participantId = user?.id || user?.email || 'unknown';
+        recordParticipantJoinLocal(booking.id, user?.id, user?.email, userRole || undefined);
+        setHasJoinedBefore(true);
+        setIsRejoinSession(true);
+        meetingTrackingService.recordJoin(
+          booking.id,
+          participantId,
+          userRole || undefined,
+          canonicalRoom,
+          user?.email
+        ).catch(console.warn);
+      }
 
       const userId = user?.id || `user_${Math.random().toString(36).substring(2, 9)}`;
       const userName = user?.email?.split('@')[0] || 'Participant';
@@ -532,7 +559,6 @@ export default function MeetingPage() {
       setLocalStream(stream);
 
       // 2. Join signaling channel using canonical room ID
-      const canonicalRoom = getCanonicalRoomId(roomId, booking);
       console.log(`[Meeting] Joining signaling channel with canonical room ID: ${canonicalRoom}`);
       await service.joinRoom(canonicalRoom);
 
@@ -574,6 +600,11 @@ export default function MeetingPage() {
 
   const endCall = async () => {
     try {
+      const activeDurationMinutes = callStartTime 
+        ? (new Date().getTime() - callStartTime.getTime()) / (1000 * 60)
+        : 0;
+      const effectiveParticipantCount = Math.max(presenceCount, remoteParticipants.size + 1);
+
       if (webrtcServiceRef.current) {
         await webrtcServiceRef.current.leave();
         webrtcServiceRef.current = null;
@@ -587,6 +618,11 @@ export default function MeetingPage() {
       
       if (document.fullscreenElement) {
         document.exitFullscreen();
+      }
+
+      // If call genuinely took place, record meeting completion and send post-session email
+      if (booking?.id && activeDurationMinutes > 0) {
+        meetingTrackingService.endMeeting(booking.id, effectiveParticipantCount, activeDurationMinutes);
       }
     } catch (error) {
       console.error("Error ending call:", error);
@@ -1509,12 +1545,12 @@ export default function MeetingPage() {
                 </div>
                 <Button 
                   size="lg" 
-                  className="w-full glow-gold gap-2 text-base py-6" 
+                  className="w-full glow-gold gap-2 text-base py-6 font-semibold" 
                   onClick={() => startCall()}
                   disabled={callStarted}
                 >
-                  <Video className="h-5 w-5" /> 
-                  {callStarted ? "Connecting..." : "Join Video Call"}
+                  {hasJoinedBefore ? <RotateCcw className="h-5 w-5" /> : <Video className="h-5 w-5" />}
+                  {callStarted ? "Connecting..." : (hasJoinedBefore ? "Rejoin Meeting" : "Join Meeting")}
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   Make sure your camera and microphone are ready
@@ -1550,12 +1586,13 @@ export default function MeetingPage() {
                 ) : (
                   <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-center space-y-1.5">
                     <div className="flex items-center justify-center gap-2 text-amber-500 text-sm font-semibold">
-                      <RotateCcw className="h-4 w-4" />
-                      <span>7-Day Follow-Up Window Active</span>
+                      {hasJoinedBefore ? <RotateCcw className="h-4 w-4" /> : <Video className="h-4 w-4" />}
+                      <span>{hasJoinedBefore ? "7-Day Follow-Up Window Active" : "7-Day Consultation Access Active"}</span>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Both the client and assigned consultant can rejoin this original room for follow-up questions
-                      {rejoinDaysRemaining ? ` (${rejoinDaysRemaining} day${rejoinDaysRemaining > 1 ? 's' : ''} left)` : ''}.
+                      {hasJoinedBefore
+                        ? `Both the client and assigned consultant can rejoin this original room for follow-up questions${rejoinDaysRemaining ? ` (${rejoinDaysRemaining} day${rejoinDaysRemaining > 1 ? 's' : ''} left)` : ''}.`
+                        : `Both the client and assigned consultant can access this original room for consultation${rejoinDaysRemaining ? ` (${rejoinDaysRemaining} day${rejoinDaysRemaining > 1 ? 's' : ''} left)` : ''}.`}
                     </p>
                     {rejoinDeadline && (
                       <p className="text-[11px] text-amber-500 font-medium">
@@ -1571,8 +1608,12 @@ export default function MeetingPage() {
                   onClick={() => startCall()}
                   disabled={callStarted}
                 >
-                  <RotateCcw className="h-5 w-5" /> 
-                  {callStarted ? "Connecting to Room..." : (followUp?.status === "confirmed" ? "Join Confirmed Follow-up Call" : "Rejoin Video Call")}
+                  {hasJoinedBefore ? <RotateCcw className="h-5 w-5" /> : <Video className="h-5 w-5" />}
+                  {callStarted ? "Connecting to Room..." : (
+                    followUp?.status === "confirmed"
+                      ? (hasJoinedBefore ? "Rejoin Confirmed Follow-up Call" : "Join Confirmed Follow-up Call")
+                      : (hasJoinedBefore ? "Rejoin Meeting" : "Join Meeting")
+                  )}
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   Reuses the original consultation meeting room.

@@ -375,4 +375,61 @@ export const emailService = {
       return { success: false, error: error?.message || 'Unexpected error sending rejection email' };
     }
   },
+
+  /**
+   * Send post-session completed email immediately after a consultation has genuinely finished.
+   * Includes 7-day rejoin policy explanation, expiry date/time, and instructions for My Bookings and Consultant Dashboard.
+   * Idempotent: guards against duplicate dispatches.
+   */
+  async sendSessionCompletedEmail(bookingId: string): Promise<EmailSendResult> {
+    try {
+      if (!bookingId) {
+        return { success: false, error: 'Booking ID is required' };
+      }
+
+      const cleanId = bookingId.trim().replace(/^foundarly-/, '');
+      console.log(`[EmailService] Dispatching post-session completed email for booking: ${cleanId}`);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch('/api/send-booking-email', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          type: 'completed',
+          bookingId: cleanId,
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (response.ok && data?.success) {
+        console.log(`[EmailService] Post-session completed email response:`, data);
+        return {
+          success: true,
+          message: data.message || 'Post-session completion email sent successfully',
+          recipient: data.recipient,
+          userEmailId: data.clientEmailId,
+        };
+      }
+
+      const errMsg = data?.error || `Server returned ${response.status}`;
+      console.warn(`[EmailService] Post-session completion email returned error:`, errMsg);
+      return {
+        success: false,
+        error: errMsg,
+      };
+    } catch (err: any) {
+      console.error('[EmailService] Fatal error in sendSessionCompletedEmail:', err);
+      return {
+        success: false,
+        error: err?.message || 'Failed to dispatch post-session completion email',
+      };
+    }
+  },
 };
+

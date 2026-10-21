@@ -24,11 +24,14 @@ import {
   generateFollowUpDeclinedEmailText,
   generateParticipantWaitingEmailHTML,
   generateParticipantWaitingEmailText,
+  generateSessionCompletedEmailHTML,
+  generateSessionCompletedEmailText,
   EmailBookingData,
   EmailBookingRejectedData,
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
   EmailParticipantWaitingData,
+  EmailSessionCompletedData,
 } from "./src/utils/emailTemplates.js";
 import { sendEmail, verifySmtpConnection, getSmtpConfig, getSmtpAuditInfo } from "./src/server/mailer.js";
 import { createClient } from "@supabase/supabase-js";
@@ -38,9 +41,12 @@ import {
   parseSessionTimes,
   validateFollowUpTiming,
   checkBookingFollowUpEligibility,
+  formatRejoinExpiryDateTime,
   FollowUpRequest,
 } from "./src/utils/meetingRejoin.js";
 import { followUpStorage } from "./src/server/followUpStorage.js";
+import { completionEmailStorage } from "./src/server/completionEmailStorage.js";
+import { meetingParticipantStorage } from "./src/server/meetingParticipantStorage.js";
 
 dotenv.config();
 
@@ -494,12 +500,19 @@ async function startServer() {
 
       const followUp = await followUpStorage.getLatestByBookingId(booking.id);
 
+      const participantIdentifier = (user.id || user.email || 'unknown').trim().toLowerCase();
+      const hasJoined = meetingParticipantStorage.hasJoined(booking.id, participantIdentifier, authResult.role);
+      const participantHistory = meetingParticipantStorage.getParticipantHistory(booking.id, participantIdentifier, authResult.role);
+
       return res.json({
         success: true,
         authorized: true,
         canJoin: eligibility.canJoin,
-        isRejoin: eligibility.isRejoin,
+        hasJoined: Boolean(hasJoined),
+        isRejoin: Boolean(hasJoined),
+        isRejoinWindow: eligibility.isRejoin,
         sessionStatus: eligibility.sessionStatus,
+        participantHistory,
         role: authResult.role,
         booking: {
           id: booking.id,
@@ -546,6 +559,76 @@ async function startServer() {
 
   app.get("/api/meeting/:roomId/access", (req, res) => {
     handleMeetingAccessValidation(req.params.roomId, req, res);
+  });
+
+  // API Endpoint: Record participant join event
+  app.post("/api/meeting/record-join", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        error: auth.error || "Authentication required.",
+        code: "UNAUTHENTICATED",
+      });
+    }
+
+    const { roomId, bookingId, role } = req.body || {};
+    const targetRoomOrId = (bookingId || roomId || '').trim();
+    if (!targetRoomOrId) {
+      return res.status(400).json({
+        success: false,
+        error: "Room ID or Booking ID is required.",
+        code: "MISSING_ID",
+      });
+    }
+
+    try {
+      const cleanBookingId = targetRoomOrId.replace(/^foundarly-/, '');
+      const participantIdentifier = (auth.user.id || auth.user.email || 'unknown').trim().toLowerCase();
+
+      // Record join in server storage
+      const userEmail = auth.user.email ? auth.user.email.trim().toLowerCase() : undefined;
+      const result = meetingParticipantStorage.recordJoin(cleanBookingId, participantIdentifier, role, userEmail);
+
+      // Also update Supabase bookings table: set meeting_started_at if not set and increment participants_count
+      try {
+        const { data: bData } = await supabaseAdminClient
+          .from("bookings")
+          .select("id, meeting_started_at, participants_count")
+          .or(`id.eq.${cleanBookingId},meeting_room_id.eq.${targetRoomOrId},meeting_room_id.eq.foundarly-${cleanBookingId}`)
+          .maybeSingle();
+
+        if (bData) {
+          const updates: any = {
+            participants_count: (bData.participants_count || 0) + (result.isFirstJoin ? 1 : 0),
+          };
+          if (!bData.meeting_started_at) {
+            updates.meeting_started_at = new Date().toISOString();
+          }
+          await supabaseAdminClient
+            .from("bookings")
+            .update(updates)
+            .eq("id", bData.id);
+        }
+      } catch (dbErr) {
+        console.warn("[Server] Non-critical warning updating booking join in Supabase:", dbErr);
+      }
+
+      return res.json({
+        success: true,
+        hasJoined: true,
+        isFirstJoin: result.isFirstJoin,
+        joinCount: result.joinCount,
+        bookingId: cleanBookingId,
+      });
+    } catch (err: any) {
+      console.error("[Server] Error recording participant join:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to record participant join.",
+        code: "INTERNAL_ERROR",
+      });
+    }
   });
 
   // Cooldown tracker for waiting participant email notifications
@@ -2098,7 +2181,159 @@ async function startServer() {
         });
       }
 
-      // ── B. CONFIRMATION FLOW (CLIENT + CONSULTANT) ──
+      // ── B. POST-SESSION COMPLETION EMAIL FLOW (WITH 7-DAY REJOIN & DEDUPLICATION) ──
+      if (type === "completed") {
+        const targetBookingId = bookingId || emailData?.bookingId;
+        if (!targetBookingId) {
+          return res.status(400).json({
+            success: false,
+            error: "Booking ID is required to send completion email",
+          });
+        }
+
+        // Idempotency check: avoid duplicate completion emails when triggered multiple times
+        if (completionEmailStorage.isSent(targetBookingId)) {
+          console.log(`[Server Email] Post-session completion email already sent for booking: ${targetBookingId}. Skipping duplicate.`);
+          return res.json({
+            success: true,
+            message: "Post-session completion email already sent (idempotent)",
+            alreadySent: true,
+            bookingId: targetBookingId,
+          });
+        }
+
+        let bookingRecord: any = null;
+        let consultantRecord: any = null;
+
+        try {
+          const { data: bData } = await supabaseAdminClient
+            .from("bookings")
+            .select("*, consultants(name, email, title)")
+            .eq("id", targetBookingId)
+            .maybeSingle();
+
+          if (bData) {
+            bookingRecord = bData;
+            consultantRecord = Array.isArray(bData.consultants) ? bData.consultants[0] : bData.consultants;
+          }
+        } catch (fetchErr) {
+          console.warn("[Server Email] Warning fetching booking from database, using payload if present:", fetchErr);
+        }
+
+        const clientEmail = (bookingRecord?.email || emailData?.userEmail || "").toLowerCase().trim();
+        const clientName = bookingRecord?.name || emailData?.userName || "Client";
+        const consultantName = consultantRecord?.name || emailData?.consultantName || "Consultant";
+        const consultantEmail = (consultantRecord?.email || emailData?.consultantEmail || "").toLowerCase().trim();
+        const date = bookingRecord?.date || emailData?.date || new Date().toISOString().split("T")[0];
+        const time = bookingRecord?.time || emailData?.time || "Flexible";
+        const sessionDuration = bookingRecord?.session_duration || emailData?.duration || 60;
+        const meetingRoomId = bookingRecord?.meeting_room_id || emailData?.meetingRoomId || `foundarly-${targetBookingId}`;
+        const meetingLink = `${siteUrl}/meeting/${meetingRoomId}`;
+
+        const timing = parseSessionTimes({
+          date,
+          time,
+          session_duration: sessionDuration,
+          meeting_started_at: bookingRecord?.meeting_started_at,
+          meeting_ended_at: bookingRecord?.meeting_ended_at,
+        });
+        const rejoinDeadlineIso = timing.rejoinDeadline.toISOString();
+        const rejoinExpiryFormatted = formatRejoinExpiryDateTime(timing.rejoinDeadline);
+
+        if (!clientEmail || !clientEmail.includes("@")) {
+          return res.status(400).json({
+            success: false,
+            error: "Recipient client email address is missing or invalid.",
+          });
+        }
+
+        // 1. Send Completion & 7-Day Rejoin Email to Client
+        const clientPayload: EmailSessionCompletedData = {
+          bookingId: targetBookingId,
+          userName: clientName,
+          userEmail: clientEmail,
+          consultantName,
+          consultantEmail: consultantEmail || null,
+          recipientRole: "client",
+          recipientName: clientName,
+          recipientEmail: clientEmail,
+          date,
+          time,
+          sessionDuration,
+          meetingRoomId,
+          meetingLink,
+          rejoinDeadline: rejoinDeadlineIso,
+          rejoinExpiryFormatted,
+          rejoinDaysRemaining: 7,
+        };
+
+        const clientHtml = generateSessionCompletedEmailHTML(clientPayload);
+        const clientText = generateSessionCompletedEmailText(clientPayload);
+        const clientSubject = `Thank You for Attending Your Consultation with ${consultantName} | 7-Day Follow-Up Access Active`;
+
+        const clientMailRes = await sendEmail({
+          from: smtpConfig.defaultFrom,
+          to: clientEmail,
+          replyTo: smtpConfig.replyTo,
+          subject: clientSubject,
+          html: clientHtml,
+          text: clientText,
+        });
+
+        if (!clientMailRes.success) {
+          return res.status(500).json({
+            success: false,
+            error: clientMailRes.error || "Failed to send post-session completion email to client",
+            diagnostic: clientMailRes.diagnostic,
+            details: clientMailRes.details,
+          });
+        }
+
+        // 2. Also send Completion Email to Consultant if consultant email is available
+        let consultantEmailId = null;
+        if (consultantEmail && consultantEmail.includes("@") && consultantEmail !== clientEmail) {
+          try {
+            const consultantPayload: EmailSessionCompletedData = {
+              ...clientPayload,
+              recipientRole: "consultant",
+              recipientName: consultantName,
+              recipientEmail: consultantEmail,
+            };
+            const consHtml = generateSessionCompletedEmailHTML(consultantPayload);
+            const consText = generateSessionCompletedEmailText(consultantPayload);
+            const consSubject = `Session Completed: Consultation with ${clientName} | 7-Day Follow-Up Active`;
+
+            const consMailRes = await sendEmail({
+              from: smtpConfig.defaultFrom,
+              to: consultantEmail,
+              replyTo: smtpConfig.replyTo,
+              subject: consSubject,
+              html: consHtml,
+              text: consText,
+            });
+            if (consMailRes.success) {
+              consultantEmailId = consMailRes.messageId;
+            }
+          } catch (consErr) {
+            console.warn("[Server Email] Consultant completion email warning:", consErr);
+          }
+        }
+
+        // Mark as sent in persistent storage to prevent duplicates
+        completionEmailStorage.markSent(targetBookingId);
+
+        return res.json({
+          success: true,
+          message: "Post-session completion email sent successfully",
+          clientEmailId: clientMailRes.messageId,
+          consultantEmailId,
+          recipient: clientEmail,
+          rejoinDeadline: rejoinDeadlineIso,
+          rejoinExpiryFormatted,
+        });
+      }
+
+      // ── C. CONFIRMATION FLOW (CLIENT + CONSULTANT) ──
       let dataToSend: EmailBookingData = emailData;
 
       if (!dataToSend || !dataToSend.userEmail) {

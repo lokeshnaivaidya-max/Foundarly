@@ -92,21 +92,39 @@ describe('Foundarly Super Admin & Developer Admin Role Hierarchy Suite', () => {
   });
 
   // ==========================================================================
-  // Test 3: Developer Admin can access approved technical functions only
   // ==========================================================================
-  test('3. Developer Admin can access approved technical functions only', () => {
+  // Test 3: Developer Admin can access all ordinary operational admin functions and developer tools
+  // ==========================================================================
+  test('3. Developer Admin can access all ordinary operational admin functions and developer tools', () => {
     // Identity verification
     assert.equal(isDeveloperAdmin(devAdminUser, devAdminProfile), true);
     assert.equal(isSuperAdmin(devAdminUser, devAdminProfile), false);
     assert.equal(isUserAdmin(devAdminUser, devAdminProfile), true);
     assert.equal(getUserEffectiveRole(devAdminUser, devAdminProfile), 'developer_admin');
 
-    // Approved technical areas
+    // Approved operational & technical areas
     assert.equal(canAccessSection('developer_admin', 'overview'), true);
     assert.equal(canAccessSection('developer_admin', 'developer'), true);
     assert.equal(canAccessSection('developer_admin', 'logs'), true);
     assert.equal(canAccessSection('developer_admin', 'faqs'), true);
     assert.equal(canAccessSection('developer_admin', 'blog'), true);
+    assert.equal(canAccessSection('developer_admin', 'bookings'), true);
+    assert.equal(canAccessSection('developer_admin', 'consultants'), true);
+    assert.equal(canAccessSection('developer_admin', 'consultant_applications'), true);
+    assert.equal(canAccessSection('developer_admin', 'payouts'), true);
+    assert.equal(canAccessSection('developer_admin', 'pricing'), true);
+    assert.equal(canAccessSection('developer_admin', 'content'), true);
+    assert.equal(canAccessSection('developer_admin', 'categories'), true);
+    assert.equal(canAccessSection('developer_admin', 'referrals'), true);
+    assert.equal(canAccessSection('developer_admin', 'testimonials'), true);
+    assert.equal(canAccessSection('developer_admin', 'settings'), true);
+    assert.equal(canAccessSection('developer_admin', 'users'), true);
+    assert.equal(canAccessSection('developer_admin', 'networking'), true);
+
+    // Operational permissions
+    assert.equal(canAccessFinancials(devAdminUser, devAdminProfile), true);
+    assert.equal(canManageUsers(devAdminUser, devAdminProfile), true);
+    assert.equal(canManageSettings(devAdminUser, devAdminProfile), true);
   });
 
   // ==========================================================================
@@ -130,29 +148,15 @@ describe('Foundarly Super Admin & Developer Admin Role Hierarchy Suite', () => {
   });
 
   // ==========================================================================
-  // Test 5: Developer Admin cannot access restricted financial, user-management, or security operations
+  // Test 5: Developer Admin is strictly restricted from administrator account management and role mutations
   // ==========================================================================
-  test('5. Developer Admin cannot access restricted financial, user-management, or security operations', () => {
-    // Financial and billing restrictions
-    assert.equal(canAccessFinancials(devAdminUser, devAdminProfile), false);
-    assert.equal(canAccessSection('developer_admin', 'payouts'), false);
-    assert.equal(canAccessSection('developer_admin', 'pricing'), false);
-
-    // User account and credential restrictions
-    assert.equal(canManageUsers(devAdminUser, devAdminProfile), false);
-    assert.equal(canAccessSection('developer_admin', 'users'), false);
-
-    // Security policies and platform settings restrictions
-    assert.equal(canManageSettings(devAdminUser, devAdminProfile), false);
-    assert.equal(canAccessSection('developer_admin', 'settings'), false);
-
-    // Administrator management restriction
+  test('5. Developer Admin is strictly restricted from administrator account management and role mutations', () => {
+    // Administrator account management restriction
+    assert.equal(canManageAdministrators(devAdminUser, devAdminProfile), false);
     assert.equal(canAccessSection('developer_admin', 'administrators'), false);
 
-    // Consultant and booking operational controls restriction
-    assert.equal(canAccessSection('developer_admin', 'consultants'), false);
-    assert.equal(canAccessSection('developer_admin', 'consultant_applications'), false);
-    assert.equal(canAccessSection('developer_admin', 'bookings'), false);
+    // Role mutation protection: Only Super Admin can mutate admin roles
+    assert.equal(canManageAdministrators(superAdminUser, superAdminProfile), true);
   });
 
   // ==========================================================================
@@ -271,12 +275,13 @@ describe('Foundarly Super Admin & Developer Admin Role Hierarchy Suite', () => {
     // Must change password policy flag
     assert.equal(targetDevAccount.user_metadata.must_change_password, true);
 
-    // Access capabilities: Technical only
+    // Access capabilities: Full operational and technical access, strictly excluding administrators
     assert.equal(canAccessSection(targetDevProfile.role, 'developer'), true);
     assert.equal(canAccessSection(targetDevProfile.role, 'logs'), true);
-    assert.equal(canAccessSection(targetDevProfile.role, 'payouts'), false);
-    assert.equal(canAccessSection(targetDevProfile.role, 'users'), false);
+    assert.equal(canAccessSection(targetDevProfile.role, 'payouts'), true);
+    assert.equal(canAccessSection(targetDevProfile.role, 'users'), true);
     assert.equal(canAccessSection(targetDevProfile.role, 'administrators'), false);
+
   });
 
   // ==========================================================================

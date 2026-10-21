@@ -3139,8 +3139,8 @@ async function startServer() {
     }
   });
 
-  // API Route: Send Consultant Application Status Notification (Approved / Rejected) - Super Admin Protected
-  app.post("/api/send-application-email", requireSuperAdminAuth, async (req, res) => {
+  // API Route: Send Consultant Application Status Notification (Approved / Rejected) - Admin Protected
+  app.post("/api/send-application-email", requireAdminAuth, async (req, res) => {
     try {
       const { type, applicationData } = req.body || {};
 

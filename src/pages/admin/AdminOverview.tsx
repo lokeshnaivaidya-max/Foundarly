@@ -24,12 +24,6 @@ export default function AdminOverview() {
   const { formatPrice } = useCurrency();
   const navigate = useNavigate();
   const { isSuperAdmin, isDeveloperAdmin } = useAuth();
-
-  useEffect(() => {
-    if (isDeveloperAdmin && !isSuperAdmin) {
-      navigate('/admin/developer', { replace: true });
-    }
-  }, [isDeveloperAdmin, isSuperAdmin, navigate]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 

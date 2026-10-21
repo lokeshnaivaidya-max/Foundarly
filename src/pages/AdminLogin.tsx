@@ -21,10 +21,7 @@ export default function AdminLoginPage() {
   useEffect(() => {
     if (!authLoading && user) {
       const fromPath = (location.state as any)?.from?.pathname;
-      if (isDeveloperAdmin(user, profile)) {
-        const validDevFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin/developer')) ? fromPath : '/admin/developer';
-        navigate(validDevFrom, { replace: true });
-      } else if (isSuperAdmin(user, profile) || isUserAdmin(user, profile)) {
+      if (isDeveloperAdmin(user, profile) || isSuperAdmin(user, profile) || isUserAdmin(user, profile)) {
         const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
         navigate(validAdminFrom, { replace: true });
       } else if (profile?.role === 'consultant' || profile?.is_consultant) {
@@ -65,7 +62,9 @@ export default function AdminLoginPage() {
 
       if (isDeveloperAdmin(user, activeProfile)) {
         toast.success("Successfully authenticated as Developer Admin");
-        navigate("/admin/developer", { replace: true });
+        const fromPath = (location.state as any)?.from?.pathname;
+        const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
+        navigate(validAdminFrom, { replace: true });
         return;
       }
 

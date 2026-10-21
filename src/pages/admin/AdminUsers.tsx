@@ -67,6 +67,14 @@ export default function AdminUsers() {
   };
 
   const openEdit = (user: Profile) => {
+    if (!isSuperAdmin) {
+      toast({
+        title: "Permission Denied",
+        description: "Only Super Administrators can modify user roles.",
+        variant: "destructive"
+      });
+      return;
+    }
     setSelectedUser(user);
     setNewRole(user.role);
     setDialogOpen(true);
@@ -74,6 +82,15 @@ export default function AdminUsers() {
 
   const handleSave = async () => {
     if (!selectedUser) return;
+
+    if (!isSuperAdmin) {
+      toast({
+        title: "Permission Denied",
+        description: "Only Super Administrators can modify user roles.",
+        variant: "destructive"
+      });
+      return;
+    }
     
     // Prevent self-demotion
     if (selectedUser.id === currentUser?.id && newRole !== 'super_admin' && newRole !== 'admin') {
@@ -186,14 +203,20 @@ export default function AdminUsers() {
                     {new Date(u.created_at).toLocaleDateString()}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="text-xs text-primary"
-                      onClick={() => openEdit(u)}
-                    >
-                      Edit Role
-                    </Button>
+                    {isSuperAdmin ? (
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-xs text-primary"
+                        onClick={() => openEdit(u)}
+                      >
+                        Edit Role
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/60 italic font-mono">
+                        Super Admin Only
+                      </span>
+                    )}
                   </TableCell>
                 </TableRow>
               );

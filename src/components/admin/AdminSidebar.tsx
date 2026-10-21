@@ -53,11 +53,12 @@ export default function AdminSidebar() {
     navigate("/login", { replace: true });
   };
 
-  // Super Admin Menu Items (Full Platform Control)
-  const superAdminMenuItems = [
+  // Complete admin menu items with conditional admin-management & technical tools
+  const primaryMenuItems = [
     { title: "Dashboard", url: "/admin", icon: LayoutDashboard },
-    { title: "Manage Administrators", url: "/admin/administrators", icon: ShieldCheck },
+    ...(isSuperAdmin ? [{ title: "Manage Administrators", url: "/admin/administrators", icon: ShieldCheck }] : []),
     { title: "Developer & Health", url: "/admin/developer", icon: Activity },
+    { title: "Sanitized Logs", url: "/admin/developer/logs", icon: FileCode },
     { title: "Manage Users", url: "/admin/users", icon: UsersRound },
     { title: "Manage Consultants", url: "/admin/consultants", icon: Users },
     { title: "Consultant Applications", url: "/admin/consultant-applications", icon: UserPlus },
@@ -75,15 +76,7 @@ export default function AdminSidebar() {
     { title: "Platform Settings", url: "/admin/settings", icon: Settings },
   ];
 
-  // Developer Admin Menu Items (Strictly Technical & Maintenance Scope)
-  const developerAdminMenuItems = [
-    { title: "System Health & Tools", url: "/admin/developer", icon: Activity },
-    { title: "Sanitized Logs", url: "/admin/developer/logs", icon: FileCode },
-    { title: "FAQs & Knowledge", url: "/admin/faqs", icon: HelpCircle },
-    { title: "Blog & Release Notes", url: "/admin/blog", icon: FileText },
-  ];
-
-  // Networking items (Super Admin only)
+  // Networking items (Accessible to all administrators)
   const networkingMenuItems = [
     { title: "Channels", url: "/admin/networking/channels", icon: Hash },
     { title: "Groups", url: "/admin/networking/groups", icon: UsersIcon },
@@ -91,12 +84,6 @@ export default function AdminSidebar() {
     { title: "Showcases", url: "/admin/networking/showcases", icon: Network },
     { title: "Reports", url: "/admin/networking/reports", icon: AlertTriangle },
   ];
-
-  const primaryMenuItems = isSuperAdmin 
-    ? superAdminMenuItems 
-    : isDeveloperAdmin 
-      ? developerAdminMenuItems 
-      : [];
 
   return (
     <Sidebar collapsible="icon" className="border-r border-border bg-background">
@@ -120,7 +107,7 @@ export default function AdminSidebar() {
 
         <SidebarGroup>
           <SidebarGroupLabel className="text-muted-foreground text-xs uppercase tracking-widest mb-2">
-            {!collapsed && (isDeveloperAdmin ? "Technical Console" : "Admin Panel")}
+            {!collapsed && "Admin Panel"}
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -143,8 +130,8 @@ export default function AdminSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Networking Control - Strictly Super Admin */}
-        {isSuperAdmin && (
+        {/* Networking Control */}
+        {(isSuperAdmin || isDeveloperAdmin) && (
           <SidebarGroup>
             <SidebarGroupLabel className="text-muted-foreground text-xs uppercase tracking-widest mb-2">
               {!collapsed && "Networking Control"}

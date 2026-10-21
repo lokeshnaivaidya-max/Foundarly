@@ -141,26 +141,26 @@ const App = () => (
                       <Route path="developer" element={<DeveloperPortal />} />
                       <Route path="developer/logs" element={<DeveloperPortal defaultTab="logs" />} />
                       <Route path="administrators" element={<ProtectedRoute requireSuperAdmin><AdminAdministrators /></ProtectedRoute>} />
-                      <Route path="users" element={<ProtectedRoute requireSuperAdmin><AdminUsers /></ProtectedRoute>} />
-                      <Route path="settings" element={<ProtectedRoute requireSuperAdmin><AdminSettings /></ProtectedRoute>} />
-                      <Route path="pricing" element={<ProtectedRoute requireSuperAdmin><AdminPricing /></ProtectedRoute>} />
-                      <Route path="bookings" element={<ProtectedRoute requireSuperAdmin><AdminBookings /></ProtectedRoute>} />
-                      <Route path="payouts" element={<ProtectedRoute requireSuperAdmin><AdminPayouts /></ProtectedRoute>} />
-                      <Route path="payments" element={<ProtectedRoute requireSuperAdmin><AdminPayments /></ProtectedRoute>} />
-                      <Route path="upi-verification" element={<ProtectedRoute requireSuperAdmin><UPIVerification /></ProtectedRoute>} />
-                      <Route path="consultants" element={<ProtectedRoute requireSuperAdmin><AdminConsultants /></ProtectedRoute>} />
-                      <Route path="consultant-applications" element={<ProtectedRoute requireSuperAdmin><AdminConsultantApplications /></ProtectedRoute>} />
-                      <Route path="content" element={<ProtectedRoute requireSuperAdmin><AdminContent /></ProtectedRoute>} />
-                      <Route path="categories" element={<ProtectedRoute requireSuperAdmin><AdminCategories /></ProtectedRoute>} />
-                      <Route path="referrals" element={<ProtectedRoute requireSuperAdmin><AdminReferrals /></ProtectedRoute>} />
-                      <Route path="testimonials" element={<ProtectedRoute requireSuperAdmin><AdminTestimonials /></ProtectedRoute>} />
+                      <Route path="users" element={<AdminUsers />} />
+                      <Route path="settings" element={<AdminSettings />} />
+                      <Route path="pricing" element={<AdminPricing />} />
+                      <Route path="bookings" element={<AdminBookings />} />
+                      <Route path="payouts" element={<AdminPayouts />} />
+                      <Route path="payments" element={<AdminPayments />} />
+                      <Route path="upi-verification" element={<UPIVerification />} />
+                      <Route path="consultants" element={<AdminConsultants />} />
+                      <Route path="consultant-applications" element={<AdminConsultantApplications />} />
+                      <Route path="content" element={<AdminContent />} />
+                      <Route path="categories" element={<AdminCategories />} />
+                      <Route path="referrals" element={<AdminReferrals />} />
+                      <Route path="testimonials" element={<AdminTestimonials />} />
                       <Route path="blog" element={<AdminBlog />} />
                       <Route path="faqs" element={<AdminFAQs />} />
-                      <Route path="networking/channels" element={<ProtectedRoute requireSuperAdmin><AdminNetworkingChannels /></ProtectedRoute>} />
-                      <Route path="networking/groups" element={<ProtectedRoute requireSuperAdmin><AdminNetworkingGroups /></ProtectedRoute>} />
-                      <Route path="networking/messages" element={<ProtectedRoute requireSuperAdmin><AdminNetworkingMessages /></ProtectedRoute>} />
-                      <Route path="networking/showcases" element={<ProtectedRoute requireSuperAdmin><AdminNetworkingShowcases /></ProtectedRoute>} />
-                      <Route path="networking/reports" element={<ProtectedRoute requireSuperAdmin><AdminNetworkingReports /></ProtectedRoute>} />
+                      <Route path="networking/channels" element={<AdminNetworkingChannels />} />
+                      <Route path="networking/groups" element={<AdminNetworkingGroups />} />
+                      <Route path="networking/messages" element={<AdminNetworkingMessages />} />
+                      <Route path="networking/showcases" element={<AdminNetworkingShowcases />} />
+                      <Route path="networking/reports" element={<AdminNetworkingReports />} />
                     </Route>
                     <Route path="/404" element={<NotFound />} />
                     <Route path="*" element={<NotFound />} />

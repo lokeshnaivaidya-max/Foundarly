@@ -229,12 +229,12 @@ export default function Header() {
 
           {/* Primary CTA - Role based */}
           {isAdminRole ? (
-            <Link to={isDeveloperAdmin ? "/admin/developer" : "/admin"}>
+            <Link to="/admin">
               <Button
                 size="sm"
                 className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs xl:text-sm shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 rounded-full px-4 xl:px-5 py-2"
               >
-                {isDeveloperAdmin ? "Developer Portal" : "Admin Dashboard"}
+                Admin Dashboard
               </Button>
             </Link>
           ) : isConsultantRole ? (
@@ -305,7 +305,7 @@ export default function Header() {
                 <DropdownMenuSeparator className="my-1 bg-border/60" />
                 <DropdownMenuGroup>
                   <DropdownMenuItem
-                    onClick={() => navigate(isDeveloperAdmin ? "/admin/developer" : isSuperAdmin ? "/admin" : isConsultantRole ? "/consultant/dashboard" : "/my-bookings")}
+                    onClick={() => navigate(isAdminRole ? "/admin" : isConsultantRole ? "/consultant/dashboard" : "/my-bookings")}
                     className="cursor-pointer rounded-lg px-2.5 py-2 text-xs font-medium focus:bg-primary/10 focus:text-primary transition-colors"
                   >
                     <User className="mr-2 h-4 w-4 text-muted-foreground" />

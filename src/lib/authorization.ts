@@ -160,7 +160,9 @@ export function sanitizeUserRole(
 
 /**
  * Fine-grained permission checker for admin sections.
- * Strictly separates Super Admin executive powers from Developer Admin technical scope.
+ * Super Admin has full platform access.
+ * Developer Admin can access all ordinary operational admin sections plus developer tools,
+ * but CANNOT access 'administrators' (admin account management & role assignment).
  */
 export function canAccessSection(
   role: 'super_admin' | 'developer_admin' | 'consultant' | 'client' | 'admin' | string | null | undefined,
@@ -173,16 +175,10 @@ export function canAccessSection(
     return true;
   }
 
-  // Developer Admin permissions: Technical health, non-sensitive configs, diagnostics & redacted logs, FAQs
+  // Developer Admin permissions: Full access to all ordinary admin sections plus developer tools,
+  // strictly excluding 'administrators' (admin-account management & role assignment)
   if (role === 'developer_admin') {
-    const devAllowedSections: AdminSection[] = [
-      'overview',
-      'developer',
-      'logs',
-      'faqs',
-      'blog',
-    ];
-    return devAllowedSections.includes(section);
+    return section !== 'administrators';
   }
 
   // Clients and Consultants have no admin section access
@@ -198,25 +194,35 @@ export function canManageAdministrators(user?: User | null, profile?: Profile | 
 }
 
 /**
- * Check if the user can access financial data, payouts, and sensitive billing details.
+ * Check if the user can mutate user roles (promote, demote, or assign admin privileges).
  * STRICTLY restricted to Super Admin.
+ */
+export function canMutateUserRoles(user?: User | null, profile?: Profile | null): boolean {
+  return isSuperAdmin(user, profile);
+}
+
+/**
+ * Check if the user can access financial data, payouts, and billing records.
+ * Accessible to Super Admin and Developer Admin for operational monitoring.
  */
 export function canAccessFinancials(user?: User | null, profile?: Profile | null): boolean {
-  return isSuperAdmin(user, profile);
+  return isUserAdmin(user, profile);
 }
 
 /**
- * Check if the user can manage user accounts and profile credentials.
- * STRICTLY restricted to Super Admin.
+ * Check if the user can view and manage user records.
+ * General user management is accessible to all administrators,
+ * while privileged role modifications are strictly gated by canMutateUserRoles.
  */
 export function canManageUsers(user?: User | null, profile?: Profile | null): boolean {
-  return isSuperAdmin(user, profile);
+  return isUserAdmin(user, profile);
 }
 
 /**
- * Check if the user can manage platform settings and secrets.
- * STRICTLY restricted to Super Admin.
+ * Check if the user can manage platform settings.
+ * Accessible to Super Admin and Developer Admin.
  */
 export function canManageSettings(user?: User | null, profile?: Profile | null): boolean {
-  return isSuperAdmin(user, profile);
+  return isUserAdmin(user, profile);
 }
+

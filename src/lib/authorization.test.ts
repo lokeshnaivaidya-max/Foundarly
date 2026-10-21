@@ -98,26 +98,32 @@ describe('Authorization & Admin Role Hierarchy Security Suite', () => {
       expect(canAccessSection(superRole, 'logs')).toBe(true);
     });
 
-    it('Developer Admin is strictly restricted to technical diagnostics', () => {
+    it('Developer Admin can access all ordinary operational admin sections plus developer tools', () => {
       const devRole = 'developer_admin';
-      // Allowed technical areas:
+      // Allowed operational & technical areas:
+      expect(canAccessSection(devRole, 'overview')).toBe(true);
       expect(canAccessSection(devRole, 'developer')).toBe(true);
       expect(canAccessSection(devRole, 'logs')).toBe(true);
       expect(canAccessSection(devRole, 'faqs')).toBe(true);
       expect(canAccessSection(devRole, 'blog')).toBe(true);
+      expect(canAccessSection(devRole, 'bookings')).toBe(true);
+      expect(canAccessSection(devRole, 'consultants')).toBe(true);
+      expect(canAccessSection(devRole, 'consultant_applications')).toBe(true);
+      expect(canAccessSection(devRole, 'payouts')).toBe(true);
+      expect(canAccessSection(devRole, 'pricing')).toBe(true);
+      expect(canAccessSection(devRole, 'settings')).toBe(true);
+      expect(canAccessSection(devRole, 'users')).toBe(true);
+      expect(canAccessSection(devRole, 'content')).toBe(true);
+      expect(canAccessSection(devRole, 'categories')).toBe(true);
+      expect(canAccessSection(devRole, 'referrals')).toBe(true);
+      expect(canAccessSection(devRole, 'testimonials')).toBe(true);
+      expect(canAccessSection(devRole, 'networking')).toBe(true);
 
-      // FORBIDDEN executive & sensitive areas:
+      // STRICTLY FORBIDDEN: Administrator account management & role assignment:
       expect(canAccessSection(devRole, 'administrators')).toBe(false);
-      expect(canAccessSection(devRole, 'users')).toBe(false);
-      expect(canAccessSection(devRole, 'payouts')).toBe(false);
-      expect(canAccessSection(devRole, 'pricing')).toBe(false);
-      expect(canAccessSection(devRole, 'settings')).toBe(false);
-      expect(canAccessSection(devRole, 'consultants')).toBe(false);
-      expect(canAccessSection(devRole, 'consultant_applications')).toBe(false);
-      expect(canAccessSection(devRole, 'bookings')).toBe(false);
     });
 
-    it('Permission functions strictly protect executive operations', () => {
+    it('Permission functions strictly protect administrator account management and role mutations', () => {
       const superUser = { id: 'admin-1', email: allowlistedAdminEmail };
       const superProfile = { id: 'admin-1', role: 'super_admin' as const, full_name: 'Super Admin' };
 
@@ -130,11 +136,14 @@ describe('Authorization & Admin Role Hierarchy Security Suite', () => {
       expect(canManageUsers(superUser, superProfile)).toBe(true);
       expect(canManageSettings(superUser, superProfile)).toBe(true);
 
-      // Developer Admin blocked from all executive operations
+      // Developer Admin has operational access to ordinary admin tools
+      expect(canAccessFinancials(devUser, devProfile)).toBe(true);
+      expect(canManageUsers(devUser, devProfile)).toBe(true);
+      expect(canManageSettings(devUser, devProfile)).toBe(true);
+
+      // Developer Admin is STRICTLY blocked from managing administrator accounts
       expect(canManageAdministrators(devUser, devProfile)).toBe(false);
-      expect(canAccessFinancials(devUser, devProfile)).toBe(false);
-      expect(canManageUsers(devUser, devProfile)).toBe(false);
-      expect(canManageSettings(devUser, devProfile)).toBe(false);
     });
   });
 });
+

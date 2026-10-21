@@ -276,7 +276,8 @@ function getCanonicalRoomId(currentRoomId?: string, currentBooking?: any): strin
 }
 
 export default function MeetingPage() {
-  const { roomId } = useParams<{ roomId: string }>();
+  const { roomId, bookingId } = useParams<{ roomId?: string; bookingId?: string }>();
+  const effectiveRoomId = (roomId || bookingId || "").trim();
   const navigate = useNavigate();
   const { user, profile, isAdmin, loading: authLoading } = useAuth();
 
@@ -333,7 +334,7 @@ export default function MeetingPage() {
   const hasTriggeredNotificationRef = useRef(false);
 
   const handleManualNotifyWaiting = useCallback(async () => {
-    const canonicalRoom = getCanonicalRoomId(roomId, booking);
+    const canonicalRoom = getCanonicalRoomId(effectiveRoomId, booking);
     if (!canonicalRoom) return;
     setWaitingNotificationSending(true);
     try {
@@ -353,11 +354,11 @@ export default function MeetingPage() {
     } finally {
       setWaitingNotificationSending(false);
     }
-  }, [roomId, booking]);
+  }, [effectiveRoomId, booking]);
 
   // Copy meeting link to clipboard
   const copyMeetingLink = () => {
-    const canonicalRoom = getCanonicalRoomId(roomId, booking);
+    const canonicalRoom = getCanonicalRoomId(effectiveRoomId, booking);
     const meetingUrl = `${window.location.origin}/meeting/${canonicalRoom}`;
     navigator.clipboard.writeText(meetingUrl).then(() => {
       setLinkCopied(true);
@@ -370,9 +371,9 @@ export default function MeetingPage() {
 
   // Periodic refresh of server-validated session access
   const loadMeetingAccess = useCallback(async () => {
-    if (!roomId) return;
+    if (!effectiveRoomId) return;
     try {
-      const accessResult = await meetingService.validateAccess(roomId);
+      const accessResult = await meetingService.validateAccess(effectiveRoomId);
 
       if (!accessResult.success || !accessResult.authorized) {
         setAccessError({
@@ -408,9 +409,9 @@ export default function MeetingPage() {
       setUserRole(accessResult.role || null);
       setFollowUp(accessResult.followUp || null);
 
-      const canonicalRoom = getCanonicalRoomId(roomId, accessResult.booking);
-      if (roomId && roomId !== canonicalRoom) {
-        console.log(`[Meeting] Canonicalizing room URL from ${roomId} to ${canonicalRoom}`);
+      const canonicalRoom = getCanonicalRoomId(effectiveRoomId, accessResult.booking);
+      if (effectiveRoomId && effectiveRoomId !== canonicalRoom) {
+        console.log(`[Meeting] Canonicalizing room URL from ${effectiveRoomId} to ${canonicalRoom}`);
         window.history.replaceState(null, '', `/meeting/${canonicalRoom}`);
       }
 
@@ -428,17 +429,17 @@ export default function MeetingPage() {
     } finally {
       setLoading(false);
     }
-  }, [roomId]);
+  }, [effectiveRoomId]);
 
   useEffect(() => {
     if (authLoading) return;
     
     if (!user) { 
-      navigate("/login", { state: { from: `/meeting/${roomId}` } }); 
+      navigate("/login", { state: { from: `/meeting/${effectiveRoomId}` } }); 
       return; 
     }
     
-    if (!roomId) { 
+    if (!effectiveRoomId) { 
       setManualEntry(true); 
       setLoading(false); 
       return; 
@@ -447,7 +448,7 @@ export default function MeetingPage() {
     loadMeetingAccess();
     const interval = setInterval(loadMeetingAccess, 45000);
     return () => clearInterval(interval);
-  }, [user, roomId, navigate, authLoading, loadMeetingAccess]);
+  }, [user, effectiveRoomId, navigate, authLoading, loadMeetingAccess]);
 
   // Timer countdown during active call
   useEffect(() => {
@@ -502,7 +503,7 @@ export default function MeetingPage() {
         : "Connecting to real-time WebRTC video call..."
       );
 
-      const canonicalRoom = getCanonicalRoomId(roomId, booking);
+      const canonicalRoom = getCanonicalRoomId(effectiveRoomId, booking);
 
       // Record participant join locally and on server
       if (booking) {
@@ -601,7 +602,7 @@ export default function MeetingPage() {
       setCallStarted(false);
       setCallStartTime(null);
     }
-  }, [booking, roomId, user, videoOff, muted]);
+  }, [booking, effectiveRoomId, user, videoOff, muted]);
 
   const endCall = async () => {
     try {
@@ -1479,7 +1480,7 @@ export default function MeetingPage() {
               <div className="space-y-3">
                 <div className="bg-secondary/50 border border-border rounded-lg p-3">
                   <p className="text-xs text-muted-foreground mb-1">Meeting ID</p>
-                  <p className="font-mono text-sm font-medium">{getCanonicalRoomId(roomId, booking)}</p>
+                  <p className="font-mono text-sm font-medium">{getCanonicalRoomId(effectiveRoomId, booking)}</p>
                 </div>
 
                 {/* Shareable Link */}
@@ -1509,7 +1510,7 @@ export default function MeetingPage() {
                     </Button>
                   </div>
                   <p className="font-mono text-xs text-muted-foreground break-all">
-                    {window.location.origin}/meeting/{getCanonicalRoomId(roomId, booking)}
+                    {window.location.origin}/meeting/{getCanonicalRoomId(effectiveRoomId, booking)}
                   </p>
                 </div>
               </div>

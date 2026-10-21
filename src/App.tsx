@@ -124,6 +124,7 @@ const App = () => (
                     <Route path="/networking-terms" element={<NetworkingTerms />} />
                     <Route path="/camera-test" element={<CameraTest />} />
                     <Route path="/meeting/:roomId" element={<Meeting />} />
+                    <Route path="/meeting/booking/:bookingId" element={<Meeting />} />
                     <Route path="/review/:bookingId" element={<Review />} />
                     <Route path="/upi-payment" element={<UPIPaymentPage />} />
                     <Route path="/login" element={<Login />} />

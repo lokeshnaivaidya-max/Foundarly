@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { 
   Search, Download, Video, Trash2, Copy, Check, ExternalLink, 
   Mail, CheckCircle, X, CreditCard, FileText, XCircle,
-  Clock, RefreshCw, AlertTriangle
+  Clock, RefreshCw, AlertTriangle, Send
 } from "lucide-react";
 import { validateUUID } from "@/utils/security";
 import { Input } from "@/components/ui/input";

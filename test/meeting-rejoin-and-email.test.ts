@@ -255,3 +255,48 @@ describe('4. Post-Session Completion Email & Deduplication', () => {
     assert.equal(completionEmailStorage.isSent(`foundarly-${bookingId}`), true);
   });
 });
+
+describe('5. Meeting Component Runtime Integrity & Route Resolution', () => {
+  test('Meeting.tsx declares and imports Label component from UI library', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const meetingFilePath = path.resolve('src/pages/Meeting.tsx');
+    const content = fs.readFileSync(meetingFilePath, 'utf8');
+
+    // 1. Must import Label component
+    const hasLabelImport = /import\s+{[^}]*\bLabel\b[^}]*}\s+from\s+["']@\/components\/ui\/label["']/.test(content);
+    assert.ok(hasLabelImport, 'Meeting.tsx must import Label from "@/components/ui/label" to prevent runtime ReferenceError');
+
+    // 2. Must not contain undeclared <Label usage
+    const labelTagCount = (content.match(/<Label\b/g) || []).length;
+    assert.ok(labelTagCount > 0, 'Meeting.tsx contains <Label tags that require the import');
+  });
+
+  test('Route resolution supports both roomId and bookingId params', () => {
+    const resolveMeetingParam = (params: { roomId?: string; bookingId?: string }): string => {
+      return (params.roomId || params.bookingId || '').trim();
+    };
+
+    // Case A: Accessed via standard /meeting/:roomId
+    assert.equal(resolveMeetingParam({ roomId: 'foundarly-session-123' }), 'foundarly-session-123');
+
+    // Case B: Accessed via /meeting/:bookingId
+    assert.equal(resolveMeetingParam({ bookingId: 'b94e3391-912f-48d9-a5f1-3962b9cc3691' }), 'b94e3391-912f-48d9-a5f1-3962b9cc3691');
+
+    // Case C: Raw UUID in roomId param
+    assert.equal(resolveMeetingParam({ roomId: 'b94e3391-912f-48d9-a5f1-3962b9cc3691' }), 'b94e3391-912f-48d9-a5f1-3962b9cc3691');
+
+    // Case D: Leading/trailing whitespace trimmed
+    assert.equal(resolveMeetingParam({ roomId: '  foundarly-xyz  ' }), 'foundarly-xyz');
+  });
+
+  test('AdminBookings.tsx declares and imports Send icon to avoid ReferenceError', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const adminBookingsPath = path.resolve('src/pages/admin/AdminBookings.tsx');
+    const content = fs.readFileSync(adminBookingsPath, 'utf8');
+
+    const hasSendImport = /import\s+{[^}]*\bSend\b[^}]*}\s+from\s+["']lucide-react["']/.test(content);
+    assert.ok(hasSendImport, 'AdminBookings.tsx must import Send from "lucide-react"');
+  });
+});

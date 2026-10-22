@@ -570,12 +570,16 @@ export const consultantDashboardService = {
         };
       }
 
-      // Preserve admin pricing from consultant record
+      // Preserve admin pricing & existing social_links from consultant record
       const { data: currentRecord } = await supabase
         .from("consultants")
-        .select("pricing_30, pricing_60")
+        .select("pricing_30, pricing_60, social_links")
         .eq("id", consultant.id)
         .maybeSingle();
+
+      const existingSocial = (currentRecord?.social_links && typeof currentRecord.social_links === 'object')
+        ? (currentRecord.social_links as Record<string, any>)
+        : {};
 
       const mergedSettings: ConsultantAvailabilitySettings = {
         ...settings,
@@ -589,17 +593,54 @@ export const consultantDashboardService = {
 
       const serialized = serializeAvailabilitySettings(mergedSettings);
 
-      const { error: updateError } = await supabase
+      // Primary payload: updates availability, preferred_time, social_links, and availability_settings column
+      const payloadWithColumn: Record<string, any> = {
+        availability: serialized.availabilityJson,
+        availability_settings: mergedSettings as any,
+        preferred_time: serialized.preferredTimeText,
+        social_links: {
+          ...existingSocial,
+          availability_settings: mergedSettings,
+        },
+      };
+
+      let { error: updateError } = await supabase
         .from("consultants")
-        .update({
-          availability: serialized.availabilityJson,
-          availability_settings: mergedSettings as any,
-          preferred_time: serialized.preferredTimeText,
-        })
+        .update(payloadWithColumn)
         .eq("id", consultant.id);
 
+      // Fallback: If PostgREST schema cache does not have availability_settings column yet,
+      // update without the top-level availability_settings column, storing schedule into availability (JSON)
+      // and social_links.availability_settings (JSONB). Both exist in the current production schema.
+      if (updateError && (
+        updateError.message?.toLowerCase().includes("availability_settings") ||
+        (updateError as any).details?.toLowerCase().includes("availability_settings") ||
+        (updateError as any).code === "PGRST204"
+      )) {
+        console.warn(
+          "[consultantDashboardService] Column 'availability_settings' missing in schema cache. Applying fallback to availability & social_links:",
+          updateError.message
+        );
+        const fallbackPayload: Record<string, any> = {
+          availability: serialized.availabilityJson,
+          preferred_time: serialized.preferredTimeText,
+          social_links: {
+            ...existingSocial,
+            availability_settings: mergedSettings,
+          },
+        };
+        const fallbackResult = await supabase
+          .from("consultants")
+          .update(fallbackPayload)
+          .eq("id", consultant.id);
+        updateError = fallbackResult.error;
+      }
+
       if (updateError) {
-        return { success: false, error: updateError.message };
+        return { 
+          success: false, 
+          error: updateError.message || "Failed to save availability in database." 
+        };
       }
 
       return {

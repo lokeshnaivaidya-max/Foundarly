@@ -297,4 +297,113 @@ describe('Consultant Self-Service Availability & Application Preference Manageme
     assert.ok(slot16);
     assert.equal(slot16.available, true);
   });
+
+  // Test 11: Schema Mismatch & Missing-Column Resilience
+  it('11. Gracefully handles schema cache mismatch when availability_settings column is missing in Supabase', () => {
+    // Simulate database consultant record without the availability_settings column
+    const productionConsultantRow = {
+      id: 'cons-prod-123',
+      name: 'Priya Patel',
+      email: 'priya@example.com',
+      user_id: 'user-priya-456',
+      preferred_time: 'Morning (10:00 AM - 1:00 PM)',
+      pricing_30: 1000,
+      pricing_60: 1500,
+      is_active: true,
+      availability: '{"weeklySchedule":{"tuesday":{"enabled":true,"windows":[{"start":"10:00","end":"13:00"}]}},"slotDurationMinutes":60,"bufferMinutes":15}',
+      social_links: {
+        linkedin: 'https://linkedin.com/in/priya',
+        availability_settings: {
+          weeklySchedule: {
+            tuesday: { enabled: true, windows: [{ start: '10:00', end: '13:00' }] },
+            thursday: { enabled: true, windows: [{ start: '15:00', end: '18:00' }] },
+          },
+          slotDurationMinutes: 60,
+          bufferMinutes: 15,
+          blockedDates: ['2026-11-20'],
+        },
+      },
+      // Note: availability_settings column is completely absent!
+    };
+
+    // Verify parsing succeeds without throwing schema errors
+    const parsed = parseAvailabilitySettings(productionConsultantRow);
+    assert.ok(parsed);
+    assert.equal(parsed.weeklySchedule.tuesday.enabled, true);
+    assert.deepEqual(parsed.weeklySchedule.tuesday.windows, [{ start: '10:00', end: '13:00' }]);
+    assert.equal(parsed.weeklySchedule.thursday.enabled, true);
+    assert.deepEqual(parsed.weeklySchedule.thursday.windows, [{ start: '15:00', end: '18:00' }]);
+    assert.equal(parsed.bufferMinutes, 15);
+    assert.deepEqual(parsed.blockedDates, ['2026-11-20']);
+
+    // Customer-facing slots should generate seamlessly from the fallback data
+    const slotsTuesday = generateAvailableSlots({
+      consultant: productionConsultantRow,
+      dateStr: '2026-11-10', // Tuesday
+      bookedSlots: [],
+      sessionDuration: 60,
+      referenceNow: new Date('2026-11-01T00:00:00Z'),
+    });
+    assert.ok(slotsTuesday.length > 0);
+    assert.ok(slotsTuesday.some((s) => s.time === '10:00 AM' && s.available));
+  });
+
+  // Test 12: Dual Serialization Format & Backward Compatibility
+  it('12. Serialization produces both valid JSON for availability and human-readable preferred_time', () => {
+    const customSchedule: ConsultantAvailabilitySettings = {
+      ...createDefaultAvailabilitySettings(),
+      weeklySchedule: {
+        ...createDefaultAvailabilitySettings().weeklySchedule,
+        monday: {
+          enabled: true,
+          windows: [{ start: '14:00', end: '18:00' }],
+        },
+      },
+      slotDurationMinutes: 30,
+      bufferMinutes: 10,
+    };
+
+    const serialized = serializeAvailabilitySettings(customSchedule);
+    // 1. JSON string is valid and roundtrips cleanly
+    const jsonParsed = JSON.parse(serialized.availabilityJson);
+    assert.equal(jsonParsed.slotDurationMinutes, 30);
+    assert.equal(jsonParsed.bufferMinutes, 10);
+    assert.deepEqual(jsonParsed.weeklySchedule.monday.windows, [{ start: '14:00', end: '18:00' }]);
+
+    // 2. preferred_time text is formatted for legacy readers
+    assert.ok(serialized.preferredTimeText.includes('02:00 PM'));
+    assert.ok(serialized.preferredTimeText.includes('06:00 PM'));
+  });
+
+  // Test 13: Blocked dates and holidays correctly suppress slot generation
+  it('13. Blocked holiday dates prevent any slots from being booked regardless of weekly schedule', () => {
+    const consultantWithHoliday = {
+      id: 'cons-holiday',
+      name: 'Ananya Roy',
+      pricing_30: 1000,
+      pricing_60: 1500,
+      availability: JSON.stringify({
+        ...createDefaultAvailabilitySettings(),
+        blockedDates: ['2026-12-25'], // Christmas holiday
+      }),
+      social_links: {
+        availability_settings: {
+          ...createDefaultAvailabilitySettings(),
+          blockedDates: ['2026-12-25'],
+        },
+      },
+    };
+
+    const slotsOnHoliday = generateAvailableSlots({
+      consultant: consultantWithHoliday,
+      dateStr: '2026-12-25', // Friday
+      bookedSlots: [],
+      sessionDuration: 60,
+      referenceNow: new Date('2026-12-01T00:00:00Z'),
+    });
+
+    // Zero slots should be available on the blocked holiday
+    const availableSlots = slotsOnHoliday.filter((s) => s.available);
+    assert.equal(availableSlots.length, 0);
+  });
 });

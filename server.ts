@@ -2289,7 +2289,7 @@ async function startServer() {
     try {
       let query = supabaseAdminClient
         .from("consultants")
-        .select("id, name, email, user_id, preferred_time, availability, availability_settings, pricing_30, pricing_60, is_active")
+        .select("id, name, email, user_id, preferred_time, availability, pricing_30, pricing_60, is_active, social_links")
         .eq("is_active", true);
 
       if (userEmail) {
@@ -2433,22 +2433,55 @@ async function startServer() {
         updatedAt: new Date().toISOString(),
       };
 
-      const serialized = serializeAvailabilitySettings(mergedSettings);
+      const existingSocial = ((consultant as any).social_links && typeof (consultant as any).social_links === "object")
+        ? ((consultant as any).social_links as Record<string, any>)
+        : {};
 
-      const { data: updated, error: updateErr } = await supabaseAdminClient
-        .from("consultants")
-        .update({
-          availability: serialized.availabilityJson,
+      const primaryPayload: Record<string, any> = {
+        availability: serialized.availabilityJson,
+        availability_settings: mergedSettings,
+        preferred_time: serialized.preferredTimeText,
+        social_links: {
+          ...existingSocial,
           availability_settings: mergedSettings,
-          preferred_time: serialized.preferredTimeText,
-        })
+        },
+      };
+
+      let { data: updated, error: updateErr } = await supabaseAdminClient
+        .from("consultants")
+        .update(primaryPayload)
         .eq("id", consultant.id)
         .select()
         .single();
 
+      // If availability_settings column does not exist in schema cache, fall back without top-level column
+      if (updateErr && (
+        updateErr.message?.toLowerCase().includes("availability_settings") ||
+        (updateErr as any).details?.toLowerCase().includes("availability_settings") ||
+        (updateErr as any).code === "PGRST204"
+      )) {
+        console.warn("[Consultant API] Column 'availability_settings' missing in schema cache, using fallback to availability & social_links:", updateErr.message);
+        const fallbackPayload: Record<string, any> = {
+          availability: serialized.availabilityJson,
+          preferred_time: serialized.preferredTimeText,
+          social_links: {
+            ...existingSocial,
+            availability_settings: mergedSettings,
+          },
+        };
+        const fallbackRes = await supabaseAdminClient
+          .from("consultants")
+          .update(fallbackPayload)
+          .eq("id", consultant.id)
+          .select()
+          .single();
+        updated = fallbackRes.data;
+        updateErr = fallbackRes.error;
+      }
+
       if (updateErr) {
         console.error("[Consultant API] Failed to update availability in Supabase:", updateErr);
-        return res.status(500).json({ success: false, error: "Failed to persist availability updates." });
+        return res.status(500).json({ success: false, error: updateErr.message || "Failed to persist availability updates." });
       }
 
       console.log(`[Consultant API] Consultant ${consultant.id} (${consultant.name}) successfully updated their self-service availability.`);

@@ -666,7 +666,12 @@ export function parseAvailabilitySettings(consultantOrSettings: any): Consultant
     return parseAvailabilitySettings(consultantOrSettings.availability_settings);
   }
 
-  // 3. From JSON string in availability column
+  // 3. From social_links.availability_settings (JSONB column)
+  if (consultantOrSettings.social_links?.availability_settings && typeof consultantOrSettings.social_links.availability_settings === 'object') {
+    return parseAvailabilitySettings(consultantOrSettings.social_links.availability_settings);
+  }
+
+  // 4. From JSON string in availability column
   if (typeof consultantOrSettings.availability === 'string' && consultantOrSettings.availability.trim().startsWith('{')) {
     try {
       const parsed = JSON.parse(consultantOrSettings.availability);
@@ -676,11 +681,6 @@ export function parseAvailabilitySettings(consultantOrSettings: any): Consultant
     } catch {
       // Not valid JSON, continue
     }
-  }
-
-  // 4. From social_links.availability_settings
-  if (consultantOrSettings.social_links?.availability_settings) {
-    return parseAvailabilitySettings(consultantOrSettings.social_links.availability_settings);
   }
 
   // 5. Default settings customized with consultant pricing & preferred time
@@ -782,13 +782,17 @@ export function checkDayAvailability(
 
   // Check if date is in blocked dates
   const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
-  const blockedItem = (settings.blockedDates || []).find(b => {
-    const bDate = b.date.includes('T') ? b.date.split('T')[0] : b.date;
+  const blockedItem = (settings.blockedDates || []).find((b: any) => {
+    if (!b) return false;
+    const rawDate = typeof b === 'string' ? b : (b.date || '');
+    const bDate = rawDate.includes('T') ? rawDate.split('T')[0] : rawDate;
     return bDate === cleanDate;
   });
 
   if (blockedItem) {
-    const reason = blockedItem.reason || 'Consultant Holiday / Blocked Date';
+    const reason = typeof blockedItem === 'string'
+      ? 'Consultant Holiday / Blocked Date'
+      : ((blockedItem as any).reason || 'Consultant Holiday / Blocked Date');
     return {
       isAvailable: false,
       available: false,

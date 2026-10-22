@@ -124,26 +124,26 @@ export default function Header() {
   return (
     <header
       className={cn(
-        "sticky top-0 left-0 right-0 z-50 transition-all duration-300 border-b",
+        "sticky top-0 left-0 right-0 z-50 transition-all duration-300 border-b w-full",
         scrolled
-          ? "bg-background/85 backdrop-blur-xl border-border/60 shadow-lg shadow-black/5 py-2.5"
-          : "bg-background/60 backdrop-blur-md border-border/30 py-3.5"
+          ? "bg-background/85 backdrop-blur-xl border-border/60 shadow-lg shadow-black/5 py-2"
+          : "bg-background/60 backdrop-blur-md border-border/30 py-2.5 sm:py-3"
       )}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between gap-4">
+      <div className="w-full max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1600px] mx-auto px-3 sm:px-4 md:px-6 flex items-center justify-between gap-2 lg:gap-3 xl:gap-4 min-w-0">
         {/* Brand Logo */}
         <Link to="/" className="flex items-center gap-2 shrink-0 group">
           {logoUrl ? (
-            <img src={logoUrl} alt={logoText} className="h-8 w-auto object-contain" />
+            <img src={logoUrl} alt={logoText} className="h-7 sm:h-8 w-auto object-contain" />
           ) : (
-            <span className="font-display text-2xl font-bold tracking-tight text-gradient-gold group-hover:opacity-90 transition-opacity">
+            <span className="font-display text-xl sm:text-2xl font-bold tracking-tight text-gradient-gold group-hover:opacity-90 transition-opacity whitespace-nowrap">
               {logoText}
             </span>
           )}
         </Link>
 
         {/* Centered Desktop Navigation Bar */}
-        <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1 bg-secondary/40 border border-border/40 p-1 rounded-full backdrop-blur-md">
+        <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1 bg-secondary/40 border border-border/40 p-1 rounded-full backdrop-blur-md shrink min-w-0">
           {navLinks.map((link) => {
             const active = isActive(link.path);
             return (
@@ -151,7 +151,7 @@ export default function Header() {
                 key={link.path}
                 to={link.path}
                 className={cn(
-                  "relative px-2.5 xl:px-3.5 py-1 text-xs xl:text-sm font-medium transition-all duration-200 whitespace-nowrap rounded-full",
+                  "relative px-2 lg:px-2 xl:px-2.5 2xl:px-3.5 py-1 text-xs xl:text-[13px] 2xl:text-sm font-medium transition-all duration-200 whitespace-nowrap rounded-full shrink-0",
                   active ? "text-primary font-semibold" : "text-muted-foreground hover:text-foreground"
                 )}
               >
@@ -169,9 +169,9 @@ export default function Header() {
         </nav>
 
         {/* Right Action Area */}
-        <div className="hidden lg:flex items-center gap-1.5 xl:gap-2.5 shrink-0">
+        <div className="hidden lg:flex items-center gap-1.5 xl:gap-2 2xl:gap-2.5 shrink-0 min-w-0">
           {/* Grouped Social & Intro Video Pill */}
-          <div className="flex items-center gap-0.5 bg-secondary/50 border border-border/60 p-0.5 rounded-full">
+          <div className="flex items-center gap-0.5 bg-secondary/50 border border-border/60 p-0.5 rounded-full shrink-0">
             <a
               href="https://youtube.com/@foundarly?si=ZHlc2Swj3Rtm37Kn"
               target="_blank"
@@ -197,28 +197,28 @@ export default function Header() {
               target="_blank"
               rel="noopener noreferrer"
               title="Watch Intro Video"
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all duration-200"
+              className="inline-flex items-center gap-1 px-1.5 xl:px-2 py-1 rounded-full text-[11px] font-medium bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all duration-200"
             >
-              <PlayCircle className="w-3.5 h-3.5" />
+              <PlayCircle className="w-3.5 h-3.5 shrink-0" />
               <span className="hidden 2xl:inline font-semibold">Intro Video</span>
             </a>
           </div>
 
           {isClientRole && (
-            <Link to="/apply-consultant">
+            <Link to="/apply-consultant" className="hidden xl:inline-flex shrink-0">
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 rounded-full px-2.5 xl:px-3 h-8"
+                className="text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 rounded-full px-2 xl:px-2.5 2xl:px-3 h-8"
               >
-                <span className="hidden xl:inline">Become a Consultant</span>
-                <span className="inline xl:hidden">Apply</span>
+                <span className="hidden 2xl:inline">Become a Consultant</span>
+                <span className="inline 2xl:hidden">Apply</span>
               </Button>
             </Link>
           )}
 
           {!user && (
-            <Link to="/login">
+            <Link to="/login" className="shrink-0">
               <Button
                 variant="ghost"
                 size="sm"
@@ -231,28 +231,28 @@ export default function Header() {
 
           {/* Primary CTA - Role based */}
           {isAdminRole ? (
-            <Link to="/admin">
+            <Link to="/admin" className="shrink-0">
               <Button
                 size="sm"
-                className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs xl:text-sm shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 rounded-full px-4 xl:px-5 py-2"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs xl:text-sm shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 rounded-full px-3 lg:px-3.5 xl:px-4 py-1.5 h-8 xl:h-9 whitespace-nowrap"
               >
                 Admin Dashboard
               </Button>
             </Link>
           ) : isConsultantRole ? (
-            <Link to="/consultant/dashboard">
+            <Link to="/consultant/dashboard" className="shrink-0">
               <Button
                 size="sm"
-                className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs xl:text-sm shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 rounded-full px-4 xl:px-5 py-2"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs xl:text-sm shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 rounded-full px-3 lg:px-3.5 xl:px-4 py-1.5 h-8 xl:h-9 whitespace-nowrap"
               >
                 Consultant Dashboard
               </Button>
             </Link>
           ) : (
-            <Link to="/booking">
+            <Link to="/booking" className="shrink-0">
               <Button
                 size="sm"
-                className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs xl:text-sm shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 rounded-full px-4 xl:px-5 py-2"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs xl:text-sm shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 rounded-full px-3 lg:px-3.5 xl:px-4 py-1.5 h-8 xl:h-9 whitespace-nowrap"
               >
                 Book a Session
               </Button>
@@ -264,7 +264,7 @@ export default function Header() {
 
           {/* Authenticated User Profile Dropdown (Kokonut UI Account Menu) */}
           {user && (
-            <ProfileDropdown />
+            <ProfileDropdown className="shrink-0 min-w-0" />
           )}
         </div>
 
@@ -437,6 +437,43 @@ export default function Header() {
                     </Button>
                   </Link>
                 )}
+
+                {/* Theme & Social Links inside Mobile Drawer */}
+                <div className="pt-3 border-t border-border/50 flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-secondary/30">
+                    <span className="text-xs font-medium text-muted-foreground">Appearance</span>
+                    <SwitchButton size="sm" showLabel={true} />
+                  </div>
+                  <div className="flex items-center justify-around py-1 text-muted-foreground">
+                    <a
+                      href="https://youtube.com/@foundarly?si=ZHlc2Swj3Rtm37Kn"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs hover:text-red-500 transition-colors"
+                    >
+                      <Youtube className="w-4 h-4 text-red-500" />
+                      <span>YouTube</span>
+                    </a>
+                    <a
+                      href="https://www.instagram.com/foundarlybusinessworld_in?utm_source=qr&igsh=dmVxNm8wNW93aHV5"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs hover:text-pink-500 transition-colors"
+                    >
+                      <Instagram className="w-4 h-4 text-pink-500" />
+                      <span>Instagram</span>
+                    </a>
+                    <a
+                      href="https://youtu.be/L2ndHKr9Q5Y?si=TE35364lR-3dY94F"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs text-red-500 hover:text-red-400 transition-colors"
+                    >
+                      <PlayCircle className="w-4 h-4" />
+                      <span>Intro Video</span>
+                    </a>
+                  </div>
+                </div>
               </div>
             </nav>
           </motion.div>

@@ -260,7 +260,7 @@ function Identity({
     <span
       className={cn(
         "flex min-w-0",
-        stacked ? "flex-col items-start gap-2.5" : "items-center gap-2.5"
+        stacked ? "flex-col items-start gap-2.5" : "items-center gap-1.5 xl:gap-2"
       )}
     >
       <motion.span
@@ -271,7 +271,7 @@ function Identity({
       >
         <Avatar
           account={account}
-          className={stacked ? "size-9" : "size-8"}
+          className={stacked ? "size-9" : "size-7 xl:size-8"}
           status={status}
           tone={tone}
         />
@@ -279,7 +279,7 @@ function Identity({
       <span className="flex min-w-0 flex-col text-left">
         <motion.span
           className={cn(
-            "relative z-20 block truncate font-semibold text-xs sm:text-sm text-foreground leading-4",
+            "relative z-20 block truncate font-semibold text-xs xl:text-sm text-foreground leading-tight",
             hidden
           )}
           key={shared ? "name-shared" : "name-static"}
@@ -288,17 +288,31 @@ function Identity({
         >
           {account.name}
         </motion.span>
-        <motion.span
-          className={cn(
-            "relative z-20 block truncate text-[11px] text-muted-foreground leading-3 mt-0.5",
-            hidden
-          )}
-          key={shared ? "email-shared" : "email-static"}
-          layoutId={shared ? `${uid}-email` : undefined}
-          transition={transition}
-        >
-          {account.email}
-        </motion.span>
+        {stacked ? (
+          <motion.span
+            className={cn(
+              "relative z-20 block truncate text-[11px] text-muted-foreground leading-3 mt-0.5",
+              hidden
+            )}
+            key={shared ? "email-shared" : "email-static"}
+            layoutId={shared ? `${uid}-email` : undefined}
+            transition={transition}
+          >
+            {account.email}
+          </motion.span>
+        ) : (
+          <motion.span
+            className={cn(
+              "relative z-20 hidden 2xl:block truncate text-[10px] xl:text-[11px] text-muted-foreground leading-tight",
+              hidden
+            )}
+            key={shared ? "email-shared" : "email-static"}
+            layoutId={shared ? `${uid}-email` : undefined}
+            transition={transition}
+          >
+            {account.email}
+          </motion.span>
+        )}
       </span>
     </span>
   );
@@ -768,9 +782,10 @@ export default function ProfileDropdown({
     if (openSeq === 0 || phaseRef.current !== "open" || !trigger || !main) {
       return;
     }
+    const availableW = typeof window !== "undefined" ? Math.min(PANEL_W, window.innerWidth - 24) : PANEL_W;
     targetH.current = main.offsetHeight;
     if (instant) {
-      w.jump(PANEL_W);
+      w.jump(availableW);
       h.jump(targetH.current);
       bodyOpacity.jump(1);
     } else {
@@ -779,7 +794,7 @@ export default function ProfileDropdown({
         h.jump(trigger.offsetHeight);
         bodyOpacity.jump(0);
       }
-      animate(w, PANEL_W, SPRING);
+      animate(w, availableW, SPRING);
       animate(h, targetH.current, SPRING);
       animate(bodyOpacity, 1, { duration: 0.2, delay: 0.05, ease: EASE_OUT });
     }
@@ -848,7 +863,7 @@ export default function ProfileDropdown({
         aria-controls={sharedInPanel ? menuId : undefined}
         aria-expanded={sharedInPanel}
         aria-haspopup="menu"
-        className="flex w-52 sm:w-56 items-center gap-2 rounded-full border border-border/60 bg-secondary/40 p-1.5 pr-2.5 text-left outline-none transition-all duration-150 hover:border-primary/40 hover:bg-secondary/70 focus-visible:ring-2 focus-visible:ring-primary/40"
+        className="flex w-auto max-w-[130px] sm:max-w-[150px] lg:max-w-[160px] xl:max-w-[185px] 2xl:max-w-[220px] items-center gap-1.5 xl:gap-2 rounded-full border border-border/60 bg-secondary/40 p-1 xl:p-1.5 pr-2 xl:pr-2.5 text-left outline-none transition-all duration-150 hover:border-primary/40 hover:bg-secondary/70 focus-visible:ring-2 focus-visible:ring-primary/40 min-w-0 shrink-0"
         onClick={(event) => {
           const via = viaOf(event);
           openMenu(via, via === "keyboard" ? "first" : "menu");
@@ -884,7 +899,7 @@ export default function ProfileDropdown({
 
       {phase === "closed" ? null : (
         <div
-          className="pointer-events-none absolute top-0 right-0 z-50"
+          className="pointer-events-none absolute top-0 right-0 z-50 max-w-[calc(100vw-1.5rem)]"
           style={{ width: PANEL_W }}
         >
           <div
@@ -907,9 +922,9 @@ export default function ProfileDropdown({
             style={{ clipPath: innerClip }}
           >
             <div
-              className="shrink-0 p-2"
+              className="shrink-0 p-2 max-w-full"
               ref={mainRef}
-              style={{ width: PANEL_W }}
+              style={{ width: PANEL_W, maxWidth: "calc(100vw - 1.5rem)" }}
             >
               <div className="flex items-start justify-between px-2 pt-2 pb-2.5">
                 <Identity

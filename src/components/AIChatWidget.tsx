@@ -5,7 +5,6 @@ import {
   Send,
   Loader2,
   Bot,
-  ChevronDown,
   RotateCcw,
   Sparkles,
   ArrowUpRight,
@@ -14,7 +13,6 @@ import {
   CreditCard,
   Video,
   Clock,
-  HelpCircle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { chatbotService, ChatMessage } from '@/services/chatbotService';
@@ -39,7 +37,7 @@ function FormattedMessage({ text, onNavigate }: { text: string; onNavigate: (pat
   const lines = text.split('\n');
 
   return (
-    <div className="space-y-1.5 text-xs md:text-sm leading-relaxed">
+    <div className="space-y-1.5 text-xs sm:text-sm leading-relaxed break-words [overflow-wrap:anywhere]">
       {lines.map((line, lIdx) => {
         if (!line.trim()) {
           return <div key={lIdx} className="h-1.5" />;
@@ -49,7 +47,7 @@ function FormattedMessage({ text, onNavigate }: { text: string; onNavigate: (pat
         const parts = line.split(/(\*\*.*?\*\*|\[.*?\]\(.*?\))/g);
 
         return (
-          <p key={lIdx} className="break-words">
+          <p key={lIdx} className="break-words [overflow-wrap:anywhere]">
             {parts.map((part, pIdx) => {
               if (part.startsWith('**') && part.endsWith('**')) {
                 return (
@@ -68,7 +66,7 @@ function FormattedMessage({ text, onNavigate }: { text: string; onNavigate: (pat
                     key={pIdx}
                     type="button"
                     onClick={() => onNavigate(href)}
-                    className="inline-flex items-center gap-0.5 text-primary hover:underline font-semibold mx-1 cursor-pointer"
+                    className="inline-flex items-center gap-0.5 text-primary hover:underline font-semibold mx-1 cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary rounded-xs"
                   >
                     {label}
                     <ArrowUpRight className="w-3 h-3 inline" />
@@ -106,6 +104,7 @@ export default function AIChatWidget() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const launcherButtonRef = useRef<HTMLButtonElement>(null);
 
   // Sync session storage
   useEffect(() => {
@@ -116,16 +115,41 @@ export default function AIChatWidget() {
     }
   }, [messages]);
 
+  // Focus management on open/close
   useEffect(() => {
     if (isOpen) {
       setUnreadCount(0);
-      setTimeout(() => inputRef.current?.focus(), 150);
+      const timer = setTimeout(() => inputRef.current?.focus(), 150);
+      return () => clearTimeout(timer);
     }
   }, [isOpen]);
 
+  // Handle keyboard accessibility (Escape to close)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        setIsOpen(false);
+        launcherButtonRef.current?.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isOpen]);
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    if (isOpen) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isLoading, isOpen]);
+
+  const handleClose = () => {
+    setIsOpen(false);
+    setTimeout(() => {
+      launcherButtonRef.current?.focus();
+    }, 50);
+  };
 
   const handleSendMessage = async (textToSend?: string) => {
     const query = (textToSend ?? input).trim();
@@ -188,8 +212,8 @@ export default function AIChatWidget() {
       window.location.href = path;
     } else {
       navigate(path);
-      // Close on mobile for smooth transition
-      if (window.innerWidth < 768) {
+      // Close on mobile screens for smooth navigation
+      if (window.innerWidth < 640) {
         setIsOpen(false);
       }
     }
@@ -197,81 +221,98 @@ export default function AIChatWidget() {
 
   return (
     <>
-      {/* Mobile Backdrop */}
+      {/* Mobile Backdrop for focused mobile interaction */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 md:hidden animate-in fade-in duration-200"
-          onClick={() => setIsOpen(false)}
+          className="fixed inset-0 bg-black/40 backdrop-blur-xs z-[9998] sm:hidden transition-opacity"
+          onClick={handleClose}
+          aria-hidden="true"
         />
       )}
 
-      {/* Floating Chat Modal */}
+      {/* Floating Chat Modal: Fixed at bottom-right viewport with exact dimension constraints */}
       {isOpen && (
         <div
-          className={`
-            fixed z-50 flex flex-col bg-card border border-border shadow-2xl
-            /* Mobile: full bottom-sheet */
-            inset-x-0 bottom-0 h-[88vh] rounded-t-2xl
-            /* Desktop: refined floating panel */
-            md:inset-auto md:bottom-20 md:right-6 md:w-[410px] md:h-[620px] md:rounded-2xl
-            transition-all duration-300 overflow-hidden
-          `}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Foundarly Support Assistant"
+          className="fixed z-[9999] flex flex-col bg-card border border-border/90 shadow-2xl rounded-2xl overflow-hidden transition-all duration-200 ease-out"
+          style={{
+            position: 'fixed',
+            right: '16px',
+            bottom: 'max(16px, env(safe-area-inset-bottom, 16px))',
+            width: 'min(420px, calc(100vw - 32px))',
+            maxWidth: 'min(420px, calc(100vw - 32px))',
+            height: 'min(680px, calc(100dvh - 32px))',
+            maxHeight: 'min(680px, calc(100dvh - 32px))',
+          }}
         >
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-amber-500/90 via-primary to-amber-600 text-primary-foreground shrink-0 shadow-sm">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-full bg-white/20 border border-white/30 flex items-center justify-center">
+          {/* Header: fixed height, high contrast, clearly visible Close button */}
+          <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-amber-500 via-primary to-amber-600 text-primary-foreground shrink-0 shadow-sm border-b border-white/10">
+            <div className="flex items-center gap-2.5 min-w-0 pr-2">
+              <div className="w-9 h-9 rounded-full bg-white/20 border border-white/30 flex items-center justify-center shrink-0 shadow-inner">
                 <Bot className="h-4.5 w-4.5 text-white" />
               </div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <p className="font-semibold text-white text-sm leading-tight">Foundarly Assistant</p>
-                  <Badge variant="outline" className="bg-white/10 text-[10px] text-white border-white/20 py-0 px-1">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <p className="font-semibold text-white text-sm leading-tight truncate">Foundarly Assistant</p>
+                  <Badge variant="outline" className="bg-white/15 text-[10px] text-white border-white/25 py-0 px-1.5 font-medium shrink-0">
                     Knowledge Base
                   </Badge>
                 </div>
-                <p className="text-white/80 text-[11px]">Instant answers for booking, fees & meetings</p>
+                <p className="text-white/85 text-[11px] truncate">Instant answers for booking, fees & meetings</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-1">
+            {/* Top-Right Action Controls */}
+            <div className="flex items-center gap-1.5 shrink-0">
               {messages.length > 0 && (
                 <button
+                  type="button"
                   onClick={handleClearChat}
                   title="Clear chat history"
-                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/25 flex items-center justify-center transition-colors text-white"
+                  aria-label="Clear chat history"
+                  className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 active:scale-95 flex items-center justify-center transition-all text-white focus:outline-none focus:ring-2 focus:ring-white/80 cursor-pointer shadow-xs"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                 </button>
               )}
+              {/* Clearly visible Close 'X' button on both desktop and mobile */}
               <button
-                onClick={() => setIsOpen(false)}
-                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/25 flex items-center justify-center transition-colors text-white"
+                type="button"
+                onClick={handleClose}
+                aria-label="Close chat"
+                title="Close chat"
+                className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/35 active:scale-95 flex items-center justify-center transition-all text-white focus:outline-none focus:ring-2 focus:ring-white/90 cursor-pointer shrink-0 shadow-xs"
               >
-                <ChevronDown className="h-4 w-4 md:hidden" />
-                <X className="h-4 w-4 hidden md:block" />
+                <X className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
           </div>
 
-          {/* Messages Body */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-background/50">
+          {/* Messages Body: the ONLY vertically scrollable section */}
+          <div
+            className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3.5 sm:px-4 py-3 sm:py-4 space-y-3.5 bg-background/50 focus:outline-none"
+            tabIndex={0}
+            role="region"
+            aria-label="Chat conversation"
+          >
             {messages.length === 0 ? (
-              <div className="flex flex-col items-center text-center pt-4 pb-2 space-y-3">
-                <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary glow-gold-sm">
-                  <Bot className="h-7 w-7" />
+              <div className="flex flex-col items-center text-center pt-3 pb-2 space-y-3">
+                <div className="w-13 h-13 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary glow-gold-sm">
+                  <Bot className="h-6 w-6" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-foreground text-base">Welcome to Foundarly!</h4>
-                  <p className="text-xs text-muted-foreground max-w-xs mt-1">
+                  <h4 className="font-bold text-foreground text-sm sm:text-base">Welcome to Foundarly!</h4>
+                  <p className="text-xs text-muted-foreground max-w-xs mt-1 leading-normal">
                     Ask any question about our verified consultants, consultation fees, live availability, payment steps, or video rooms.
                   </p>
                 </div>
 
                 {/* Quick Topic Buttons */}
-                <div className="w-full pt-2 space-y-2">
+                <div className="w-full pt-1 space-y-1.5">
                   <div className="flex items-center justify-between text-[11px] text-muted-foreground uppercase tracking-wider font-semibold px-1">
-                    <span>Popular Questions</span>
+                    <span>Popular Inquiries</span>
                     <Sparkles className="w-3 h-3 text-primary" />
                   </div>
                   <div className="grid grid-cols-1 gap-1.5">
@@ -280,14 +321,15 @@ export default function AIChatWidget() {
                       return (
                         <button
                           key={i}
+                          type="button"
                           onClick={() => handleSendMessage(cat.query)}
-                          className="w-full text-left text-xs bg-secondary/60 hover:bg-secondary hover:border-primary/40 border border-border/80 text-foreground px-3.5 py-2.5 rounded-xl transition-all duration-200 flex items-center justify-between group cursor-pointer"
+                          className="w-full text-left text-xs bg-secondary/60 hover:bg-secondary hover:border-primary/40 border border-border/80 text-foreground px-3 py-2 rounded-xl transition-all duration-200 flex items-center justify-between group cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
                         >
                           <div className="flex items-center gap-2">
-                            <Icon className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition-transform" />
-                            <span>{cat.query}</span>
+                            <Icon className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition-transform shrink-0" />
+                            <span className="font-medium">{cat.query}</span>
                           </div>
-                          <ArrowUpRight className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors" />
+                          <ArrowUpRight className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
                         </button>
                       );
                     })}
@@ -307,7 +349,7 @@ export default function AIChatWidget() {
                           </div>
                         )}
                         <div
-                          className={`max-w-[84%] rounded-2xl px-4 py-3 shadow-sm ${
+                          className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 sm:px-4 sm:py-3 shadow-sm break-words [overflow-wrap:anywhere] ${
                             isUser
                               ? 'bg-primary text-primary-foreground rounded-br-xs font-medium'
                               : 'bg-card border border-border/80 text-foreground rounded-bl-xs'
@@ -348,8 +390,9 @@ export default function AIChatWidget() {
                           {msg.followUps.map((prompt, fIdx) => (
                             <button
                               key={fIdx}
+                              type="button"
                               onClick={() => handleSendMessage(prompt)}
-                              className="text-[11px] bg-secondary/60 hover:bg-secondary border border-border text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-full transition-colors cursor-pointer"
+                              className="text-[11px] bg-secondary/60 hover:bg-secondary border border-border text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-full transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary"
                             >
                               {prompt}
                             </button>
@@ -379,7 +422,7 @@ export default function AIChatWidget() {
             )}
           </div>
 
-          {/* Input & Footer */}
+          {/* Composer: pinned to the bottom of the panel, fully visible */}
           <div className="p-3 border-t border-border bg-card shrink-0 space-y-2">
             <div className="flex items-center gap-2 bg-background border border-border rounded-xl px-3 py-2 focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/40 transition-all">
               <input
@@ -389,12 +432,15 @@ export default function AIChatWidget() {
                 onKeyDown={handleKeyDown}
                 placeholder="Ask about booking, fees, time slots, meetings..."
                 disabled={isLoading}
+                aria-label="Ask a question"
                 className="flex-1 bg-transparent text-xs md:text-sm text-foreground placeholder:text-muted-foreground outline-none disabled:opacity-50"
               />
               <button
+                type="button"
                 onClick={() => handleSendMessage()}
                 disabled={isLoading || !input.trim()}
-                className="w-8 h-8 rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all shrink-0 cursor-pointer text-primary-foreground shadow-sm"
+                aria-label="Send message"
+                className="w-8 h-8 rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all shrink-0 cursor-pointer text-primary-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
               >
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -414,16 +460,19 @@ export default function AIChatWidget() {
         </div>
       )}
 
-      {/* Floating Toggle Button */}
+      {/* Floating Toggle Launcher: Discovered easily at bottom-right corner */}
       {!isOpen && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5">
-          <div className="hidden sm:block bg-card border border-border px-3.5 py-1.5 rounded-full shadow-lg text-xs font-medium text-foreground">
+        <div className="fixed bottom-4 right-4 sm:bottom-5 sm:right-5 md:bottom-6 md:right-6 z-50 flex items-center gap-2.5">
+          <div className="hidden sm:block bg-card/95 backdrop-blur-sm border border-border px-3.5 py-1.5 rounded-full shadow-lg text-xs font-medium text-foreground">
             Questions? Chat with us 👋
           </div>
           <button
+            ref={launcherButtonRef}
+            type="button"
             onClick={() => setIsOpen(true)}
             aria-label="Open support chat"
-            className="relative w-14 h-14 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg hover:shadow-xl glow-gold transition-all duration-300 flex items-center justify-center cursor-pointer"
+            aria-expanded={isOpen}
+            className="relative w-13 h-13 sm:w-14 sm:h-14 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg hover:shadow-xl glow-gold transition-all duration-300 flex items-center justify-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
           >
             <MessageCircle className="h-6 w-6" />
             {unreadCount > 0 && (

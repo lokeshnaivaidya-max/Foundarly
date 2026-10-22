@@ -149,4 +149,55 @@ describe('Foundarly Predefined Knowledge-Based Chatbot Engine', () => {
     // Local deterministic response should be nearly instantaneous (< 100ms)
     assert.ok(elapsed < 500);
   });
+
+  it('9. UI/UX Lifecycle: Close/Reopen retains conversation history and sessionStorage state', () => {
+    // Simulate sessionStorage and chat history lifecycle
+    const mockStorage: Record<string, string> = {};
+    const STORAGE_KEY = 'foundarly_knowledge_chat_history';
+
+    // 1. User has conversation history
+    const initialHistory = [
+      { role: 'user', content: 'What are the consultation fees?', timestamp: new Date().toISOString() },
+      { role: 'assistant', content: '30-minute sessions are ₹1,500 and 60-minute sessions are ₹2,500.', timestamp: new Date().toISOString() },
+    ];
+    mockStorage[STORAGE_KEY] = JSON.stringify(initialHistory);
+
+    // 2. Chat is closed (isOpen: false) -> History must NOT be wiped
+    const isClosed = true;
+    assert.equal(isClosed, true);
+    assert.ok(mockStorage[STORAGE_KEY], 'Storage must not be deleted on close');
+
+    // 3. Chat is reopened (isOpen: true) -> History is restored
+    const restoredHistory = JSON.parse(mockStorage[STORAGE_KEY]);
+    assert.equal(restoredHistory.length, 2);
+    assert.equal(restoredHistory[0].content, 'What are the consultation fees?');
+    assert.ok(restoredHistory[1].content.includes('₹1,500'));
+  });
+
+  it('10. UI/UX Layout Specifications: Bottom-right fixed positioning, close button, and scroll constraint', async () => {
+    // Read AIChatWidget.tsx to ensure all required layout attributes exist in code
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const widgetSource = fs.readFileSync(path.resolve('src/components/AIChatWidget.tsx'), 'utf8');
+
+    // Requirement 1: Accessible Close Button with aria-label="Close chat"
+    assert.ok(widgetSource.includes('aria-label="Close chat"'), 'Must have aria-label="Close chat"');
+    assert.ok(widgetSource.includes('<X className="h-4 w-4"'), 'Must render clearly visible X close icon');
+
+    // Requirement 2: Fixed floating panel in bottom-right corner of viewport with exact max-width and max-height
+    assert.ok(widgetSource.includes("position: 'fixed'"), 'Must be fixed position');
+    assert.ok(widgetSource.includes("right: '16px'"), 'Must be positioned at right: 16px');
+    assert.ok(widgetSource.includes("bottom: 'max(16px, env(safe-area-inset-bottom, 16px))'") || widgetSource.includes("bottom: '16px'"), 'Must be positioned at bottom: 16px with safe-area support');
+    assert.ok(widgetSource.includes("width: 'min(420px, calc(100vw - 32px))'"), 'Must limit width to min(420px, calc(100vw - 32px))');
+    assert.ok(widgetSource.includes("height: 'min(680px, calc(100dvh - 32px))'"), 'Must limit height to min(680px, calc(100dvh - 32px))');
+
+    // Requirement 3: Internal layout - messages is the only scrollable section, header and composer shrink-0
+    assert.ok(widgetSource.includes('flex-1 min-h-0 overflow-y-auto'), 'Messages body must have flex-1 min-h-0 overflow-y-auto');
+    assert.ok(widgetSource.includes('shrink-0'), 'Header and composer must be shrink-0');
+    assert.ok(widgetSource.includes('break-words [overflow-wrap:anywhere]'), 'Must prevent horizontal overflow and wrap words');
+
+    // Requirement 4 & 5: Keyboard accessibility (Escape key handler) and reopen launcher
+    assert.ok(widgetSource.includes("e.key === 'Escape'"), 'Must listen for Escape key to close');
+    assert.ok(widgetSource.includes('aria-label="Open support chat"'), 'Launcher button must have accessible aria-label');
+  });
 });

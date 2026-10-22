@@ -54,6 +54,11 @@ export const storageService = {
     }
   },
 
+  async uploadBlogImage(file: File, filename?: string): Promise<string> {
+    const safeName = filename || `blog-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+    return await this.uploadFile('blog-images', file, safeName);
+  },
+
   async uploadImage(bucket: string, path: string, file: File) {
     const { data, error } = await supabase.storage
       .from(bucket)

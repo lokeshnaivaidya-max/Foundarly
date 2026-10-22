@@ -15,6 +15,7 @@ import {
 import { blogService } from "@/services/blog";
 import { storageService } from "@/services/storage";
 import { useToast } from "@/hooks/use-toast";
+import { getSafeDatabaseErrorMessage, secureLog } from "@/utils/security";
 import type { Database } from "@/lib/database.types";
 
 type BlogPost = Database['public']['Tables']['blog']['Row'];
@@ -48,10 +49,10 @@ export default function AdminBlog() {
       const data = await blogService.getAll();
       setPosts(data);
     } catch (error) {
-      console.error('Error loading blog posts:', error);
+      secureLog.error('Error loading blog posts:', error);
       toast({
-        title: "Error",
-        description: "Failed to load blog posts",
+        title: "Load Error",
+        description: `Failed to load blog posts: ${getSafeDatabaseErrorMessage(error, 'Failed to load blog posts')}`,
         variant: "destructive"
       });
     } finally {
@@ -115,23 +116,36 @@ export default function AdminBlog() {
     }
 
     setSaving(true);
-    try {
-      let featuredImage = editing?.featured_image || null;
+    let featuredImage = editing?.featured_image || null;
 
-      // Upload image if new file selected
-      if (imageFile) {
-        featuredImage = await storageService.uploadFile('blog-images', imageFile, `blog-${Date.now()}`);
+    // Failure Point 1: Storage Image Upload
+    if (imageFile) {
+      try {
+        featuredImage = await storageService.uploadBlogImage(imageFile);
+      } catch (uploadError) {
+        secureLog.error('Error uploading blog image to storage:', uploadError);
+        const safeError = getSafeDatabaseErrorMessage(uploadError, 'Storage upload failed');
+        toast({
+          title: "Image Upload Failed",
+          description: `Failed to upload blog image: ${safeError}`,
+          variant: "destructive"
+        });
+        setSaving(false);
+        return;
       }
+    }
 
-      const postData = {
-        title: form.title,
-        content: form.content,
-        meta_title: form.meta_title || null,
-        meta_description: form.meta_description || null,
-        featured_image: featuredImage,
-        status: form.published ? "published" as const : "draft" as const
-      };
+    const postData = {
+      title: form.title,
+      content: form.content,
+      meta_title: form.meta_title || null,
+      meta_description: form.meta_description || null,
+      featured_image: featuredImage,
+      status: form.published ? "published" as const : "draft" as const
+    };
 
+    // Failure Point 2: Database Record Insert / Update
+    try {
       if (editing) {
         await blogService.update(editing.id, postData);
         toast({ title: "Updated", description: "Blog post updated successfully" });
@@ -142,11 +156,12 @@ export default function AdminBlog() {
 
       setDialogOpen(false);
       loadPosts();
-    } catch (error) {
-      console.error('Error saving blog post:', error);
+    } catch (dbError) {
+      secureLog.error('Error saving blog post to database:', dbError);
+      const safeError = getSafeDatabaseErrorMessage(dbError, 'Failed to save blog post');
       toast({
-        title: "Error",
-        description: "Failed to save blog post",
+        title: "Blog Save Failed",
+        description: `Failed to save blog post: ${safeError}`,
         variant: "destructive"
       });
     } finally {
@@ -162,10 +177,11 @@ export default function AdminBlog() {
       toast({ title: "Deleted", description: "Blog post removed successfully" });
       loadPosts();
     } catch (error) {
-      console.error('Error deleting blog post:', error);
+      secureLog.error('Error deleting blog post:', error);
+      const safeError = getSafeDatabaseErrorMessage(error, 'Failed to delete blog post');
       toast({
-        title: "Error",
-        description: "Failed to delete blog post",
+        title: "Delete Failed",
+        description: `Failed to delete blog post: ${safeError}`,
         variant: "destructive"
       });
     }

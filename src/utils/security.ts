@@ -118,6 +118,57 @@ export const secureLog = {
 };
 
 /**
+ * Safely format Supabase database and storage errors for client display
+ * Prevents credential/token leaks while providing clear diagnostics
+ */
+export function getSafeDatabaseErrorMessage(error: unknown, fallback = 'Operation failed'): string {
+  if (!error) return fallback;
+  if (typeof error === 'string') {
+    return /bearer|token|secret|key|password|jwt/i.test(error) ? fallback : error;
+  }
+
+  const err = error as any;
+  const rawMessage = err?.message || err?.error_description || err?.error || '';
+  const strMessage = typeof rawMessage === 'string' ? rawMessage : String(rawMessage);
+
+  // RLS policy permission violation (Code 42501 or message containing row-level security / permission denied)
+  if (
+    err?.code === '42501' ||
+    strMessage.toLowerCase().includes('row-level security') ||
+    strMessage.toLowerCase().includes('permission denied')
+  ) {
+    return 'Permission denied by Row Level Security. Ensure you are signed in as an administrator (Super Admin or Developer Admin).';
+  }
+
+  // Storage bucket not found or forbidden
+  if (
+    strMessage.toLowerCase().includes('bucket not found') ||
+    (err?.statusCode === 404 && strMessage.toLowerCase().includes('not found'))
+  ) {
+    return 'Storage bucket not found or inaccessible. Please verify storage bucket setup.';
+  }
+
+  // Duplicate key constraint violation (Code 23505)
+  if (err?.code === '23505' || strMessage.toLowerCase().includes('duplicate key')) {
+    return 'A record with this identifier already exists.';
+  }
+
+  // Network / fetch error
+  if (strMessage.includes('Failed to fetch') || strMessage.includes('NetworkError')) {
+    return 'Network connection error. Please check your internet connection.';
+  }
+
+  // If safe and under 200 characters without sensitive tokens
+  if (strMessage.length > 0 && strMessage.length < 200) {
+    if (!/bearer|token|secret|key|password|jwt/i.test(strMessage)) {
+      return strMessage;
+    }
+  }
+
+  return fallback;
+}
+
+/**
  * Content Security Policy headers
  */
 export const CSP_DIRECTIVES = {

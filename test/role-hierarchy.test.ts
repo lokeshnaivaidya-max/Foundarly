@@ -464,6 +464,16 @@ describe('Foundarly Super Admin & Developer Admin Role Hierarchy Suite', () => {
         if (op === 'DELETE') return isSuper; // Strictly Super Admin only
       }
 
+      if (table === 'blog') {
+        if (op === 'SELECT') return true; // public published, admins all
+        if (op === 'INSERT' || op === 'UPDATE' || op === 'DELETE') return isAdmin;
+      }
+
+      if (table === 'storage.blog-images') {
+        if (op === 'SELECT') return true; // public read
+        if (op === 'INSERT' || op === 'UPDATE' || op === 'DELETE') return isAdmin;
+      }
+
       if (table === 'profiles.role') {
         // Role alterations
         return isSuper;
@@ -478,6 +488,10 @@ describe('Foundarly Super Admin & Developer Admin Role Hierarchy Suite', () => {
     assert.equal(checkOperationAccess('super_admin', 'consultant_earnings', 'UPDATE'), true);
     assert.equal(checkOperationAccess('super_admin', 'consultant_earnings', 'DELETE'), true);
     assert.equal(checkOperationAccess('super_admin', 'bookings', 'DELETE'), true);
+    assert.equal(checkOperationAccess('super_admin', 'blog', 'INSERT'), true);
+    assert.equal(checkOperationAccess('super_admin', 'blog', 'UPDATE'), true);
+    assert.equal(checkOperationAccess('super_admin', 'blog', 'DELETE'), true);
+    assert.equal(checkOperationAccess('super_admin', 'storage.blog-images', 'INSERT'), true);
     assert.equal(checkOperationAccess('super_admin', 'profiles.role', 'UPDATE'), true);
 
     // 2. Developer Admin: operational SELECT and UPDATE, but strictly NO DELETE on financial/booking tables and NO role mutation
@@ -493,17 +507,25 @@ describe('Foundarly Super Admin & Developer Admin Role Hierarchy Suite', () => {
     assert.equal(checkOperationAccess('developer_admin', 'bookings', 'SELECT'), true);
     assert.equal(checkOperationAccess('developer_admin', 'bookings', 'UPDATE'), true);
     assert.equal(checkOperationAccess('developer_admin', 'bookings', 'DELETE'), false, 'Developer Admin must NOT be allowed to DELETE bookings');
+    assert.equal(checkOperationAccess('developer_admin', 'blog', 'INSERT'), true, 'Developer Admin can create blog posts');
+    assert.equal(checkOperationAccess('developer_admin', 'blog', 'UPDATE'), true, 'Developer Admin can update blog posts');
+    assert.equal(checkOperationAccess('developer_admin', 'blog', 'DELETE'), true, 'Developer Admin can delete blog posts');
+    assert.equal(checkOperationAccess('developer_admin', 'storage.blog-images', 'INSERT'), true, 'Developer Admin can upload blog images');
     assert.equal(checkOperationAccess('developer_admin', 'profiles.role', 'UPDATE'), false, 'Developer Admin must NOT be allowed to modify profile roles');
 
     // 3. Consultant: can SELECT own payments/earnings/payouts, INSERT payouts, but CANNOT UPDATE payments or payouts
     assert.equal(checkOperationAccess('consultant', 'upi_payments', 'UPDATE'), false, 'Consultant cannot verify payments');
     assert.equal(checkOperationAccess('consultant', 'payout_requests', 'UPDATE'), false, 'Consultant cannot self-approve payouts');
     assert.equal(checkOperationAccess('consultant', 'payout_requests', 'INSERT'), true, 'Consultant can request payouts');
+    assert.equal(checkOperationAccess('consultant', 'blog', 'INSERT'), false, 'Consultant cannot create blog posts');
+    assert.equal(checkOperationAccess('consultant', 'storage.blog-images', 'INSERT'), false, 'Consultant cannot upload blog images');
 
     // 4. Client: can SELECT own payments/bookings, INSERT bookings/payments, but CANNOT access payouts or earnings
     assert.equal(checkOperationAccess('client', 'upi_payments', 'UPDATE'), false, 'Client cannot self-verify payments');
     assert.equal(checkOperationAccess('client', 'payout_requests', 'SELECT'), false, 'Client cannot view consultant payouts');
     assert.equal(checkOperationAccess('client', 'consultant_earnings', 'SELECT'), false, 'Client cannot view consultant earnings');
+    assert.equal(checkOperationAccess('client', 'blog', 'INSERT'), false, 'Client cannot create blog posts');
+    assert.equal(checkOperationAccess('client', 'storage.blog-images', 'INSERT'), false, 'Client cannot upload blog images');
 
     // 5. Anonymous: can only INSERT bookings and payment proofs (guest flow)
     assert.equal(checkOperationAccess('anon', 'bookings', 'INSERT'), true);
@@ -511,6 +533,8 @@ describe('Foundarly Super Admin & Developer Admin Role Hierarchy Suite', () => {
     assert.equal(checkOperationAccess('anon', 'bookings', 'SELECT'), false);
     assert.equal(checkOperationAccess('anon', 'upi_payments', 'SELECT'), false);
     assert.equal(checkOperationAccess('anon', 'payout_requests', 'SELECT'), false);
+    assert.equal(checkOperationAccess('anon', 'blog', 'INSERT'), false, 'Anonymous cannot create blog posts');
+    assert.equal(checkOperationAccess('anon', 'storage.blog-images', 'INSERT'), false, 'Anonymous cannot upload blog images');
   });
 });
 

@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
@@ -177,9 +178,31 @@ async function requireSuperAdminAuth(req: express.Request, res: express.Response
 
 const currentDir = typeof __dirname !== "undefined" ? __dirname : process.cwd();
 
+function parsePort(): number {
+  const portArgIdx = process.argv.indexOf("--port");
+  if (portArgIdx !== -1 && process.argv[portArgIdx + 1]) {
+    const val = parseInt(process.argv[portArgIdx + 1], 10);
+    if (!isNaN(val)) return val;
+  }
+  if (process.env.PORT) {
+    const val = parseInt(process.env.PORT, 10);
+    if (!isNaN(val)) return val;
+  }
+  return 3000;
+}
+
+function parseHost(): string {
+  const hostArgIdx = process.argv.indexOf("--host");
+  if (hostArgIdx !== -1 && process.argv[hostArgIdx + 1]) {
+    return process.argv[hostArgIdx + 1];
+  }
+  return process.env.HOST || "0.0.0.0";
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parsePort();
+  const HOST = parseHost();
 
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "1mb" }));
@@ -3895,14 +3918,10 @@ async function startServer() {
   });
 
   // Vite middleware for development vs static build for production
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(currentDir, "dist");
+  const distPath = path.join(currentDir, "dist");
+  const distExists = fs.existsSync(path.join(distPath, "index.html"));
+
+  if (process.env.NODE_ENV === "production" && distExists) {
     app.use(express.static(distPath));
 
     const recognizedSpaRoutes = [
@@ -3944,10 +3963,28 @@ async function startServer() {
       }
       next();
     });
+  } else {
+    const vite = await createViteServer({
+      server: {
+        middlewareMode: true,
+        hmr: false,
+        ws: false,
+      },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Foundarly Server] Running on http://localhost:${PORT}`);
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`[Foundarly Server] Running on http://${HOST}:${PORT}`);
+  });
+
+  server.on("error", (err: any) => {
+    if (err?.code === "EADDRINUSE") {
+      console.warn(`[Foundarly Server] Port ${PORT} already in use; waiting for existing process.`);
+    } else {
+      console.error("[Foundarly Server] Server error:", err);
+    }
   });
 }
 

@@ -13,6 +13,8 @@ export default defineConfig({
   server: {
     host: "::",
     port: 3000,
+    hmr: false,
+    ws: false,
   },
   plugins: [react()],
   resolve: {

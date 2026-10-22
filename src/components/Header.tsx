@@ -31,6 +31,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { settingsService } from "@/services/settings";
 import { cn } from "@/lib/utils";
+import ProfileDropdown from "@/components/kokonutui/profile-dropdown";
+import SwitchButton from "@/components/kokonutui/switch-button";
 
 const navLinks = [
   { label: "Home", path: "/" },
@@ -257,121 +259,12 @@ export default function Header() {
             </Link>
           )}
 
-          {/* Authenticated User Profile Dropdown */}
+          {/* Kokonut UI Theme Switcher */}
+          <SwitchButton size="sm" showLabel={false} className="shrink-0" />
+
+          {/* Authenticated User Profile Dropdown (Kokonut UI Account Menu) */}
           {user && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  className="relative h-9 w-9 rounded-full ring-2 ring-primary/20 hover:ring-primary/50 transition-all p-0 overflow-hidden focus-visible:ring-primary"
-                >
-                  <Avatar className="h-9 w-9">
-                    <AvatarImage
-                      src={profile?.avatar_url || user.user_metadata?.avatar_url}
-                      alt={profile?.full_name || "User"}
-                    />
-                    <AvatarFallback className="bg-primary/15 text-primary text-xs font-bold">
-                      {getInitials()}
-                    </AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-56 mt-2 rounded-2xl p-2 border-border/80 shadow-xl backdrop-blur-xl" align="end">
-                <DropdownMenuLabel className="font-normal px-2 py-2">
-                  <div className="flex flex-col space-y-1">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-semibold leading-none text-foreground truncate">
-                        {profile?.full_name || "User Account"}
-                      </p>
-                      {isSuperAdmin ? (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
-                          Super Admin
-                        </span>
-                      ) : isDeveloperAdmin ? (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 shrink-0">
-                          Developer Admin
-                        </span>
-                      ) : isConsultantRole ? (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/20 text-primary border border-primary/30 shrink-0">
-                          Consultant
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="text-xs leading-none text-muted-foreground truncate">
-                      {user.email}
-                    </p>
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator className="my-1 bg-border/60" />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem
-                    onClick={() => navigate(isAdminRole ? "/admin" : isConsultantRole ? "/consultant/dashboard" : "/my-bookings")}
-                    className="cursor-pointer rounded-lg px-2.5 py-2 text-xs font-medium focus:bg-primary/10 focus:text-primary transition-colors"
-                  >
-                    <User className="mr-2 h-4 w-4 text-muted-foreground" />
-                    <span>My Profile</span>
-                  </DropdownMenuItem>
-
-                  {isClientRole && (
-                    <DropdownMenuItem
-                      onClick={() => navigate("/my-bookings")}
-                      className="cursor-pointer rounded-lg px-2.5 py-2 text-xs font-medium focus:bg-primary/10 focus:text-primary transition-colors"
-                    >
-                      <Calendar className="mr-2 h-4 w-4 text-muted-foreground" />
-                      <span>My Bookings</span>
-                    </DropdownMenuItem>
-                  )}
-
-                  {isConsultantRole && (
-                    <DropdownMenuItem
-                      onClick={() => navigate("/consultant/dashboard")}
-                      className="cursor-pointer rounded-lg px-2.5 py-2 text-xs font-semibold text-primary focus:bg-primary/10 focus:text-primary transition-colors"
-                    >
-                      <Briefcase className="mr-2 h-4 w-4 text-primary" />
-                      <span>Consultant Dashboard</span>
-                    </DropdownMenuItem>
-                  )}
-
-                  {isAdminRole && (
-                    <DropdownMenuItem
-                      onClick={() => navigate("/admin")}
-                      className="cursor-pointer rounded-lg px-2.5 py-2 text-xs font-semibold text-primary focus:bg-primary/10 focus:text-primary transition-colors"
-                    >
-                      <ShieldCheck className="mr-2 h-4 w-4 text-primary" />
-                      <span>Admin Dashboard</span>
-                    </DropdownMenuItem>
-                  )}
-
-                  {isClientRole && (
-                    <DropdownMenuItem
-                      onClick={() => navigate("/apply-consultant")}
-                      className="cursor-pointer rounded-lg px-2.5 py-2 text-xs font-medium focus:bg-primary/10 focus:text-primary transition-colors"
-                    >
-                      <Briefcase className="mr-2 h-4 w-4 text-muted-foreground" />
-                      <span>Become a Consultant</span>
-                    </DropdownMenuItem>
-                  )}
-
-                  <DropdownMenuItem
-                    onClick={() => navigate(isAdminRole ? "/admin/settings" : isConsultantRole ? "/consultant/dashboard" : "/my-bookings")}
-                    className="cursor-pointer rounded-lg px-2.5 py-2 text-xs font-medium focus:bg-primary/10 focus:text-primary transition-colors"
-                  >
-                    <Settings className="mr-2 h-4 w-4 text-muted-foreground" />
-                    <span>Settings</span>
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-
-                <DropdownMenuSeparator className="my-1 bg-border/60" />
-
-                <DropdownMenuItem
-                  onClick={handleSignOut}
-                  className="cursor-pointer rounded-lg px-2.5 py-2 text-xs font-medium text-destructive focus:bg-destructive/10 focus:text-destructive transition-colors"
-                >
-                  <LogOut className="mr-2 h-4 w-4" />
-                  <span>Sign Out</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <ProfileDropdown />
           )}
         </div>
 

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Shield, BadgeCheck, Video } from "lucide-react";
 import Lottie from "lottie-react";
 import { useAuth } from "@/contexts/AuthContext";
+import TextMorph from "@/components/kokonutui/text-morph";
 
 function Particle({ x, y, size, delay, dur }: { x: string; y: string; size: number; delay: number; dur: number }) {
   return (
@@ -96,14 +97,20 @@ function HeroSection() {
 
           {/* LEFT — Text content */}
           <div className="w-full lg:w-1/2 flex flex-col items-center lg:items-start text-center lg:text-left">
-            <motion.p
+            <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.2 }}
-              className="text-primary font-sans text-sm font-semibold tracking-[0.2em] uppercase mb-5"
+              className="text-primary font-sans text-xs sm:text-sm font-semibold tracking-[0.18em] uppercase mb-5 flex items-center justify-center lg:justify-start gap-2 flex-wrap"
             >
-              Premium 1-on-1 Consulting
-            </motion.p>
+              <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+              <span>PREMIUM 1-ON-1</span>
+              <TextMorph
+                words={["CONSULTING", "ADVISORY", "STRATEGY", "TRANSFORMATION"]}
+                className="text-primary font-bold border-b-2 border-primary/40 pb-0.5"
+                interval={2400}
+              />
+            </motion.div>
 
             <motion.h1
               initial={{ opacity: 0, y: 30 }}

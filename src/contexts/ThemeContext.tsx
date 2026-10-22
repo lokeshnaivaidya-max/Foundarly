@@ -52,6 +52,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const applyTheme = (theme: Theme) => {
     const root = document.documentElement;
+    root.classList.toggle('dark', theme === 'dark');
     
     if (theme === 'dark') {
       // Dark theme with gold accents

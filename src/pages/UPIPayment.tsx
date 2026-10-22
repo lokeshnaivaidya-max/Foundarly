@@ -272,6 +272,14 @@ export default function UPIPaymentPage() {
                     <p className="text-xs text-muted-foreground mb-1">Phone Number</p>
                     <p className="font-medium">{formData.customerPhone}</p>
                   </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Scheduled Date</p>
+                    <p className="font-medium">{booking?.date || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Scheduled Time</p>
+                    <p className="font-medium text-primary">{booking?.time && booking.time !== 'Flexible' ? `${booking.time} IST` : 'Pending'}</p>
+                  </div>
                   <div className="col-span-2">
                     <p className="text-xs text-muted-foreground mb-1">Email</p>
                     <p className="font-medium">{formData.customerEmail}</p>
@@ -493,8 +501,14 @@ export default function UPIPaymentPage() {
                     <span className="font-medium">{booking.session_duration} minutes</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Preferred Date</span>
-                    <span className="font-medium">{booking.date}{booking.time && booking.time !== 'Flexible' ? ` at ${booking.time}` : ''}</span>
+                    <span className="text-muted-foreground">Scheduled Date</span>
+                    <span className="font-medium">{booking.date}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Scheduled Time</span>
+                    <span className="font-medium text-primary font-semibold">
+                      {booking.time && booking.time !== 'Flexible' ? `${booking.time} IST` : 'Pending / Flexible'}
+                    </span>
                   </div>
                 </div>
 

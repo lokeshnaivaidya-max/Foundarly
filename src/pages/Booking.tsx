@@ -27,6 +27,7 @@ import {
   checkRateLimit,
   secureLog 
 } from "@/utils/security";
+import { generateAvailableSlots, TimeSlot } from "@/utils/timeSlots";
 
 function Particle({ x, y, size, delay, dur }: { x: string; y: string; size: number; delay: number; dur: number }) {
   return (
@@ -47,8 +48,18 @@ const PARTICLES = [
 export default function BookingPage() {
   const [submitted, setSubmitted] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
-  const [formData, setFormData] = useState({ name: "", email: "", consultant_id: "", date: "", message: "", session_duration: 60 });
+  const [formData, setFormData] = useState({ 
+    name: "", 
+    email: "", 
+    consultant_id: "", 
+    date: "", 
+    time: "", 
+    message: "", 
+    session_duration: 60 
+  });
   const [selectedConsultant, setSelectedConsultant] = useState<any>(null);
+  const [availableSlots, setAvailableSlots] = useState<TimeSlot[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
 
   // Referral code state
   const [referralInput, setReferralInput] = useState("");
@@ -95,9 +106,16 @@ export default function BookingPage() {
 
   useEffect(() => {
     const id = searchParams.get("consultant");
+    const durationParam = searchParams.get("duration");
+    const dur = durationParam === "30" ? 30 : 60;
     if (id && consultants) {
       const found = consultants.find(c => c.id === id);
-      if (found) { setFormData(prev => ({ ...prev, consultant_id: id })); setSelectedConsultant(found); }
+      if (found) { 
+        setFormData(prev => ({ ...prev, consultant_id: id, session_duration: dur })); 
+        setSelectedConsultant(found); 
+      }
+    } else if (durationParam) {
+      setFormData(prev => ({ ...prev, session_duration: dur }));
     }
   }, [consultants, searchParams]);
 
@@ -106,7 +124,54 @@ export default function BookingPage() {
     else setSelectedConsultant(null);
   }, [formData.consultant_id, consultants]);
 
-  const sessionPrice = selectedConsultant?.pricing_60 || 0;
+  // Load available time slots whenever consultant, date, or session duration changes
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadSlots() {
+      if (!formData.consultant_id || !formData.date) {
+        setAvailableSlots([]);
+        return;
+      }
+
+      setSlotsLoading(true);
+      try {
+        const booked = await bookingsService.getBookedSlots(formData.consultant_id, formData.date);
+        if (isCancelled) return;
+
+        const slots = generateAvailableSlots({
+          dateStr: formData.date,
+          preferredTime: selectedConsultant?.preferred_time,
+          bookedSlots: booked,
+          durationMinutes: formData.session_duration || 60,
+        });
+
+        setAvailableSlots(slots);
+
+        // If currently chosen time is invalid or unavailable in the new slots, reset it
+        if (formData.time) {
+          const match = slots.find(s => s.time === formData.time);
+          if (!match || !match.available) {
+            setFormData(prev => ({ ...prev, time: "" }));
+          }
+        }
+      } catch (err) {
+        console.warn("[BookingPage] Failed to fetch time slots:", err);
+        if (!isCancelled) setAvailableSlots([]);
+      } finally {
+        if (!isCancelled) setSlotsLoading(false);
+      }
+    }
+
+    loadSlots();
+    return () => {
+      isCancelled = true;
+    };
+  }, [formData.consultant_id, formData.date, selectedConsultant, formData.session_duration]);
+
+  const sessionPrice = (formData.session_duration === 30 && selectedConsultant?.pricing_30)
+    ? selectedConsultant.pricing_30
+    : (selectedConsultant?.pricing_60 || 0);
   const effectivePrice = Math.max(0, sessionPrice - discountAmount);
 
   const handleApplyReferral = async () => {
@@ -169,6 +234,10 @@ export default function BookingPage() {
       toast.error("Please select a preferred date"); 
       return; 
     }
+    if (!formData.time || formData.time.toLowerCase() === "flexible") { 
+      toast.error("Please select an available consultation time slot"); 
+      return; 
+    }
     if (!validateEmail(formData.email)) {
       toast.error("Please enter a valid email address");
       return;
@@ -194,6 +263,8 @@ export default function BookingPage() {
         name: formData.name,
         email: formData.email,
         date: formData.date,
+        time: formData.time,
+        session_duration: formData.session_duration,
         session_price: sessionPrice
       });
 
@@ -203,9 +274,9 @@ export default function BookingPage() {
         name: sanitizeString(formData.name), 
         email: formData.email.toLowerCase().trim(),
         date: formData.date, 
-        time: "Flexible", 
+        time: formData.time, 
         message: formData.message ? sanitizeString(formData.message) : null,
-        session_duration: 60, 
+        session_duration: formData.session_duration, 
         session_price: effectivePrice, 
         payment_status: "pending", 
         status: "pending",
@@ -405,15 +476,41 @@ export default function BookingPage() {
                   <motion.div className="bg-secondary/40 border border-border rounded-xl p-4"
                     initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} transition={{ duration: 0.3 }}>
                     <label className="text-sm font-medium text-foreground mb-3 block">Session Duration</label>
-                    <motion.button type="button" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                      className="w-full p-4 rounded-xl border-2 border-primary bg-primary/10 shadow-sm text-left">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Clock className="h-3.5 w-3.5 text-primary" />
-                        <span className="font-semibold text-foreground text-sm">30-60 min session</span>
-                      </div>
-                      <div className="text-xl font-bold text-primary">{formatPrice(selectedConsultant.pricing_60)}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">Deep-dive consultation</div>
-                    </motion.button>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, session_duration: 30 }))}
+                        className={`p-3.5 rounded-xl border text-left transition-all ${
+                          formData.session_duration === 30
+                            ? "border-2 border-primary bg-primary/10 shadow-sm ring-1 ring-primary/30"
+                            : "border-border bg-secondary/50 hover:border-primary/40 text-muted-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Clock className={`h-3.5 w-3.5 ${formData.session_duration === 30 ? "text-primary" : "text-muted-foreground"}`} />
+                          <span className="font-semibold text-foreground text-sm">30 min session</span>
+                        </div>
+                        <div className="text-lg font-bold text-primary">{formatPrice(selectedConsultant.pricing_30 || selectedConsultant.pricing_60)}</div>
+                        <div className="text-[11px] text-muted-foreground mt-0.5">Quick consultation</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, session_duration: 60 }))}
+                        className={`p-3.5 rounded-xl border text-left transition-all ${
+                          formData.session_duration === 60
+                            ? "border-2 border-primary bg-primary/10 shadow-sm ring-1 ring-primary/30"
+                            : "border-border bg-secondary/50 hover:border-primary/40 text-muted-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Clock className={`h-3.5 w-3.5 ${formData.session_duration === 60 ? "text-primary" : "text-muted-foreground"}`} />
+                          <span className="font-semibold text-foreground text-sm">60 min session</span>
+                        </div>
+                        <div className="text-lg font-bold text-primary">{formatPrice(selectedConsultant.pricing_60)}</div>
+                        <div className="text-[11px] text-muted-foreground mt-0.5">Deep-dive consultation</div>
+                      </button>
+                    </div>
                   </motion.div>
                 )}
 
@@ -425,6 +522,93 @@ export default function BookingPage() {
                   <Input required type="date" className="bg-secondary border-border focus:border-primary/50 w-full"
                     value={formData.date} onChange={(e) => handleChange("date", e.target.value)}
                     min={new Date().toISOString().split("T")[0]} />
+                </div>
+
+                {/* Preferred Time / Available Time Slots */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <label className="text-sm font-medium text-foreground flex items-center gap-1.5 block">
+                      <Clock className="h-3.5 w-3.5 text-primary" /> Preferred Time / Available Time Slots *
+                    </label>
+                    {selectedConsultant?.preferred_time && (
+                      <span className="text-[11px] bg-primary/10 text-primary border border-primary/20 px-2.5 py-0.5 rounded-full font-medium">
+                        Window: {selectedConsultant.preferred_time}
+                      </span>
+                    )}
+                  </div>
+
+                  {!formData.consultant_id ? (
+                    <div className="p-4 rounded-xl border border-dashed border-border bg-secondary/20 text-xs text-muted-foreground text-center">
+                      Please select a consultant first to view available time slots.
+                    </div>
+                  ) : !formData.date ? (
+                    <div className="p-4 rounded-xl border border-dashed border-border bg-secondary/20 text-xs text-muted-foreground text-center">
+                      Please select a preferred date to view available time slots.
+                    </div>
+                  ) : slotsLoading ? (
+                    <div className="p-6 rounded-xl border border-border bg-secondary/20 flex items-center justify-center gap-2.5 text-xs text-muted-foreground">
+                      <span className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                      <span>Checking consultant schedule & bookings...</span>
+                    </div>
+                  ) : availableSlots.length === 0 ? (
+                    <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-500 text-center space-y-1">
+                      <p className="font-semibold">No time slots configured</p>
+                      <p className="text-muted-foreground text-[11px]">
+                        No consultation slots available for this date. Please choose another date.
+                      </p>
+                    </div>
+                  ) : availableSlots.every(s => !s.available) ? (
+                    <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-500 text-center space-y-1">
+                      <p className="font-semibold">All slots unavailable for this date</p>
+                      <p className="text-muted-foreground text-[11px]">
+                        All time slots for {formData.date} are either booked or have passed. Please select a future date.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                        {availableSlots.map((slot) => {
+                          const isSelected = formData.time === slot.time;
+                          const isUnavailable = !slot.available;
+
+                          return (
+                            <button
+                              key={slot.time}
+                              type="button"
+                              disabled={isUnavailable}
+                              onClick={() => handleChange("time", slot.time)}
+                              title={
+                                slot.reason === 'booked' ? 'This slot is already booked' :
+                                slot.reason === 'past' ? 'This slot has already passed today' :
+                                `Select ${slot.label}`
+                              }
+                              className={`p-2.5 rounded-xl border text-center transition-all flex flex-col items-center justify-center gap-0.5 relative ${
+                                isSelected
+                                  ? "bg-primary text-primary-foreground border-primary font-bold shadow-md ring-2 ring-primary/40 glow-gold-sm"
+                                  : isUnavailable
+                                  ? "bg-secondary/20 border-border/40 text-muted-foreground/40 cursor-not-allowed opacity-60"
+                                  : "bg-secondary/60 border-border text-foreground hover:border-primary/50 hover:bg-secondary/90 cursor-pointer"
+                              }`}
+                            >
+                              <span className={`text-xs font-semibold ${isUnavailable ? "line-through" : ""}`}>
+                                {slot.time}
+                              </span>
+                              <span className="text-[10px] opacity-75">
+                                {isUnavailable
+                                  ? (slot.reason === 'booked' ? 'Booked' : 'Past')
+                                  : 'IST'}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {formData.time && (
+                        <p className="text-[11px] text-emerald-500 font-medium flex items-center gap-1 mt-1">
+                          <Check size={12} /> Selected Slot: <span className="font-bold">{formData.time} IST</span> ({formData.session_duration} min consultation)
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Message */}

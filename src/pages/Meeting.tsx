@@ -16,6 +16,7 @@ import { WebRTCService } from "@/services/webrtcService";
 import { meetingService, MeetingAccessResponse } from "@/services/meetingService";
 import { meetingTrackingService } from "@/services/meetingTracking";
 import { hasParticipantJoinedLocal, recordParticipantJoinLocal, getMeetingActionLabel } from "@/utils/meetingRejoin";
+import { getCountdownTargetMs, parseBookingDateTime } from "@/utils/timeSlots";
 
 interface BookingWithConsultant {
   id: string;
@@ -198,8 +199,11 @@ function LocalVideo({ stream, videoOff, className }: { stream: MediaStream | nul
 }
 
 function getMeetingStatus(date: string, time: string, duration: number): "upcoming" | "live" | "completed" | "missed" {
+  const start = parseBookingDateTime(date, time);
+  if (!start || isNaN(start.getTime())) {
+    return "upcoming";
+  }
   const now = new Date();
-  const start = new Date(`${date}T${time}`);
   const end = new Date(start.getTime() + duration * 60 * 1000);
   const joinWindow = new Date(start.getTime() - 5 * 60 * 1000);
   
@@ -210,8 +214,11 @@ function getMeetingStatus(date: string, time: string, duration: number): "upcomi
 }
 
 function canJoinMeeting(date: string, time: string, duration: number): boolean {
+  const start = parseBookingDateTime(date, time);
+  if (!start || isNaN(start.getTime())) {
+    return false;
+  }
   const now = new Date();
-  const start = new Date(`${date}T${time}`);
   const end = new Date(start.getTime() + duration * 60 * 1000);
   const joinWindow = new Date(start.getTime() - 5 * 60 * 1000);
   
@@ -220,22 +227,47 @@ function canJoinMeeting(date: string, time: string, duration: number): boolean {
 }
 
 function Countdown({ targetDate, targetTime }: { targetDate: string; targetTime: string }) {
-  const [diff, setDiff] = useState(0);
+  const [diff, setDiff] = useState<number | null>(null);
+  const [isPendingTime, setIsPendingTime] = useState(false);
+
   useEffect(() => {
-    const target = new Date(`${targetDate}T${targetTime}`).getTime() - 5 * 60 * 1000;
-    const tick = () => setDiff(Math.max(0, target - Date.now()));
+    const { targetMs, isValid } = getCountdownTargetMs(targetDate, targetTime);
+    if (!isValid || targetMs === null) {
+      setIsPendingTime(true);
+      return;
+    }
+
+    setIsPendingTime(false);
+    const tick = () => setDiff(Math.max(0, targetMs - Date.now()));
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [targetDate, targetTime]);
-  const h = Math.floor(diff / 3600000);
-  const m = Math.floor((diff % 3600000) / 60000);
-  const s = Math.floor((diff % 60000) / 1000);
+
+  if (isPendingTime) {
+    return (
+      <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-center max-w-md mx-auto space-y-2">
+        <div className="flex items-center justify-center gap-2 text-amber-500 text-sm font-semibold">
+          <AlertCircle className="h-4 w-4" />
+          <span>Scheduled Start Time Pending</span>
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          This consultation was scheduled without a fixed time slot ({targetTime || "Flexible"}). Please coordinate with your consultant or administrator to confirm the exact session start time.
+        </p>
+      </div>
+    );
+  }
+
+  const safeDiff = diff === null || isNaN(diff) || !isFinite(diff) ? 0 : Math.max(0, diff);
+  const h = Math.floor(safeDiff / 3600000);
+  const m = Math.floor((safeDiff % 3600000) / 60000);
+  const s = Math.floor((safeDiff % 60000) / 1000);
+
   return (
     <div className="flex items-center gap-3 justify-center">
       {[{ v: h, l: "Hours" }, { v: m, l: "Minutes" }, { v: s, l: "Seconds" }].map(({ v, l }) => (
         <div key={l} className="flex flex-col items-center bg-secondary border border-border rounded-xl px-5 py-3 min-w-[70px]">
-          <span className="font-display text-3xl font-bold text-primary">{String(v).padStart(2, "0")}</span>
+          <span className="font-display text-3xl font-bold text-primary">{String(isNaN(v) ? 0 : v).padStart(2, "0")}</span>
           <span className="text-xs text-muted-foreground mt-1">{l}</span>
         </div>
       ))}

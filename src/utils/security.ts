@@ -34,10 +34,13 @@ export function validateDate(date: string): boolean {
   return parsedDate instanceof Date && !isNaN(parsedDate.getTime());
 }
 
-// Validate time (HH:MM)
+// Validate time (HH:MM or hh:mm AM/PM)
 export function validateTime(time: string): boolean {
-  const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
-  return timeRegex.test(time);
+  if (!time || typeof time !== 'string') return false;
+  const clean = time.trim();
+  const timeRegex24 = /^([01]\d|2[0-3]):([0-5]\d)(:([0-5]\d))?$/;
+  const timeRegex12 = /^(0?[1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)$/i;
+  return timeRegex24.test(clean) || timeRegex12.test(clean);
 }
 
 // Validate phone number (international format)

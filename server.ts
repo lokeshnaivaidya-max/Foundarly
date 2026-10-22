@@ -45,6 +45,12 @@ import {
   FollowUpRequest,
 } from "./src/utils/meetingRejoin.js";
 import { followUpStorage } from "./src/server/followUpStorage.js";
+import {
+  generateAvailableSlots,
+  isSlotInPast,
+  APP_TIMEZONE,
+  parseTimeString,
+} from "./src/utils/timeSlots.js";
 import { completionEmailStorage } from "./src/server/completionEmailStorage.js";
 import { meetingParticipantStorage } from "./src/server/meetingParticipantStorage.js";
 import agoraAccessToken from "agora-access-token";
@@ -1556,6 +1562,170 @@ async function startServer() {
       return res.status(500).json({
         success: false,
         error: "Internal server error occurred while processing reschedule request.",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  });
+
+  // =========================================================================
+  // SCHEDULING & AVAILABLE SLOTS VALIDATION ENDPOINTS
+  // =========================================================================
+
+  // 1. Get available time slots for a consultant on a specific date
+  app.get("/api/consultants/:id/available-slots", async (req, res) => {
+    const { id } = req.params;
+    const { date, duration } = req.query as { date?: string; duration?: string };
+
+    if (!id || typeof id !== "string") {
+      return res.status(400).json({
+        success: false,
+        error: "Valid consultant ID is required.",
+        code: "INVALID_CONSULTANT_ID",
+      });
+    }
+
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({
+        success: false,
+        error: "Valid date in YYYY-MM-DD format is required.",
+        code: "INVALID_DATE",
+      });
+    }
+
+    const sessionDuration = parseInt(duration || "60", 10) === 30 ? 30 : 60;
+
+    try {
+      // Fetch consultant availability
+      const { data: consultant, error: cErr } = await supabaseAdminClient
+        .from("consultants")
+        .select("id, name, preferred_time")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (cErr || !consultant) {
+        return res.status(404).json({
+          success: false,
+          error: "Consultant not found.",
+          code: "CONSULTANT_NOT_FOUND",
+        });
+      }
+
+      // Fetch active bookings for this consultant on the specified date
+      const { data: activeBookings, error: bErr } = await supabaseAdminClient
+        .from("bookings")
+        .select("id, time, status, payment_status")
+        .eq("consultant_id", id)
+        .eq("date", date)
+        .not("status", "in", '("cancelled","rejected")')
+        .neq("payment_status", "rejected");
+
+      if (bErr) {
+        console.warn("[Slot Server] Notice querying active bookings:", bErr);
+      }
+
+      const bookedTimes: string[] = (activeBookings || [])
+        .map((b) => b.time)
+        .filter((t): t is string => Boolean(t && t !== "Flexible"));
+
+      const slots = generateAvailableSlots({
+        consultantPreferredTime: consultant.preferred_time,
+        dateStr: date,
+        sessionDuration,
+        bookedTimes,
+      });
+
+      return res.json({
+        success: true,
+        consultant_id: id,
+        date,
+        timezone: "Asia/Kolkata (IST, UTC+05:30)",
+        slots,
+      });
+    } catch (err: any) {
+      console.error("[Slot Server] Unexpected error fetching slots:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Internal server error fetching availability slots.",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  });
+
+  // 2. Validate time slot availability before payment/booking
+  app.post("/api/bookings/validate-slot", async (req, res) => {
+    const { consultant_id, date, time } = req.body || {};
+
+    if (!consultant_id || !date || !time) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        error: "consultant_id, date, and time are required.",
+        code: "MISSING_FIELDS",
+      });
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        error: "Invalid date format. Expected YYYY-MM-DD.",
+        code: "INVALID_DATE",
+      });
+    }
+
+    if (!parseTimeString(time)) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        error: "Invalid time format. Expected e.g. '10:00 AM' or '14:00'.",
+        code: "INVALID_TIME",
+      });
+    }
+
+    if (isSlotInPast(date, time)) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        error: "This time slot has already passed or is within the minimum 15-minute booking buffer.",
+        code: "SLOT_IN_PAST",
+      });
+    }
+
+    try {
+      // Check for conflict
+      const { data: conflicts, error: conflictErr } = await supabaseAdminClient
+        .from("bookings")
+        .select("id, status, payment_status")
+        .eq("consultant_id", consultant_id)
+        .eq("date", date)
+        .eq("time", time)
+        .not("status", "in", '("cancelled","rejected")')
+        .neq("payment_status", "rejected");
+
+      if (conflictErr) {
+        console.warn("[Slot Server] Conflict check query notice:", conflictErr);
+      }
+
+      if (conflicts && conflicts.length > 0) {
+        return res.status(409).json({
+          success: false,
+          valid: false,
+          error: "This time slot is already booked for this consultant. Please choose another time.",
+          code: "SLOT_ALREADY_BOOKED",
+        });
+      }
+
+      return res.json({
+        success: true,
+        valid: true,
+        message: "Time slot is available.",
+      });
+    } catch (err: any) {
+      console.error("[Slot Server] Error validating slot:", err);
+      return res.status(500).json({
+        success: false,
+        valid: false,
+        error: "Internal error validating slot availability.",
         code: "INTERNAL_ERROR",
       });
     }

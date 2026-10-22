@@ -3,6 +3,7 @@ import {
   MeetingSessionStatus,
   calculateRejoinEligibility,
   validateParticipantAccess,
+  parseSessionTimes,
   FollowUpRequest,
   hasParticipantJoinedLocal,
 } from '@/utils/meetingRejoin';
@@ -202,6 +203,8 @@ export const meetingService = {
           authCheck.role
         );
 
+        const sessionTimes = parseSessionTimes(booking);
+
         return {
           success: true,
           authorized: true,
@@ -216,8 +219,8 @@ export const meetingService = {
             consultants: consultantObj,
           },
           timing: {
-            scheduledStart: new Date(booking.date).toISOString(),
-            scheduledEnd: new Date(booking.date).toISOString(),
+            scheduledStart: sessionTimes.scheduledStart.toISOString(),
+            scheduledEnd: sessionTimes.scheduledEnd.toISOString(),
             rejoinDeadline: eligibility.rejoinDeadline.toISOString(),
             rejoinTimeRemainingMs: eligibility.rejoinTimeRemainingMs,
             rejoinDaysRemaining: eligibility.rejoinDaysRemaining,

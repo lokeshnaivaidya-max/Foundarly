@@ -9,12 +9,47 @@ import {
   sanitizeString,
   validateEmail,
 } from '@/utils/security';
+import {
+  parseBookingDateTime,
+  isSlotInPast,
+  normalizeTimeSlot,
+} from '@/utils/timeSlots';
 
 type Booking = Database['public']['Tables']['bookings']['Row'];
 type BookingInsert = Database['public']['Tables']['bookings']['Insert'];
 type BookingUpdate = Database['public']['Tables']['bookings']['Update'];
 
 export const bookingsService = {
+  /**
+   * Fetch active booked time slots for a consultant on a given date to prevent double-booking.
+   */
+  async getBookedSlots(consultantId: string, date: string): Promise<string[]> {
+    if (!validateUUID(consultantId) || !validateDate(date)) {
+      return [];
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('time, status, payment_status')
+        .eq('consultant_id', consultantId)
+        .eq('date', date)
+        .not('status', 'in', '("cancelled","rejected")')
+        .neq('payment_status', 'rejected');
+
+      if (error || !data) {
+        console.warn('[BookingsService.getBookedSlots] Warning fetching booked slots:', error);
+        return [];
+      }
+
+      return data
+        .map((b: any) => (b.time || '').trim())
+        .filter((t: string) => t && t.toLowerCase() !== 'flexible');
+    } catch (err) {
+      console.warn('[BookingsService.getBookedSlots] Error fetching booked slots:', err);
+      return [];
+    }
+  },
   async getAll(statusFilter?: 'all' | 'pending' | 'confirmed' | 'rejected' | string) {
     console.log(`[BookingsService.getAll] Fetching bookings from Supabase with filter: ${statusFilter || 'all'}...`);
     let rawBookings: any[] = [];
@@ -173,6 +208,40 @@ export const bookingsService = {
     }
 
     const newBookingId = booking.id || crypto.randomUUID();
+    const rawTime = (booking.time || 'Flexible').trim();
+    const normalizedTime = rawTime.toLowerCase() === 'flexible' ? 'Flexible' : normalizeTimeSlot(rawTime);
+
+    // Validate date format
+    if (!validateDate(booking.date)) {
+      throw new Error('Invalid date format (must be YYYY-MM-DD)');
+    }
+
+    // Validate slot is not in the past (if specific time provided)
+    if (normalizedTime !== 'Flexible') {
+      if (isSlotInPast(booking.date, normalizedTime)) {
+        throw new Error('Selected consultation slot is in the past or starts too soon. Please select an upcoming slot.');
+      }
+
+      // Check slot availability in Supabase to prevent double-booking
+      const { data: existingBookings, error: slotCheckError } = await supabase
+        .from('bookings')
+        .select('id, time, status, payment_status')
+        .eq('consultant_id', validConsultantId)
+        .eq('date', booking.date)
+        .not('status', 'in', '("cancelled","rejected")')
+        .neq('payment_status', 'rejected');
+
+      if (!slotCheckError && existingBookings && existingBookings.length > 0) {
+        const isConflict = existingBookings.some((b: any) => {
+          const bookedTime = (b.time || '').trim();
+          return bookedTime.toLowerCase() !== 'flexible' && normalizeTimeSlot(bookedTime) === normalizedTime;
+        });
+
+        if (isConflict) {
+          throw new Error(`The time slot ${normalizedTime} on ${booking.date} is already booked for this consultant. Please choose another slot.`);
+        }
+      }
+    }
 
     // Prepare payload
     const sanitizedBooking = {
@@ -182,7 +251,7 @@ export const bookingsService = {
       name: sanitizeString(booking.name),
       email: booking.email.toLowerCase().trim(),
       date: booking.date,
-      time: booking.time || 'Flexible',
+      time: normalizedTime,
       message: booking.message ? sanitizeString(booking.message) : null,
       session_duration: booking.session_duration || 60,
       session_price: booking.session_price ?? 699,

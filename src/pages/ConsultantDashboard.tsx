@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { consultantDashboardService, DashboardStats, ConsultantBooking, PayoutRequest } from "@/services/consultantDashboard";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,17 @@ export default function ConsultantDashboard() {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
   const { formatPrice } = useCurrency();
+  
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = searchParams.get("tab") || "bookings";
+
+  const handleTabChange = (val: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("tab", val);
+      return next;
+    }, { replace: true });
+  };
   
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [bookings, setBookings] = useState<ConsultantBooking[]>([]);
@@ -122,10 +133,10 @@ export default function ConsultantDashboard() {
     }
   };
 
-  const loadDashboardData = async () => {
+  const loadDashboardData = async (silent = false) => {
     if (!user) return;
 
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const userParam = { id: user.id, email: user.email };
       const [statsData, bookingsData, payoutsData, followUpsRes] = await Promise.all([
@@ -143,9 +154,9 @@ export default function ConsultantDashboard() {
       }
     } catch (error) {
       console.error("Error loading dashboard:", error);
-      toast.error("Failed to load dashboard data");
+      if (!silent) toast.error("Failed to load dashboard data");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -545,7 +556,7 @@ export default function ConsultantDashboard() {
         )}
 
         {/* Tabs */}
-        <Tabs defaultValue="bookings" className="space-y-6">
+        <Tabs value={currentTab} onValueChange={handleTabChange} className="space-y-6">
           <TabsList className="grid w-full grid-cols-5 max-w-2xl">
             <TabsTrigger value="bookings">Bookings</TabsTrigger>
             <TabsTrigger value="availability" className="gap-1.5">
@@ -568,7 +579,7 @@ export default function ConsultantDashboard() {
           <TabsContent value="availability" className="space-y-4">
             <ConsultantAvailabilityEditor
               user={{ id: user.id, email: user.email }}
-              onAvailabilityUpdated={loadDashboardData}
+              onAvailabilityUpdated={() => loadDashboardData(true)}
             />
           </TabsContent>
 

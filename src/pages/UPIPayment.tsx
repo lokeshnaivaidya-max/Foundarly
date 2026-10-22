@@ -34,6 +34,7 @@ import {
 import { toast } from "sonner";
 import { PageLoader } from "@/components/PageLoader";
 import { validateEmail, sanitizeString } from "@/utils/security";
+import CurrencyTransfer from "@/components/CurrencyTransfer";
 
 const UPI_DETAILS = {
   accountHolder: "Abhishek Agarwal",
@@ -55,6 +56,7 @@ export default function UPIPaymentPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [paymentRecord, setPaymentRecord] = useState<any>(null);
   const [paymentMethod, setPaymentMethod] = useState<'upi' | 'bank'>('upi');
 
   const [formData, setFormData] = useState({
@@ -129,6 +131,7 @@ export default function UPIPaymentPage() {
         const existingPayment = await upiPaymentService.getPaymentByBookingId(bookingId);
         if (existingPayment) {
           // Payment already submitted - show as submitted
+          setPaymentRecord(existingPayment);
           setSubmitted(true);
           setFormData({
             customerName: existingPayment.customer_name,
@@ -190,7 +193,7 @@ export default function UPIPaymentPage() {
 
     try {
       // Create UPI payment record
-      await upiPaymentService.createPayment({
+      const createdPayment = await upiPaymentService.createPayment({
         booking_id: booking.id,
         user_id: user!.id,
         customer_name: formData.customerName,
@@ -212,6 +215,7 @@ export default function UPIPaymentPage() {
         status: 'pending',
       });
 
+      setPaymentRecord(createdPayment);
       toast.success("Payment details submitted successfully!");
       setSubmitted(true);
     } catch (error: any) {
@@ -234,96 +238,41 @@ export default function UPIPaymentPage() {
 
   if (submitted) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background flex flex-col">
         <Header />
-        <div className="container mx-auto px-6 py-24">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="max-w-2xl mx-auto"
-          >
-            <Card className="p-12 text-center bg-gradient-card border-primary/20">
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.2, type: "spring" }}
-                className="w-20 h-20 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto mb-6"
-              >
-                <Clock className="h-10 w-10 text-amber-500" />
-              </motion.div>
-              
-              <h2 className="font-display text-3xl font-bold mb-4 text-gradient-gold">
-                Payment Under Verification
-              </h2>
-              
-              <p className="text-muted-foreground mb-6">
-                Your payment details have been submitted successfully. Our admin team will verify your payment and confirm your booking within 24 hours.
-              </p>
+        <main className="flex-1 container mx-auto px-4 sm:px-6 py-12 sm:py-16">
+          <div className="max-w-xl mx-auto mb-6 text-center">
+            <h1 className="font-display text-2xl sm:text-3xl font-bold mb-2">
+              Payment <span className="text-gradient-gold">Confirmation</span>
+            </h1>
+            <p className="text-xs sm:text-sm text-muted-foreground">
+              Review your transaction status, live admin verification, and confirmed booking access.
+            </p>
+          </div>
 
-              <div className="bg-secondary/50 rounded-xl p-6 mb-6 space-y-4">
-                <h3 className="font-semibold text-lg mb-4">Payment Details Submitted</h3>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Full Name</p>
-                    <p className="font-medium">{formData.customerName}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Phone Number</p>
-                    <p className="font-medium">{formData.customerPhone}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Scheduled Date</p>
-                    <p className="font-medium">{booking?.date || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">Scheduled Time</p>
-                    <p className="font-medium text-primary">{booking?.time && booking.time !== 'Flexible' ? `${booking.time} IST` : 'Pending'}</p>
-                  </div>
-                  <div className="col-span-2">
-                    <p className="text-xs text-muted-foreground mb-1">Email</p>
-                    <p className="font-medium">{formData.customerEmail}</p>
-                  </div>
-                  <div className="col-span-2">
-                    <p className="text-xs text-muted-foreground mb-1">Transaction ID</p>
-                    <p className="font-mono font-bold text-primary">{formData.transactionId}</p>
-                  </div>
-                  {formData.message && (
-                    <div className="col-span-2">
-                      <p className="text-xs text-muted-foreground mb-1">Message</p>
-                      <p className="text-sm">{formData.message}</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="border-t border-border pt-4 mt-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Amount Paid</span>
-                    <span className="text-lg font-bold text-primary">{formatPrice(booking.session_price)}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-6 flex gap-3">
-                <AlertCircle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-amber-600 dark:text-amber-400 mb-1">
-                    Verification in Progress
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Your payment is being verified by our admin team. You'll receive a confirmation once approved. This usually takes 2-24 hours.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex gap-3 justify-center">
-                <Button onClick={() => navigate(isAdmin ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings')} className="glow-gold-sm">
-                  View My Bookings
-                </Button>
-              </div>
-            </Card>
-          </motion.div>
-        </div>
+          <CurrencyTransfer
+            paymentId={paymentRecord?.id}
+            bookingId={booking.id}
+            amount={booking.session_price || 0}
+            currency="INR"
+            transactionId={formData.transactionId || paymentRecord?.transaction_id || ""}
+            customerName={formData.customerName || booking.name || "Client"}
+            customerEmail={formData.customerEmail || booking.email || ""}
+            consultantName={consultant?.name || "Expert Consultant"}
+            consultantTitle={consultant?.title}
+            sessionDuration={booking.session_duration || 60}
+            bookingDate={booking.date || "Scheduled Date"}
+            bookingTime={booking.time && booking.time !== "Flexible" ? `${booking.time} IST` : "Scheduled Slot"}
+            meetingRoomId={booking.meeting_room_id}
+            initialStatus={paymentRecord?.status || "pending"}
+            initialAdminNotes={paymentRecord?.admin_notes}
+            onStatusChanged={(newStatus) => {
+              if (newStatus === "verified") {
+                setBooking((prev: any) => ({ ...prev, status: "confirmed", payment_status: "paid" }));
+              }
+            }}
+          />
+        </main>
         <Footer />
       </div>
     );

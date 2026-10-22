@@ -264,4 +264,32 @@ export const upiPaymentService = {
 
     return stats;
   },
+
+  /**
+   * Resubmit / update transaction ID for a pending or rejected payment
+   */
+  async resubmitTransactionId(paymentId: string, newTransactionId: string): Promise<UPIPayment> {
+    if (!validateUUID(paymentId)) {
+      throw new Error('Invalid payment ID');
+    }
+    const cleanTxn = newTransactionId.trim().toUpperCase();
+    if (cleanTxn.length < 5) {
+      throw new Error('Invalid transaction ID / UTR number');
+    }
+
+    const { data, error } = await (supabase
+      .from('upi_payments')
+      .update({
+        transaction_id: cleanTxn,
+        status: 'pending',
+        admin_notes: null,
+        updated_at: new Date().toISOString(),
+      } as any) as any)
+      .eq('id', paymentId)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    return data as UPIPayment;
+  },
 };

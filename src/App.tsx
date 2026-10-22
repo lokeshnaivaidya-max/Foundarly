@@ -10,6 +10,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AIChatWidget from "@/components/AIChatWidget";
 import { CookieConsent } from "@/components/CookieConsent";
+import { PaymentRealtimeListener } from "@/components/PaymentRealtimeListener";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import Index from "./pages/Index";
 import Consultants from "./pages/Consultants";
@@ -79,10 +80,11 @@ const App = () => (
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                   <RolePreviewProvider>
                     <RolePreviewBanner />
+                    <PaymentRealtimeListener />
                     <AIChatWidget />
                     <CookieConsent />
                     <Routes>
-                    <Route path="/" element={<Consultants />} />
+                    <Route path="/" element={<Index />} />
                     <Route path="/home" element={<Index />} />
                     <Route path="/consultants" element={<Consultants />} />
                     <Route path="/consultants/:id" element={<ConsultantProfile />} />

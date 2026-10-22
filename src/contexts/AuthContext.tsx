@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { secureLog } from '@/utils/security';
@@ -41,6 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const inFlightFetchRef = useRef<Map<string, Promise<Profile | null>>>(new Map());
 
   useEffect(() => {
     // Clean up any legacy localStorage admin sessions
@@ -81,43 +82,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const fetchProfile = async (userId: string, currentUser?: User | null): Promise<Profile | null> => {
-    try {
-      const targetUser = currentUser || user;
-      const userEmail = (targetUser?.email || '').toLowerCase().trim();
-      const isAllowlistedAdmin = isAllowedAdminEmail(userEmail);
+    if (inFlightFetchRef.current.has(userId)) {
+      return inFlightFetchRef.current.get(userId)!;
+    }
 
-      // Query profile row from public.profiles table
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+    const fetchPromise = (async () => {
+      try {
+        const targetUser = currentUser || user;
+        const userEmail = (targetUser?.email || '').toLowerCase().trim();
+        const isAllowlistedAdmin = isAllowedAdminEmail(userEmail);
 
-      let profileData = (data as Profile) || null;
+        // Query profile row from public.profiles table
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
 
-      // 1. Check if user is an allowlisted Super Admin
-      if (isAllowlistedAdmin) {
-        if (!profileData) {
-          profileData = {
-            id: userId,
-            role: 'super_admin',
-            full_name: targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Super Admin',
-            is_consultant: false,
-          };
-        } else {
-          profileData = { ...profileData, role: 'super_admin' };
+        let profileData = (data as Profile) || null;
+
+        // 1. Check if user is an allowlisted Super Admin
+        if (isAllowlistedAdmin) {
+          if (!profileData) {
+            profileData = {
+              id: userId,
+              role: 'super_admin',
+              full_name: targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Super Admin',
+              is_consultant: false,
+            };
+          } else {
+            profileData = { ...profileData, role: 'super_admin' };
+          }
+
+          // Ensure database profile is upgraded to super_admin only if not already
+          if (!data || data.role !== 'super_admin' || data.full_name !== profileData.full_name) {
+            supabase.from('profiles').upsert({ 
+              id: userId, 
+              role: 'super_admin', 
+              full_name: profileData.full_name 
+            }).then();
+          }
+          
+          setProfile(profileData);
+          return profileData;
         }
-
-        // Ensure database profile is upgraded to super_admin
-        supabase.from('profiles').upsert({ 
-          id: userId, 
-          role: 'super_admin', 
-          full_name: profileData.full_name 
-        }).then();
-        
-        setProfile(profileData);
-        return profileData;
-      }
 
       // 2. Check if user is assigned Developer Admin role in DB
       if (profileData && profileData.role === 'developer_admin') {
@@ -193,17 +201,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         is_consultant: isConsultantUser,
       };
 
-      // Persist / update profile in public.profiles table
-      try {
-        await supabase
-          .from('profiles')
-          .upsert({
-            id: userId,
-            full_name: fallbackName,
-            role: finalRole,
-          });
-      } catch (upsertErr) {
-        console.warn('[AuthContext] Could not upsert profile in DB:', upsertErr);
+      // Persist / update profile in public.profiles table ONLY if missing or changed
+      if (!profileData || profileData.role !== finalRole || profileData.full_name !== fallbackName) {
+        try {
+          await supabase
+            .from('profiles')
+            .upsert({
+              id: userId,
+              full_name: fallbackName,
+              role: finalRole,
+            });
+        } catch (upsertErr) {
+          console.warn('[AuthContext] Could not upsert profile in DB:', upsertErr);
+        }
       }
 
       setProfile(resolvedProfile);
@@ -220,8 +230,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return fallbackProfile;
     } finally {
       setLoading(false);
+      inFlightFetchRef.current.delete(userId);
     }
-  };
+  })();
+
+  inFlightFetchRef.current.set(userId, fetchPromise);
+  return fetchPromise;
+};
 
   const signUp = async (email: string, password: string, fullName: string) => {
     const { data, error } = await supabase.auth.signUp({

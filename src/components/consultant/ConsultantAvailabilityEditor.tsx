@@ -105,8 +105,8 @@ export default function ConsultantAvailabilityEditor({
   const [loadingPreviewBookings, setLoadingPreviewBookings] = useState(false);
 
   // Load availability and application data
-  const loadAvailability = async () => {
-    setLoading(true);
+  const loadAvailability = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await consultantDashboardService.getMyAvailability({
         id: user.id,
@@ -121,9 +121,9 @@ export default function ConsultantAvailabilityEditor({
       }
     } catch (err) {
       console.error("Error loading consultant availability:", err);
-      toast.error("Failed to load your availability settings.");
+      if (!silent) toast.error("Failed to load your availability settings.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -412,7 +412,7 @@ export default function ConsultantAvailabilityEditor({
         setInitialSettings(JSON.parse(JSON.stringify(settings)));
         toast.success(res.message || "Your availability has been saved and is now live!");
         if (onAvailabilityUpdated) onAvailabilityUpdated();
-        loadAvailability();
+        loadAvailability(true);
       } else {
         toast.error(res.error || "Failed to update availability.");
         if (res.conflicts && res.conflicts.length > 0) {

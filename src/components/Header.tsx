@@ -33,8 +33,8 @@ import { settingsService } from "@/services/settings";
 import { cn } from "@/lib/utils";
 
 const navLinks = [
-  { label: "Home", path: "/home" },
-  { label: "Experts", path: "/" },
+  { label: "Home", path: "/" },
+  { label: "Experts", path: "/consultants" },
   { label: "Network", path: "/network" },
   { label: "Pricing", path: "/pricing" },
   { label: "Our Story", path: "/about" },
@@ -84,10 +84,10 @@ export default function Header() {
 
   const isActive = (path: string) => {
     if (path === "/") {
-      return location.pathname === "/" || location.pathname === "/consultants";
+      return location.pathname === "/" || location.pathname === "/home";
     }
-    if (path === "/home") {
-      return location.pathname === "/home";
+    if (path === "/consultants") {
+      return location.pathname === "/consultants" || location.pathname.startsWith("/consultants/");
     }
     return location.pathname === path || location.pathname.startsWith(path + "/");
   };

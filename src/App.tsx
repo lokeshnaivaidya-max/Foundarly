@@ -64,7 +64,6 @@ import ConsultantProfile from "./pages/ConsultantProfile";
 
 import { RolePreviewProvider } from "@/contexts/RolePreviewContext";
 import RolePreviewBanner from "@/components/RolePreviewBanner";
-import OpeningSign from "@/components/OpeningSign";
 
 const queryClient = new QueryClient();
 
@@ -80,7 +79,6 @@ const App = () => (
                 <Sonner />
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                   <RolePreviewProvider>
-                    <OpeningSign />
                     <RolePreviewBanner />
                     <PaymentRealtimeListener />
                     <AIChatWidget />

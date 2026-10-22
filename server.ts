@@ -50,6 +50,12 @@ import {
   isSlotInPast,
   APP_TIMEZONE,
   parseTimeString,
+  normalizeTimeSlot,
+  parseAvailabilitySettings,
+  serializeAvailabilitySettings,
+  validateAvailabilitySettings,
+  checkDayAvailability,
+  ConsultantAvailabilitySettings,
 } from "./src/utils/timeSlots.js";
 import { completionEmailStorage } from "./src/server/completionEmailStorage.js";
 import { meetingParticipantStorage } from "./src/server/meetingParticipantStorage.js";
@@ -1571,7 +1577,7 @@ async function startServer() {
   // SCHEDULING & AVAILABLE SLOTS VALIDATION ENDPOINTS
   // =========================================================================
 
-  // 1. Get available time slots for a consultant on a specific date
+  // 1. Get available time slots for a consultant on a specific date (using structured availability settings)
   app.get("/api/consultants/:id/available-slots", async (req, res) => {
     const { id } = req.params;
     const { date, duration } = req.query as { date?: string; duration?: string };
@@ -1595,10 +1601,10 @@ async function startServer() {
     const sessionDuration = parseInt(duration || "60", 10) === 30 ? 30 : 60;
 
     try {
-      // Fetch consultant availability
+      // Fetch consultant record with availability & pricing
       const { data: consultant, error: cErr } = await supabaseAdminClient
         .from("consultants")
-        .select("id, name, preferred_time")
+        .select("id, name, preferred_time, availability, pricing_30, pricing_60, social_links")
         .eq("id", id)
         .maybeSingle();
 
@@ -1609,6 +1615,10 @@ async function startServer() {
           code: "CONSULTANT_NOT_FOUND",
         });
       }
+
+      // Parse structured availability settings
+      const settings = parseAvailabilitySettings(consultant);
+      const dayStatus = checkDayAvailability(date, settings);
 
       // Fetch active bookings for this consultant on the specified date
       const { data: activeBookings, error: bErr } = await supabaseAdminClient
@@ -1628,7 +1638,7 @@ async function startServer() {
         .filter((t): t is string => Boolean(t && t !== "Flexible"));
 
       const slots = generateAvailableSlots({
-        consultantPreferredTime: consultant.preferred_time,
+        availabilitySettings: settings,
         dateStr: date,
         sessionDuration,
         bookedTimes,
@@ -1640,6 +1650,15 @@ async function startServer() {
         date,
         timezone: "Asia/Kolkata (IST, UTC+05:30)",
         slots,
+        is_blocked: dayStatus.isBlocked,
+        blocked_reason: dayStatus.blockedReason,
+        is_day_off: dayStatus.isDayOff,
+        weekday: dayStatus.weekday,
+        pricing: {
+          pricing_30: consultant.pricing_30 || settings.pricing.pricing_30,
+          pricing_60: consultant.pricing_60 || settings.pricing.pricing_60,
+          currency: "INR",
+        },
       });
     } catch (err: any) {
       console.error("[Slot Server] Unexpected error fetching slots:", err);
@@ -1651,9 +1670,9 @@ async function startServer() {
     }
   });
 
-  // 2. Validate time slot availability before payment/booking
+  // 2. Validate time slot availability before payment/booking (enforces blocked dates & weekday hours)
   app.post("/api/bookings/validate-slot", async (req, res) => {
-    const { consultant_id, date, time } = req.body || {};
+    const { consultant_id, date, time, duration } = req.body || {};
 
     if (!consultant_id || !date || !time) {
       return res.status(400).json({
@@ -1692,13 +1711,50 @@ async function startServer() {
     }
 
     try {
-      // Check for conflict
+      // Fetch consultant settings
+      const { data: consultant, error: cErr } = await supabaseAdminClient
+        .from("consultants")
+        .select("id, name, preferred_time, availability, pricing_30, pricing_60, social_links")
+        .eq("id", consultant_id)
+        .maybeSingle();
+
+      if (cErr || !consultant) {
+        return res.status(404).json({
+          success: false,
+          valid: false,
+          error: "Consultant not found.",
+          code: "CONSULTANT_NOT_FOUND",
+        });
+      }
+
+      const settings = parseAvailabilitySettings(consultant);
+      const dayStatus = checkDayAvailability(date, settings);
+
+      if (dayStatus.isBlocked) {
+        return res.status(400).json({
+          success: false,
+          valid: false,
+          error: `Consultant is unavailable on this date (${dayStatus.blockedReason || 'Blocked Date'}).`,
+          code: "DATE_BLOCKED",
+        });
+      }
+
+      if (dayStatus.isDayOff) {
+        return res.status(400).json({
+          success: false,
+          valid: false,
+          error: `Consultant does not schedule consultations on this weekday.`,
+          code: "DAY_OFF",
+        });
+      }
+
+      // Check for conflict in bookings table
+      const normalizedReqTime = normalizeTimeSlot(time);
       const { data: conflicts, error: conflictErr } = await supabaseAdminClient
         .from("bookings")
-        .select("id, status, payment_status")
+        .select("id, time, status, payment_status")
         .eq("consultant_id", consultant_id)
         .eq("date", date)
-        .eq("time", time)
         .not("status", "in", '("cancelled","rejected")')
         .neq("payment_status", "rejected");
 
@@ -1706,7 +1762,12 @@ async function startServer() {
         console.warn("[Slot Server] Conflict check query notice:", conflictErr);
       }
 
-      if (conflicts && conflicts.length > 0) {
+      const hasConflict = (conflicts || []).some((b: any) => {
+        const bTime = (b.time || '').trim();
+        return bTime.toLowerCase() !== 'flexible' && normalizeTimeSlot(bTime) === normalizedReqTime;
+      });
+
+      if (hasConflict) {
         return res.status(409).json({
           success: false,
           valid: false,
@@ -1727,6 +1788,200 @@ async function startServer() {
         valid: false,
         error: "Internal error validating slot availability.",
         code: "INTERNAL_ERROR",
+      });
+    }
+  });
+
+  // 3. Authoritative Server-Side Price Calculation (Never trust client-submitted prices)
+  app.post("/api/bookings/calculate-price", async (req, res) => {
+    const { consultant_id, session_duration, referral_code } = req.body || {};
+
+    if (!consultant_id) {
+      return res.status(400).json({
+        success: false,
+        error: "consultant_id is required.",
+        code: "MISSING_CONSULTANT_ID",
+      });
+    }
+
+    const duration = parseInt(session_duration || "60", 10) === 30 ? 30 : 60;
+
+    try {
+      const { data: consultant, error: cErr } = await supabaseAdminClient
+        .from("consultants")
+        .select("id, name, pricing_30, pricing_60, availability")
+        .eq("id", consultant_id)
+        .maybeSingle();
+
+      if (cErr || !consultant) {
+        return res.status(404).json({
+          success: false,
+          error: "Consultant not found.",
+          code: "CONSULTANT_NOT_FOUND",
+        });
+      }
+
+      const basePrice = duration === 30
+        ? (Number(consultant.pricing_30) || 1000)
+        : (Number(consultant.pricing_60) || 1299);
+
+      let discountAmount = 0;
+      let appliedReferral: any = null;
+
+      if (referral_code && typeof referral_code === "string" && referral_code.trim()) {
+        const cleanCode = referral_code.trim().toUpperCase();
+        const { data: refCode } = await supabaseAdminClient
+          .from("referral_codes")
+          .select("*")
+          .eq("code", cleanCode)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (refCode) {
+          if (refCode.discount_type === "percentage") {
+            discountAmount = Math.round((basePrice * (refCode.discount_value || 0)) / 100);
+          } else {
+            discountAmount = Math.min(basePrice, refCode.discount_value || 0);
+          }
+          appliedReferral = { code: refCode.code, discount_type: refCode.discount_type, discount_value: refCode.discount_value };
+        }
+      }
+
+      const finalPrice = Math.max(0, basePrice - discountAmount);
+
+      return res.json({
+        success: true,
+        consultant_id,
+        session_duration: duration,
+        original_price: basePrice,
+        discount_amount: discountAmount,
+        final_price: finalPrice,
+        currency: "INR",
+        applied_referral: appliedReferral,
+      });
+    } catch (err: any) {
+      console.error("[Price Calculator] Error calculating price:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to calculate session price.",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  });
+
+  // 4. Admin Consultant Availability & Pricing: Fetch Settings
+  app.get("/api/admin/consultants/:id/availability-pricing", requireAdminAuth, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      const { data: consultant, error } = await supabaseAdminClient
+        .from("consultants")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (error || !consultant) {
+        return res.status(404).json({
+          success: false,
+          error: "Consultant not found.",
+        });
+      }
+
+      const settings = parseAvailabilitySettings(consultant);
+
+      return res.json({
+        success: true,
+        consultant,
+        settings,
+      });
+    } catch (err: any) {
+      console.error("[Admin Availability] Error fetching settings:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Internal error loading consultant availability.",
+      });
+    }
+  });
+
+  // 5. Admin Consultant Availability & Pricing: Update Settings & Pricing
+  app.put("/api/admin/consultants/:id/availability-pricing", requireAdminAuth, async (req, res) => {
+    const { id } = req.params;
+    const { settings } = req.body || {};
+
+    if (!settings || typeof settings !== "object") {
+      return res.status(400).json({
+        success: false,
+        error: "Valid availability settings object is required.",
+      });
+    }
+
+    const validation = validateAvailabilitySettings(settings);
+    if (!validation.valid) {
+      return res.status(400).json({
+        success: false,
+        error: validation.error || "Invalid availability settings configuration.",
+      });
+    }
+
+    try {
+      const { data: existingConsultant, error: fetchErr } = await supabaseAdminClient
+        .from("consultants")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (fetchErr || !existingConsultant) {
+        return res.status(404).json({
+          success: false,
+          error: "Consultant not found.",
+        });
+      }
+
+      const serialized = serializeAvailabilitySettings(settings);
+      const existingSocial = (existingConsultant.social_links && typeof existingConsultant.social_links === "object")
+        ? existingConsultant.social_links
+        : {};
+
+      const updates: Record<string, any> = {
+        pricing_30: Number(serialized.pricing_30) || 0,
+        pricing_60: Number(serialized.pricing_60) || 0,
+        preferred_time: serialized.preferredTimeText,
+        availability: serialized.availabilityJson,
+        social_links: {
+          ...existingSocial,
+          availability_settings: settings,
+        },
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: updatedConsultant, error: updateErr } = await supabaseAdminClient
+        .from("consultants")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (updateErr) {
+        console.error("[Admin Availability] Update error in Supabase:", updateErr);
+        return res.status(500).json({
+          success: false,
+          error: `Failed to update consultant: ${updateErr.message}`,
+        });
+      }
+
+      console.log(`[Admin Availability] Successfully updated availability & pricing for consultant ${id} (${updatedConsultant.name})`);
+
+      return res.json({
+        success: true,
+        message: "Consultant availability and pricing updated successfully.",
+        consultant: updatedConsultant,
+        settings,
+      });
+    } catch (err: any) {
+      console.error("[Admin Availability] Unexpected error updating settings:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Internal error saving consultant availability.",
       });
     }
   });

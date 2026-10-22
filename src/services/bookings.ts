@@ -13,6 +13,9 @@ import {
   parseBookingDateTime,
   isSlotInPast,
   normalizeTimeSlot,
+  parseAvailabilitySettings,
+  checkDayAvailability,
+  generateAvailableSlots,
 } from '@/utils/timeSlots';
 
 type Booking = Database['public']['Tables']['bookings']['Row'];
@@ -216,6 +219,39 @@ export const bookingsService = {
       throw new Error('Invalid date format (must be YYYY-MM-DD)');
     }
 
+    const duration = booking.session_duration === 30 ? 30 : 60;
+
+    // Fetch consultant to validate existence, availability settings, and authoritative pricing
+    const { data: consultant } = await supabase
+      .from('consultants')
+      .select('id, name, pricing_30, pricing_60, preferred_time, availability, social_links')
+      .eq('id', validConsultantId)
+      .maybeSingle();
+
+    let authoritativeBasePrice = duration === 30 ? 1000 : 1299;
+    if (consultant) {
+      const settings = parseAvailabilitySettings(consultant);
+      authoritativeBasePrice = duration === 30
+        ? (Number(consultant.pricing_30) || settings.pricing.pricing_30 || 1000)
+        : (Number(consultant.pricing_60) || settings.pricing.pricing_60 || 1299);
+
+      // Verify date is not blocked or an off day for this consultant
+      const dayStatus = checkDayAvailability(booking.date, settings);
+      if (dayStatus.isBlocked) {
+        throw new Error(`Consultant is unavailable on ${booking.date} (${dayStatus.blockedReason || 'Blocked Date'}). Please select another date.`);
+      }
+      if (dayStatus.isDayOff) {
+        throw new Error(`Consultant does not schedule consultations on ${booking.date}. Please select an available working day.`);
+      }
+    }
+
+    // Server-side authoritative price calculation: never trust arbitrary client prices
+    // If client supplied a lower price with an applied referral discount, clamp safely
+    let finalSessionPrice = authoritativeBasePrice;
+    if (typeof booking.session_price === 'number') {
+      finalSessionPrice = Math.max(0, Math.min(authoritativeBasePrice, booking.session_price));
+    }
+
     // Validate slot is not in the past (if specific time provided)
     if (normalizedTime !== 'Flexible') {
       if (isSlotInPast(booking.date, normalizedTime)) {
@@ -253,8 +289,8 @@ export const bookingsService = {
       date: booking.date,
       time: normalizedTime,
       message: booking.message ? sanitizeString(booking.message) : null,
-      session_duration: booking.session_duration || 60,
-      session_price: booking.session_price ?? 699,
+      session_duration: duration,
+      session_price: finalSessionPrice,
       status: booking.status || 'pending',
       payment_status: booking.payment_status || 'pending',
       created_at: new Date().toISOString(),

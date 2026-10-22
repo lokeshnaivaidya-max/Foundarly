@@ -24,6 +24,7 @@ import {
   Terminal,
   CreditCard,
   CheckCircle2,
+  CalendarClock,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import {
@@ -61,6 +62,7 @@ export default function AdminSidebar() {
     { title: "Sanitized Logs", url: "/admin/developer/logs", icon: FileCode },
     { title: "Manage Users", url: "/admin/users", icon: UsersRound },
     { title: "Manage Consultants", url: "/admin/consultants", icon: Users },
+    { title: "Availability & Pricing", url: "/admin/availability-pricing", icon: CalendarClock },
     { title: "Consultant Applications", url: "/admin/consultant-applications", icon: UserPlus },
     { title: "Manage Bookings", url: "/admin/bookings", icon: CalendarCheck },
     { title: "Consultant Payouts", url: "/admin/payouts", icon: CreditCard },

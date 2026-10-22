@@ -30,6 +30,7 @@ import AdminOverview from "./pages/admin/AdminOverview";
 import AdminContent from "./pages/admin/AdminContent";
 import AdminTestimonials from "./pages/admin/AdminTestimonials";
 import AdminConsultants from "./pages/admin/AdminConsultants";
+import AdminAvailabilityPricing from "./pages/admin/AdminAvailabilityPricing";
 import AdminBookings from "./pages/admin/AdminBookings";
 import AdminBlog from "./pages/admin/AdminBlog";
 import AdminUsers from "./pages/admin/AdminUsers";
@@ -149,6 +150,8 @@ const App = () => (
                       <Route path="payments" element={<AdminPayments />} />
                       <Route path="upi-verification" element={<UPIVerification />} />
                       <Route path="consultants" element={<AdminConsultants />} />
+                      <Route path="availability-pricing" element={<AdminAvailabilityPricing />} />
+                      <Route path="consultation-settings" element={<AdminAvailabilityPricing />} />
                       <Route path="consultant-applications" element={<AdminConsultantApplications />} />
                       <Route path="content" element={<AdminContent />} />
                       <Route path="categories" element={<AdminCategories />} />

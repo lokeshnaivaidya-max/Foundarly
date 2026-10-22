@@ -30,6 +30,7 @@ export interface Database {
           languages?: string[] | null
           categories?: string[] | null
           availability?: string | null
+          availability_settings?: Json | null
           social_links?: Json | null
         }
         Insert: {
@@ -52,6 +53,7 @@ export interface Database {
           languages?: string[] | null
           categories?: string[] | null
           availability?: string | null
+          availability_settings?: Json | null
           social_links?: Json | null
         }
         Update: {
@@ -74,6 +76,7 @@ export interface Database {
           languages?: string[] | null
           categories?: string[] | null
           availability?: string | null
+          availability_settings?: Json | null
           social_links?: Json | null
         }
       }

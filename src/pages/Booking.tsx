@@ -140,10 +140,11 @@ export default function BookingPage() {
         if (isCancelled) return;
 
         const slots = generateAvailableSlots({
+          consultant: selectedConsultant,
           dateStr: formData.date,
           preferredTime: selectedConsultant?.preferred_time,
           bookedSlots: booked,
-          durationMinutes: formData.session_duration || 60,
+          sessionDuration: formData.session_duration || 60,
         });
 
         setAvailableSlots(slots);
@@ -549,6 +550,16 @@ export default function BookingPage() {
                     <div className="p-6 rounded-xl border border-border bg-secondary/20 flex items-center justify-center gap-2.5 text-xs text-muted-foreground">
                       <span className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                       <span>Checking consultant schedule & bookings...</span>
+                    </div>
+                  ) : availableSlots.length === 1 && (availableSlots[0].reason === 'holiday' || availableSlots[0].reason === 'unavailable_day') ? (
+                    <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-500 text-center space-y-1">
+                      <p className="font-semibold flex items-center justify-center gap-1.5">
+                        <Clock size={14} />
+                        {availableSlots[0].reason === 'holiday' ? 'Consultant Holiday / Blocked Date' : 'Consultant Day Off'}
+                      </p>
+                      <p className="text-muted-foreground text-[11px]">
+                        {availableSlots[0].label || 'No consultation slots available on this date. Please choose another date.'}
+                      </p>
                     </div>
                   ) : availableSlots.length === 0 ? (
                     <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-500 text-center space-y-1">

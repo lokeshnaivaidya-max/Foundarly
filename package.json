@@ -9,8 +9,8 @@
     "start": "node dist/server.cjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "tsx --test test/meeting-rejoin-and-email.test.ts test/role-hierarchy.test.ts test/review-and-followup-fixes.test.ts test/reschedule-workflow.test.ts test/blog-workflow-and-storage-rls.test.ts test/booking-slot-selection.test.ts",
-    "test:watch": "tsx --test --watch test/meeting-rejoin-and-email.test.ts test/role-hierarchy.test.ts test/review-and-followup-fixes.test.ts test/reschedule-workflow.test.ts test/blog-workflow-and-storage-rls.test.ts test/booking-slot-selection.test.ts"
+    "test": "tsx --test test/meeting-rejoin-and-email.test.ts test/role-hierarchy.test.ts test/review-and-followup-fixes.test.ts test/reschedule-workflow.test.ts test/blog-workflow-and-storage-rls.test.ts test/booking-slot-selection.test.ts test/consultant-availability-pricing.test.ts",
+    "test:watch": "tsx --test --watch test/meeting-rejoin-and-email.test.ts test/role-hierarchy.test.ts test/review-and-followup-fixes.test.ts test/reschedule-workflow.test.ts test/blog-workflow-and-storage-rls.test.ts test/booking-slot-selection.test.ts test/consultant-availability-pricing.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.45.0",

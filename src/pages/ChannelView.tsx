@@ -9,6 +9,7 @@ import { ArrowLeft, Send, Users, Hash } from "lucide-react";
 import { networkingService, Channel, ChannelMessage } from "@/services/networking";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { PageLoader } from "@/components/PageLoader";
 
 export default function ChannelViewPage() {
   const { id } = useParams<{ id: string }>();
@@ -136,19 +137,7 @@ export default function ChannelViewPage() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-background">
-        <Header />
-        <main className="pt-28 pb-24">
-          <div className="container mx-auto px-6">
-            <div className="text-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-            </div>
-          </div>
-        </main>
-        <Footer />
-      </div>
-    );
+    return <PageLoader text="Loading channel messages..." />;
   }
 
   if (!channel) {

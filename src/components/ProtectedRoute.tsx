@@ -3,7 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { isUserAdmin, isSuperAdmin, UserRole, getUserEffectiveRole } from '@/lib/authorization';
 import { ShieldAlert, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useNavigate } from 'react-router-dom';
+import { PageLoader } from '@/components/PageLoader';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -23,11 +23,7 @@ export default function ProtectedRoute({
   const navigate = useNavigate();
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
-    );
+    return <PageLoader text="Authenticating..." />;
   }
 
   // Not authenticated at all

@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 import { upiPaymentService, UPIPayment } from "@/services/upiPayment";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import { PageLoader } from "@/components/PageLoader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -213,14 +214,7 @@ export default function UPIVerificationPage() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-muted-foreground">Loading payments...</p>
-        </div>
-      </div>
-    );
+    return <PageLoader text="Loading UPI payments..." />;
   }
 
   return (

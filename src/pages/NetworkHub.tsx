@@ -10,6 +10,7 @@ import RightSidebar from "@/components/networking/RightSidebar";
 import CreateGroupModal from "@/components/networking/CreateGroupModal";
 import { toast } from "sonner";
 import { SEO } from "@/components/SEO";
+import { PageLoader } from "@/components/PageLoader";
 
 export default function NetworkHub() {
   const { user } = useAuth();
@@ -275,14 +276,7 @@ export default function NetworkHub() {
   );
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading network...</p>
-        </div>
-      </div>
-    );
+    return <PageLoader text="Loading network hub..." />;
   }
 
   return (

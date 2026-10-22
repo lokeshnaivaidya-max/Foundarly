@@ -16,6 +16,7 @@ import { Users, MessageSquare, Plus, Search, Hash, Lock, Globe } from "lucide-re
 import { networkingService, Channel, UserGroup } from "@/services/networking";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { PageLoader } from "@/components/PageLoader";
 
 export default function NetworkPage() {
   const { user } = useAuth();
@@ -123,19 +124,7 @@ export default function NetworkPage() {
   );
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-background">
-        <Header />
-        <main className="pt-28 pb-24">
-          <div className="container mx-auto px-6">
-            <div className="text-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-            </div>
-          </div>
-        </main>
-        <Footer />
-      </div>
-    );
+    return <PageLoader text="Loading networking channels..." />;
   }
 
   return (

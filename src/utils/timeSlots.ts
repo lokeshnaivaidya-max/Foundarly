@@ -175,25 +175,27 @@ export function normalizeTimeSlot(timeStr: string): string {
  * Parses a date (YYYY-MM-DD or ISO) and a time string into a concrete UTC Date object in IST.
  * Returns null if the date or time cannot be parsed into a valid timestamp.
  */
-export function parseBookingDateTime(dateStr?: string | null, timeStr?: string | null): Date | null {
+export function parseBookingDateTime(dateStr?: string | Date | null, timeStr?: string | null): Date | null {
   if (!dateStr || !timeStr) return null;
 
   const parsedTime = parseTimeString(timeStr);
   if (!parsedTime) return null;
 
+  const rawDate = typeof dateStr === 'string' ? dateStr : (dateStr instanceof Date ? dateStr.toISOString() : String(dateStr));
+
   let year: number;
   let month: number;
   let day: number;
 
-  if (dateStr.includes('T')) {
-    const d = new Date(dateStr);
+  if (rawDate.includes('T')) {
+    const d = new Date(rawDate);
     if (isNaN(d.getTime())) return null;
     const ist = getNowInIST(d);
     year = ist.year;
     month = ist.month;
     day = ist.day;
   } else {
-    const parts = dateStr.split('-');
+    const parts = rawDate.split('-');
     if (parts.length !== 3) return null;
     year = parseInt(parts[0], 10);
     month = parseInt(parts[1], 10);
@@ -246,25 +248,21 @@ export function parseConsultantAvailabilityHours(preferredTime?: string | null):
 
   const clean = preferredTime.trim().toLowerCase();
 
-  // Keyword-based presets
-  if (clean.includes('morning')) {
-    // 9 AM - 1 PM (or 8 AM - 12 PM if explicitly 8)
-    return { startHour: clean.includes('8') ? 8 : 9, endHour: clean.includes('8') ? 12 : 13 };
+  // 1. Explicit application form options presets
+  if (clean.includes('8 am') && clean.includes('12 pm')) {
+    return { startHour: 8, endHour: 12 };
   }
-  if (clean.includes('afternoon')) {
-    return { startHour: 13, endHour: 17 };
+  if (clean.includes('12 pm') && clean.includes('4 pm')) {
+    return { startHour: 12, endHour: 16 };
   }
-  if (clean.includes('evening')) {
-    return { startHour: 17, endHour: 21 };
+  if (clean.includes('4 pm') && clean.includes('8 pm')) {
+    return { startHour: 16, endHour: 20 };
   }
-  if (clean.includes('night')) {
-    return { startHour: 20, endHour: 23 };
-  }
-  if (clean.includes('flexible')) {
-    return { startHour: 9, endHour: 18 };
+  if (clean.includes('8 pm') && clean.includes('10 pm')) {
+    return { startHour: 20, endHour: 22 };
   }
 
-  // Regex range match: e.g. "10:00 AM - 6:00 PM", "8 AM – 12 PM", "2 PM - 5 PM"
+  // 2. Regex range match: e.g. "10:00 AM - 6:00 PM", "8 AM – 12 PM", "2 PM - 5 PM"
   const rangeMatch = clean.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:–|-|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
   if (rangeMatch) {
     let startH = parseInt(rangeMatch[1], 10);
@@ -286,7 +284,120 @@ export function parseConsultantAvailabilityHours(preferredTime?: string | null):
     }
   }
 
+  // 3. Keyword-based fallback presets
+  if (clean.includes('morning')) {
+    return { startHour: clean.includes('8') ? 8 : 9, endHour: clean.includes('8') ? 12 : 13 };
+  }
+  if (clean.includes('afternoon')) {
+    return { startHour: 13, endHour: 17 };
+  }
+  if (clean.includes('evening')) {
+    return { startHour: 17, endHour: 21 };
+  }
+  if (clean.includes('night')) {
+    return { startHour: 20, endHour: 23 };
+  }
+  if (clean.includes('flexible')) {
+    return { startHour: 9, endHour: 18 };
+  }
+
   return { startHour: 10, endHour: 18 };
+}
+
+export interface ConfirmedBookingConflict {
+  bookingId: string;
+  clientName: string;
+  date: string;
+  time: string;
+  reason: 'blocked_date' | 'day_disabled' | 'time_outside_windows';
+  details: string;
+}
+
+/**
+ * Validates availability changes against existing confirmed bookings.
+ * Strictly prevents availability changes from silently invalidating already confirmed sessions.
+ */
+export function validateConfirmedBookingConflicts(
+  settings: ConsultantAvailabilitySettings,
+  confirmedBookings: Array<{ id: string; name?: string; date: string; time: string; status: string; session_duration?: number }>
+): { hasConflict: boolean; conflicts: ConfirmedBookingConflict[]; errorMessage?: string } {
+  if (!Array.isArray(confirmedBookings) || confirmedBookings.length === 0) {
+    return { hasConflict: false, conflicts: [] };
+  }
+
+  const conflicts: ConfirmedBookingConflict[] = [];
+  const blockedDateSet = new Set((settings.blockedDates || []).map(b => b.date));
+
+  for (const b of confirmedBookings) {
+    if (b.status !== 'confirmed') continue;
+
+    const clientName = b.name || 'Client';
+    const bookingDate = b.date.includes('T') ? b.date.split('T')[0] : b.date;
+
+    // 1. Check if date is in blocked dates
+    if (blockedDateSet.has(bookingDate)) {
+      conflicts.push({
+        bookingId: b.id,
+        clientName,
+        date: bookingDate,
+        time: b.time,
+        reason: 'blocked_date',
+        details: `Date ${bookingDate} is marked as unavailable/holiday, but has an active confirmed booking with ${clientName} at ${b.time}.`,
+      });
+      continue;
+    }
+
+    // 2. Check if weekday is enabled
+    const dayOfWeek = getDayOfWeekInIST(bookingDate);
+    const daySchedule = settings.weeklySchedule?.[dayOfWeek];
+    if (!daySchedule || !daySchedule.enabled) {
+      conflicts.push({
+        bookingId: b.id,
+        clientName,
+        date: bookingDate,
+        time: b.time,
+        reason: 'day_disabled',
+        details: `${WEEKDAY_LABELS[dayOfWeek]}s are disabled, but ${bookingDate} has an active confirmed booking with ${clientName} at ${b.time}.`,
+      });
+      continue;
+    }
+
+    // 3. Check if booking time falls within configured windows
+    const parsedTime = parseTimeString(b.time);
+    if (!parsedTime) continue;
+    const bookingStartMinutes = parsedTime.hours * 60 + parsedTime.minutes;
+    const duration = b.session_duration || 30;
+    const bookingEndMinutes = bookingStartMinutes + duration;
+
+    const insideAnyWindow = (daySchedule.windows || []).some(w => {
+      const winStart = time24ToMinutes(w.start);
+      const winEnd = time24ToMinutes(w.end);
+      return bookingStartMinutes >= winStart && bookingEndMinutes <= winEnd;
+    });
+
+    if (!insideAnyWindow) {
+      const windowStr = (daySchedule.windows || []).map(w => `${w.start}-${w.end}`).join(', ') || 'None';
+      conflicts.push({
+        bookingId: b.id,
+        clientName,
+        date: bookingDate,
+        time: b.time,
+        reason: 'time_outside_windows',
+        details: `Booking with ${clientName} at ${b.time} on ${bookingDate} falls outside your configured windows (${windowStr}).`,
+      });
+    }
+  }
+
+  if (conflicts.length > 0) {
+    const first = conflicts[0];
+    return {
+      hasConflict: true,
+      conflicts,
+      errorMessage: `Cannot update availability: ${conflicts.length} confirmed booking(s) conflict with this schedule. (e.g. ${first.details}). Please reschedule or complete these bookings first before removing your availability.`,
+    };
+  }
+
+  return { hasConflict: false, conflicts: [] };
 }
 
 /**
@@ -646,17 +757,27 @@ export function serializeAvailabilitySettings(settings: ConsultantAvailabilitySe
 
 /**
  * Checks whether a given date is available, blocked as a holiday, or an off day for the consultant.
+ * Accepts arguments in either order: (dateStr, settings) or (settings, dateStr).
  */
 export function checkDayAvailability(
-  dateStr: string,
-  settings: ConsultantAvailabilitySettings
+  arg1: string | ConsultantAvailabilitySettings,
+  arg2: string | ConsultantAvailabilitySettings
 ): {
   isAvailable: boolean;
+  available: boolean;
   isBlocked: boolean;
   blockedReason?: string;
+  holidayReason?: string;
   isDayOff: boolean;
   weekday: WeekdayKey;
+  dayOfWeek: WeekdayKey;
+  reason?: string;
 } {
+  const dateStr = typeof arg1 === 'string' ? arg1 : (typeof arg2 === 'string' ? arg2 : '');
+  const settings = typeof arg1 === 'object' && arg1 !== null
+    ? (arg1 as ConsultantAvailabilitySettings)
+    : (typeof arg2 === 'object' && arg2 !== null ? (arg2 as ConsultantAvailabilitySettings) : createDefaultAvailabilitySettings());
+
   const weekday = getDayOfWeekInIST(dateStr);
 
   // Check if date is in blocked dates
@@ -667,30 +788,42 @@ export function checkDayAvailability(
   });
 
   if (blockedItem) {
+    const reason = blockedItem.reason || 'Consultant Holiday / Blocked Date';
     return {
       isAvailable: false,
+      available: false,
       isBlocked: true,
-      blockedReason: blockedItem.reason || 'Consultant Holiday / Blocked Date',
+      blockedReason: reason,
+      holidayReason: reason,
       isDayOff: false,
       weekday,
+      dayOfWeek: weekday,
+      reason,
     };
   }
 
   const daySchedule = settings.weeklySchedule?.[weekday];
   if (!daySchedule || !daySchedule.enabled || !daySchedule.windows || daySchedule.windows.length === 0) {
+    const reason = `${WEEKDAY_LABELS[weekday]} is marked as unavailable.`;
     return {
       isAvailable: false,
+      available: false,
       isBlocked: false,
       isDayOff: true,
       weekday,
+      dayOfWeek: weekday,
+      reason,
     };
   }
 
   return {
     isAvailable: true,
+    available: true,
     isBlocked: false,
     isDayOff: false,
     weekday,
+    dayOfWeek: weekday,
+    reason: undefined,
   };
 }
 

@@ -1,4 +1,13 @@
 import { supabase } from "@/lib/supabase";
+import {
+  ConsultantAvailabilitySettings,
+  parseAvailabilitySettings,
+  serializeAvailabilitySettings,
+  createDefaultAvailabilitySettings,
+  validateAvailabilitySettings,
+  validateConfirmedBookingConflicts,
+  getNowInIST,
+} from "@/utils/timeSlots";
 
 export interface DashboardStats {
   total_bookings: number;
@@ -403,4 +412,227 @@ export const consultantDashboardService = {
 
     return { success: true };
   },
+
+  // Get Consultant's self-service availability & original application settings
+  async getMyAvailability(
+    userParam: UserIdentifier
+  ): Promise<ConsultantSelfAvailabilityData | null> {
+    // 1. Try server API /api/consultant/availability
+    try {
+      const session = (await supabase.auth.getSession()).data.session;
+      if (session?.access_token) {
+        const res = await fetch("/api/consultant/availability", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+        const json = await res.json().catch(() => null);
+        if (res.ok && json?.success && json?.settings) {
+          return {
+            consultantId: json.consultantId,
+            consultantName: json.consultantName,
+            consultantEmail: json.consultantEmail,
+            settings: json.settings,
+            originalApplication: json.originalApplication || {
+              preferredTiming: "Flexible (Any Time)",
+              submittedAt: null,
+            },
+            adminPricing: json.adminPricing || {
+              pricing_30: 1000,
+              pricing_60: 1299,
+              currency: "INR",
+            },
+            confirmedBookings: json.confirmedBookings || [],
+          };
+        }
+      }
+    } catch (apiErr) {
+      console.warn("[consultantDashboardService] API /api/consultant/availability error, using direct query:", apiErr);
+    }
+
+    // 2. Fallback direct Supabase query
+    try {
+      const consultant = await getConsultant(userParam);
+      if (!consultant) return null;
+
+      // Query full consultant record
+      const { data: fullConsultant } = await supabase
+        .from("consultants")
+        .select("*")
+        .eq("id", consultant.id)
+        .maybeSingle();
+
+      const parsedSettings = parseAvailabilitySettings(fullConsultant || consultant);
+
+      // Query original application
+      let originalApplicationTiming = fullConsultant?.preferred_time || "Flexible (Any Time)";
+      let applicationSubmittedAt: string | null = null;
+      if (consultant.email) {
+        const { data: apps } = await supabase
+          .from("consultant_applications")
+          .select("preferred_session_timing, created_at")
+          .ilike("email", consultant.email.trim())
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (apps && apps.length > 0 && apps[0].preferred_session_timing) {
+          originalApplicationTiming = apps[0].preferred_session_timing;
+          applicationSubmittedAt = apps[0].created_at || null;
+        }
+      }
+
+      // Fetch confirmed bookings
+      const todayIST = getNowInIST().dateStr;
+      const { data: confirmedBookings = [] } = await supabase
+        .from("bookings")
+        .select("id, name, email, date, time, status, session_duration")
+        .eq("consultant_id", consultant.id)
+        .eq("status", "confirmed")
+        .gte("date", todayIST)
+        .order("date", { ascending: true });
+
+      return {
+        consultantId: consultant.id,
+        consultantName: consultant.name,
+        consultantEmail: consultant.email,
+        settings: parsedSettings,
+        originalApplication: {
+          preferredTiming: originalApplicationTiming,
+          submittedAt: applicationSubmittedAt,
+        },
+        adminPricing: {
+          pricing_30: fullConsultant?.pricing_30 || 1000,
+          pricing_60: fullConsultant?.pricing_60 || 1299,
+          currency: "INR",
+        },
+        confirmedBookings: (confirmedBookings as any) || [],
+      };
+    } catch (err) {
+      console.error("[consultantDashboardService] Error in getMyAvailability:", err);
+      return null;
+    }
+  },
+
+  // Save Consultant's self-service availability changes
+  async updateMyAvailability(
+    userParam: UserIdentifier,
+    settings: ConsultantAvailabilitySettings
+  ): Promise<{ success: boolean; message?: string; error?: string; conflicts?: any[] }> {
+    // 1. Try server API /api/consultant/availability
+    try {
+      const session = (await supabase.auth.getSession()).data.session;
+      if (session?.access_token) {
+        const res = await fetch("/api/consultant/availability", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ settings }),
+        });
+        const json = await res.json().catch(() => null);
+        if (res.ok && json?.success) {
+          return { success: true, message: json.message };
+        }
+        if (json?.error) {
+          return { success: false, error: json.error, conflicts: json.conflicts };
+        }
+      }
+    } catch (apiErr) {
+      console.warn("[consultantDashboardService] Server availability PUT error, trying direct fallback:", apiErr);
+    }
+
+    // 2. Direct Supabase update fallback
+    try {
+      const consultant = await getConsultant(userParam);
+      if (!consultant) return { success: false, error: "Consultant record not found." };
+
+      const validation = validateAvailabilitySettings(settings);
+      if (!validation.valid) {
+        return { success: false, error: validation.error };
+      }
+
+      // Check confirmed bookings safeguard
+      const todayIST = getNowInIST().dateStr;
+      const { data: confirmedBookings = [] } = await supabase
+        .from("bookings")
+        .select("id, name, email, date, time, status, session_duration")
+        .eq("consultant_id", consultant.id)
+        .eq("status", "confirmed")
+        .gte("date", todayIST);
+
+      const conflictCheck = validateConfirmedBookingConflicts(settings, (confirmedBookings as any) || []);
+      if (conflictCheck.hasConflict) {
+        return {
+          success: false,
+          error: conflictCheck.errorMessage,
+          conflicts: conflictCheck.conflicts,
+        };
+      }
+
+      // Preserve admin pricing from consultant record
+      const { data: currentRecord } = await supabase
+        .from("consultants")
+        .select("pricing_30, pricing_60")
+        .eq("id", consultant.id)
+        .maybeSingle();
+
+      const mergedSettings: ConsultantAvailabilitySettings = {
+        ...settings,
+        pricing: {
+          pricing_30: currentRecord?.pricing_30 || 1000,
+          pricing_60: currentRecord?.pricing_60 || 1299,
+          currency: "INR",
+        },
+        updatedAt: new Date().toISOString(),
+      };
+
+      const serialized = serializeAvailabilitySettings(mergedSettings);
+
+      const { error: updateError } = await supabase
+        .from("consultants")
+        .update({
+          availability: serialized.availabilityJson,
+          availability_settings: mergedSettings as any,
+          preferred_time: serialized.preferredTimeText,
+        })
+        .eq("id", consultant.id);
+
+      if (updateError) {
+        return { success: false, error: updateError.message };
+      }
+
+      return {
+        success: true,
+        message: "Your availability has been updated successfully and is now active for customer bookings.",
+      };
+    } catch (err: any) {
+      return { success: false, error: err?.message || "Failed to save availability." };
+    }
+  },
 };
+
+export interface ConsultantSelfAvailabilityData {
+  consultantId: string;
+  consultantName: string;
+  consultantEmail: string | null;
+  settings: ConsultantAvailabilitySettings;
+  originalApplication: {
+    preferredTiming: string;
+    submittedAt: string | null;
+  };
+  adminPricing: {
+    pricing_30: number;
+    pricing_60: number;
+    currency: string;
+  };
+  confirmedBookings: Array<{
+    id: string;
+    name?: string;
+    email?: string;
+    date: string;
+    time: string;
+    status: string;
+    session_duration?: number;
+  }>;
+}

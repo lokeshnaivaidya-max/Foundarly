@@ -56,6 +56,8 @@ import {
   validateAvailabilitySettings,
   checkDayAvailability,
   ConsultantAvailabilitySettings,
+  validateConfirmedBookingConflicts,
+  getNowInIST,
 } from "./src/utils/timeSlots.js";
 import { completionEmailStorage } from "./src/server/completionEmailStorage.js";
 import { meetingParticipantStorage } from "./src/server/meetingParticipantStorage.js";
@@ -2271,6 +2273,195 @@ async function startServer() {
     } catch (err: any) {
       console.error("[Consultant API] Unexpected stats error:", err);
       return res.status(500).json({ success: false, error: "Failed to compute stats." });
+    }
+  });
+
+  // 5. Get Consultant's Own Availability & Original Application Preferences
+  app.get("/api/consultant/availability", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({ success: false, error: "Authentication required." });
+    }
+
+    const user = auth.user;
+    const userEmail = (user.email || "").toLowerCase().trim();
+
+    try {
+      let query = supabaseAdminClient
+        .from("consultants")
+        .select("id, name, email, user_id, preferred_time, availability, availability_settings, pricing_30, pricing_60, is_active")
+        .eq("is_active", true);
+
+      if (userEmail) {
+        query = query.or(`user_id.eq.${user.id},email.ilike.${userEmail}`);
+      } else {
+        query = query.eq("user_id", user.id);
+      }
+
+      const { data: consultants, error: consultantErr } = await query.limit(1);
+      const consultant = consultants?.[0];
+
+      if (!consultant) {
+        return res.status(403).json({ success: false, error: "No active consultant profile linked to your account." });
+      }
+
+      // Query original application preference from consultant_applications table if available
+      let originalApplicationTiming = consultant.preferred_time || "Flexible (Any Time)";
+      let applicationSubmittedAt: string | null = null;
+      if (consultant.email) {
+        const { data: apps } = await supabaseAdminClient
+          .from("consultant_applications")
+          .select("preferred_session_timing, created_at, status")
+          .ilike("email", consultant.email.trim())
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (apps && apps.length > 0 && apps[0].preferred_session_timing) {
+          originalApplicationTiming = apps[0].preferred_session_timing;
+          applicationSubmittedAt = apps[0].created_at || null;
+        }
+      }
+
+      // Fetch upcoming confirmed bookings so the consultant can see them and avoid conflicts
+      const todayIST = getNowInIST().dateStr;
+      const { data: confirmedBookings = [] } = await supabaseAdminClient
+        .from("bookings")
+        .select("id, name, email, date, time, status, session_duration")
+        .eq("consultant_id", consultant.id)
+        .eq("status", "confirmed")
+        .gte("date", todayIST)
+        .order("date", { ascending: true })
+        .order("time", { ascending: true });
+
+      const parsedSettings = parseAvailabilitySettings(consultant);
+
+      return res.json({
+        success: true,
+        consultantId: consultant.id,
+        consultantName: consultant.name,
+        consultantEmail: consultant.email,
+        settings: parsedSettings,
+        originalApplication: {
+          preferredTiming: originalApplicationTiming,
+          submittedAt: applicationSubmittedAt,
+        },
+        adminPricing: {
+          pricing_30: consultant.pricing_30 || 1000,
+          pricing_60: consultant.pricing_60 || 1299,
+          currency: "INR",
+        },
+        confirmedBookings: confirmedBookings || [],
+      });
+    } catch (err: any) {
+      console.error("[Consultant API] Error loading availability:", err);
+      return res.status(500).json({ success: false, error: "Internal error loading availability." });
+    }
+  });
+
+  // 6. Update Consultant's Own Availability (Strictly Enforces Role & Field Scoping)
+  app.put("/api/consultant/availability", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({ success: false, error: "Authentication required." });
+    }
+
+    const user = auth.user;
+    const userEmail = (user.email || "").toLowerCase().trim();
+
+    try {
+      let query = supabaseAdminClient
+        .from("consultants")
+        .select("id, name, email, user_id, preferred_time, pricing_30, pricing_60, is_active")
+        .eq("is_active", true);
+
+      if (userEmail) {
+        query = query.or(`user_id.eq.${user.id},email.ilike.${userEmail}`);
+      } else {
+        query = query.eq("user_id", user.id);
+      }
+
+      const { data: consultants } = await query.limit(1);
+      const consultant = consultants?.[0];
+
+      if (!consultant) {
+        return res.status(403).json({ success: false, error: "Unauthorized: No active consultant profile found." });
+      }
+
+      const submittedSettings = req.body?.settings;
+      if (!submittedSettings || typeof submittedSettings !== "object") {
+        return res.status(400).json({ success: false, error: "Valid availability settings object is required." });
+      }
+
+      // 1. Structure validation
+      const validation = validateAvailabilitySettings(submittedSettings);
+      if (!validation.valid) {
+        return res.status(400).json({ success: false, error: validation.error || "Invalid availability settings." });
+      }
+
+      // 2. Confirmed Bookings Safeguard: Prevent changes from invalidating confirmed bookings
+      const todayIST = getNowInIST().dateStr;
+      const { data: confirmedBookings = [] } = await supabaseAdminClient
+        .from("bookings")
+        .select("id, name, email, date, time, status, session_duration")
+        .eq("consultant_id", consultant.id)
+        .eq("status", "confirmed")
+        .gte("date", todayIST);
+
+      const conflictCheck = validateConfirmedBookingConflicts(submittedSettings, confirmedBookings || []);
+      if (conflictCheck.hasConflict) {
+        return res.status(409).json({
+          success: false,
+          error: conflictCheck.errorMessage,
+          conflicts: conflictCheck.conflicts,
+        });
+      }
+
+      // 3. Strict Authorization Scope:
+      // Preserves admin-managed pricing. The consultant is forbidden from altering pricing_30 or pricing_60!
+      const mergedSettings: ConsultantAvailabilitySettings = {
+        version: 1,
+        weeklySchedule: submittedSettings.weeklySchedule,
+        slotDurationMinutes: Number(submittedSettings.slotDurationMinutes) || 60,
+        bufferMinutes: Number(submittedSettings.bufferMinutes) || 0,
+        blockedDates: Array.isArray(submittedSettings.blockedDates) ? submittedSettings.blockedDates : [],
+        pricing: {
+          pricing_30: consultant.pricing_30 || 1000,
+          pricing_60: consultant.pricing_60 || 1299,
+          currency: "INR",
+        },
+        timezone: APP_TIMEZONE,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const serialized = serializeAvailabilitySettings(mergedSettings);
+
+      const { data: updated, error: updateErr } = await supabaseAdminClient
+        .from("consultants")
+        .update({
+          availability: serialized.availabilityJson,
+          availability_settings: mergedSettings,
+          preferred_time: serialized.preferredTimeText,
+        })
+        .eq("id", consultant.id)
+        .select()
+        .single();
+
+      if (updateErr) {
+        console.error("[Consultant API] Failed to update availability in Supabase:", updateErr);
+        return res.status(500).json({ success: false, error: "Failed to persist availability updates." });
+      }
+
+      console.log(`[Consultant API] Consultant ${consultant.id} (${consultant.name}) successfully updated their self-service availability.`);
+
+      return res.json({
+        success: true,
+        message: "Your availability has been updated successfully and is now active for customer bookings.",
+        settings: mergedSettings,
+        preferredTimeText: serialized.preferredTimeText,
+      });
+    } catch (err: any) {
+      console.error("[Consultant API] Error saving availability:", err);
+      return res.status(500).json({ success: false, error: "Internal server error saving availability." });
     }
   });
 

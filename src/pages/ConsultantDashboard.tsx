@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   DollarSign, Calendar, Star, TrendingUp, Clock, Video, 
-  CreditCard, CheckCircle2, XCircle, RefreshCw, Copy, Check, Shield, RotateCcw, AlertCircle, MessageSquare
+  CreditCard, CheckCircle2, XCircle, RefreshCw, Copy, Check, Shield, RotateCcw, AlertCircle, MessageSquare, CalendarClock
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageLoader } from "@/components/PageLoader";
@@ -28,6 +28,7 @@ import {
   FollowUpRequest,
 } from "@/utils/meetingRejoin";
 import { followUpService } from "@/services/followUpService";
+import ConsultantAvailabilityEditor from "@/components/consultant/ConsultantAvailabilityEditor";
 
 export default function ConsultantDashboard() {
   const { user, profile } = useAuth();
@@ -545,8 +546,12 @@ export default function ConsultantDashboard() {
 
         {/* Tabs */}
         <Tabs defaultValue="bookings" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 max-w-xl">
+          <TabsList className="grid w-full grid-cols-5 max-w-2xl">
             <TabsTrigger value="bookings">Bookings</TabsTrigger>
+            <TabsTrigger value="availability" className="gap-1.5">
+              <CalendarClock className="h-4 w-4" />
+              <span>My Availability</span>
+            </TabsTrigger>
             <TabsTrigger value="follow-ups" className="relative gap-1.5">
               <span>Follow-ups</span>
               {followUps.filter(f => f.status === 'pending_consultant').length > 0 && (
@@ -558,6 +563,14 @@ export default function ConsultantDashboard() {
             <TabsTrigger value="payouts">Payouts</TabsTrigger>
             <TabsTrigger value="earnings">Earnings</TabsTrigger>
           </TabsList>
+
+          {/* Availability Tab */}
+          <TabsContent value="availability" className="space-y-4">
+            <ConsultantAvailabilityEditor
+              user={{ id: user.id, email: user.email }}
+              onAvailabilityUpdated={loadDashboardData}
+            />
+          </TabsContent>
 
           {/* Bookings Tab */}
           <TabsContent value="bookings" className="space-y-4">

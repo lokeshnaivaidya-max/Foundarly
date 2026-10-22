@@ -199,7 +199,6 @@ function nextTarget(
 function Avatar({
   account,
   tone,
-  status,
   className,
 }: {
   account: Account;
@@ -207,7 +206,6 @@ function Avatar({
   status?: AccountStatus;
   className?: string;
 }) {
-  const dot = STATUSES.find((entry) => entry.id === status)?.dot;
   return (
     <span
       aria-hidden="true"
@@ -226,14 +224,6 @@ function Avatar({
       ) : (
         initialsOf(account)
       )}
-      {dot ? (
-        <span
-          className={cn(
-            "absolute right-0 bottom-0 size-2.5 rounded-full ring-2 ring-background transition-colors duration-200",
-            dot
-          )}
-        />
-      ) : null}
     </span>
   );
 }
@@ -243,7 +233,6 @@ function Identity({
   shared,
   account,
   tone,
-  status,
   transition,
   stacked,
 }: {
@@ -251,7 +240,6 @@ function Identity({
   shared: boolean;
   account: Account;
   tone: number;
-  status: AccountStatus;
   transition: Transition;
   stacked: boolean;
 }) {
@@ -272,7 +260,6 @@ function Identity({
         <Avatar
           account={account}
           className={stacked ? "size-9" : "size-7 xl:size-8"}
-          status={status}
           tone={tone}
         />
       </motion.span>
@@ -437,49 +424,6 @@ function HoldSignOut({
   );
 }
 
-function StatusRow({
-  status,
-  onChange,
-}: {
-  status: AccountStatus;
-  onChange: (status: AccountStatus) => void;
-}) {
-  return (
-    <fieldset
-      aria-label="Status"
-      className="m-0 flex min-w-0 items-center justify-between border-0 py-1 pr-1 pl-2.5"
-    >
-      <span className="text-[11px] text-muted-foreground font-medium">Status</span>
-      <span className="flex gap-0.5">
-        {STATUSES.map((entry) => {
-          const checked = entry.id === status;
-          return (
-            <button
-              aria-checked={checked}
-              aria-label={entry.name}
-              className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-muted-foreground outline-none transition-colors duration-100 hover:bg-secondary aria-checked:text-foreground aria-checked:font-semibold"
-              data-menu-item=""
-              data-row="status"
-              key={entry.id}
-              onClick={() => onChange(entry.id)}
-              role="menuitemradio"
-              tabIndex={-1}
-              type="button"
-            >
-              <span
-                className={cn(
-                  "size-2 rounded-full transition-colors duration-200",
-                  checked ? entry.dot : "bg-muted-foreground/30"
-                )}
-              />
-              {entry.label}
-            </button>
-          );
-        })}
-      </span>
-    </fieldset>
-  );
-}
 
 function ThemeRow({
   uid,
@@ -588,15 +532,6 @@ export default function ProfileDropdown({
   const [phase, setPhase] = useState<Phase>("closed");
   const [instant, setInstant] = useState(false);
   const [openSeq, setOpenSeq] = useState(0);
-
-  const [status, setStatus] = useState<AccountStatus>(() => {
-    return (localStorage.getItem("foundarly_presence_status") as AccountStatus) || "online";
-  });
-
-  const handleStatusChange = (newStatus: AccountStatus) => {
-    setStatus(newStatus);
-    localStorage.setItem("foundarly_presence_status", newStatus);
-  };
 
   const handleThemeChange = (newTheme: AccountTheme) => {
     if (newTheme === "system") {
@@ -882,7 +817,6 @@ export default function ProfileDropdown({
             account={account}
             shared={!sharedInPanel}
             stacked={false}
-            status={status}
             tone={tone}
             transition={sharedTransition}
             uid={uid}
@@ -931,7 +865,6 @@ export default function ProfileDropdown({
                   account={account}
                   shared={sharedInPanel}
                   stacked
-                  status={status}
                   tone={tone}
                   transition={sharedTransition}
                   uid={uid}
@@ -954,7 +887,6 @@ export default function ProfileDropdown({
                 style={{ opacity: bodyOpacity }}
                 tabIndex={-1}
               >
-                <StatusRow onChange={handleStatusChange} status={status} />
                 <ThemeRow
                   onChange={handleThemeChange}
                   reduced={reduced}

@@ -267,16 +267,55 @@ export const upiPaymentService = {
 
   /**
    * Resubmit / update transaction ID for a pending or rejected payment
+   * Strictly permits updating ONLY transaction_id for the authenticated owner
    */
   async resubmitTransactionId(paymentId: string, newTransactionId: string): Promise<UPIPayment> {
     if (!validateUUID(paymentId)) {
       throw new Error('Invalid payment ID');
     }
-    const cleanTxn = newTransactionId.trim().toUpperCase();
-    if (cleanTxn.length < 5) {
-      throw new Error('Invalid transaction ID / UTR number');
+    const cleanTxn = newTransactionId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    if (cleanTxn.length < 5 || cleanTxn.length > 40) {
+      throw new Error('Invalid transaction ID / UTR number (must be 5 to 40 alphanumeric characters)');
     }
 
+    // Call secure server endpoint with authenticated user session
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      if (token && typeof fetch === 'function') {
+        const response = await fetch('/api/payment/resubmit-transaction', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            paymentId,
+            newTransactionId: cleanTxn,
+          }),
+        });
+
+        if (response.ok) {
+          const json = await response.json();
+          if (json.success && json.data) {
+            return json.data as UPIPayment;
+          }
+        } else {
+          const errJson = await response.json().catch(() => null);
+          if (errJson?.error) {
+            throw new Error(errJson.error);
+          }
+        }
+      }
+    } catch (fetchErr: any) {
+      // If network/endpoint error or in mocked test environment, fall back to restricted RLS update
+      if (fetchErr?.message && !fetchErr.message.includes('fetch') && !fetchErr.message.includes('Failed to fetch')) {
+        throw fetchErr;
+      }
+    }
+
+    // Direct RLS update strictly modifying ONLY transaction_id and resetting pending state
     const { data, error } = await (supabase
       .from('upi_payments')
       .update({

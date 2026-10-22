@@ -8,6 +8,7 @@ import {
   validatePaymentStatus,
   sanitizeString,
   validateEmail,
+  maskEmail,
 } from '@/utils/security';
 import {
   parseBookingDateTime,
@@ -154,7 +155,7 @@ export const bookingsService = {
       throw new Error('Invalid user ID');
     }
 
-    console.log('[BookingsService.getByUserId] Fetching bookings for user ID:', userId, 'email:', email);
+    console.log('[BookingsService.getByUserId] Fetching bookings for user ID:', userId, 'email:', maskEmail(email));
 
     const { data: byUserId, error: err1 } = await supabase
       .from('bookings')

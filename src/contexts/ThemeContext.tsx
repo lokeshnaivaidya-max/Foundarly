@@ -2,58 +2,106 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { settingsService } from '@/services/settings';
 import { secureLog } from '@/utils/security';
 
-type Theme = 'dark' | 'light';
+export type Theme = 'dark' | 'light';
 
 interface ThemeContextType {
   theme: Theme;
+  /** Sets the personal client theme preference (saved in localStorage) */
   setTheme: (theme: Theme) => void;
+  /** Admin-only: sets the global fallback theme for the platform */
+  setGlobalTheme?: (theme: Theme) => Promise<void>;
   loading: boolean;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
+const LOCAL_STORAGE_KEY = 'foundarly_theme';
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('light');
-  const [loading, setLoading] = useState(true);
+  const [theme, setThemeState] = useState<Theme>(() => {
+    // 1. Initial fast synchronous read from client storage to avoid flash of wrong theme
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (stored === 'dark' || stored === 'light') {
+          return stored;
+        }
+      } catch {
+        // LocalStorage may be blocked in strict sandboxes
+      }
+    }
+    return 'light';
+  });
+
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    loadTheme();
+    // Apply initial theme immediately to DOM
+    applyTheme(theme);
+    initializeTheme();
   }, []);
 
-  const loadTheme = async () => {
+  const initializeTheme = async () => {
+    if (typeof window === 'undefined') return;
+
+    // If user already has an explicit preference in localStorage, respect it
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (stored === 'dark' || stored === 'light') {
+        setThemeState(stored);
+        applyTheme(stored);
+        return;
+      }
+    } catch {
+      // Ignore
+    }
+
+    // Otherwise, check for platform-level default from public site_settings
     try {
       const settings = await settingsService.getAll();
       const themeSetting = settings.find(s => s.setting_key === 'site_theme');
-      if (themeSetting?.setting_value) {
-        const savedTheme = themeSetting.setting_value as Theme;
-        setThemeState(savedTheme);
-        applyTheme(savedTheme);
-      } else {
-        applyTheme('light');
+      if (themeSetting?.setting_value === 'dark' || themeSetting?.setting_value === 'light') {
+        const defaultTheme = themeSetting.setting_value as Theme;
+        setThemeState(defaultTheme);
+        applyTheme(defaultTheme);
       }
-    } catch (error) {
-      secureLog.error('Error loading theme:', error);
-      applyTheme('light');
-    } finally {
-      setLoading(false);
+    } catch {
+      // Safe fallback: default light theme
     }
   };
 
-  const setTheme = async (newTheme: Theme) => {
+  /**
+   * Per-User theme switch: Changes theme immediately in document and preserves in localStorage.
+   * Does NOT make unauthorized mutations to global database settings.
+   */
+  const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme);
     applyTheme(newTheme);
-    
+
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, newTheme);
+    } catch (err) {
+      secureLog.warn('Failed to save theme to localStorage:', err);
+    }
+  };
+
+  /**
+   * Privileged: Updates the platform default theme in site_settings (Admin Settings portal only)
+   */
+  const setGlobalTheme = async (newTheme: Theme) => {
+    setTheme(newTheme);
     try {
       await settingsService.upsert('site_theme', newTheme);
     } catch (error) {
-      secureLog.error('Error saving theme:', error);
+      secureLog.error('Error saving global theme in database:', error);
+      throw error;
     }
   };
 
   const applyTheme = (theme: Theme) => {
     const root = document.documentElement;
     root.classList.toggle('dark', theme === 'dark');
-    
+
     if (theme === 'dark') {
       // Dark theme with gold accents
       root.style.setProperty('--background', '240 6% 7%');
@@ -74,7 +122,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       root.style.setProperty('--input', '240 4% 18%');
       root.style.setProperty('--ring', '45 100% 58%');
       root.style.setProperty('--surface-elevated', '240 5% 12%');
-      
+
       // Sidebar colors for dark theme
       root.style.setProperty('--sidebar-background', '240 6% 7%');
       root.style.setProperty('--sidebar-foreground', '40 20% 92%');
@@ -104,7 +152,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       root.style.setProperty('--input', '45 30% 85%');
       root.style.setProperty('--ring', '45 100% 50%');
       root.style.setProperty('--surface-elevated', '48 100% 96%');
-      
+
       // Sidebar colors for light theme
       root.style.setProperty('--sidebar-background', '0 0% 100%');
       root.style.setProperty('--sidebar-foreground', '40 10% 15%');
@@ -118,7 +166,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, loading }}>
+    <ThemeContext.Provider value={{ theme, setTheme, setGlobalTheme, loading }}>
       {children}
     </ThemeContext.Provider>
   );

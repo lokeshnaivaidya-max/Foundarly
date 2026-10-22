@@ -14,8 +14,15 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL |
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd';
 const SUPABASE_SERVICE_ROLE_KEY = process.argv[2] || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const DEV_EMAIL = process.env.DEV_ADMIN_EMAIL || 'foundarly@developer.in';
-const DEV_PASSWORD = process.argv[3] || process.env.DEV_ADMIN_PASSWORD || 'foundar@developer';
+const DEV_EMAIL = (process.env.DEV_ADMIN_EMAIL || 'foundarly@developer.in').trim().toLowerCase();
+const DEV_PASSWORD = process.argv[3] || process.env.DEV_ADMIN_PASSWORD;
+
+if (!DEV_PASSWORD) {
+  console.error('\n❌ ERROR: DEV_ADMIN_PASSWORD must be explicitly provided.');
+  console.error('Usage:');
+  console.error('  DEV_ADMIN_PASSWORD="<STRONG_PASSWORD_MIN_12_CHARS>" node scripts/provision-developer-admin.js <SERVICE_ROLE_KEY>\n');
+  process.exit(1);
+}
 
 async function main() {
   console.log('====================================================');

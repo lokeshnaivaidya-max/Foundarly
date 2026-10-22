@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { secureLog, validateEmail, validateUUID } from '@/utils/security';
+import { secureLog, validateEmail, validateUUID, maskEmail } from '@/utils/security';
 import {
   EmailBookingData,
   EmailApplicationApprovedData,
@@ -146,7 +146,7 @@ export const emailService = {
    */
   async sendApplicationApproval(data: EmailApplicationApprovedData): Promise<EmailSendResult> {
     try {
-      console.log(`[EmailService] Dispatching application APPROVAL email to: ${data.applicantEmail}`);
+      console.log(`[EmailService] Dispatching application APPROVAL email to: ${maskEmail(data.applicantEmail)}`);
 
       if (!data.applicantEmail || !validateEmail(data.applicantEmail)) {
         return { success: false, error: `Invalid applicant email address: ${data.applicantEmail}` };
@@ -220,7 +220,7 @@ export const emailService = {
    */
   async sendApplicationRejection(data: EmailApplicationRejectedData): Promise<EmailSendResult> {
     try {
-      console.log(`[EmailService] Dispatching application REJECTION email to: ${data.applicantEmail}`);
+      console.log(`[EmailService] Dispatching application REJECTION email to: ${maskEmail(data.applicantEmail)}`);
 
       if (!data.applicantEmail || !validateEmail(data.applicantEmail)) {
         return { success: false, error: `Invalid applicant email address: ${data.applicantEmail}` };

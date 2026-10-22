@@ -89,6 +89,16 @@ function isAllowedAdminEmail(email?: string | null): boolean {
   return getAdminAllowlist().includes(email.trim().toLowerCase());
 }
 
+function maskEmail(email?: string | null): string {
+  if (!email || typeof email !== 'string') return '[REDACTED_EMAIL]';
+  const clean = email.trim();
+  const atIdx = clean.indexOf('@');
+  if (atIdx <= 1) return '[REDACTED_EMAIL]';
+  const u = clean.substring(0, atIdx);
+  const d = clean.substring(atIdx + 1);
+  return `${u[0]}***${u[u.length - 1]}@${d}`;
+}
+
 const supabaseAdminClient = createClient(
   process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co",
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd"
@@ -1890,6 +1900,136 @@ async function startServer() {
         success: false,
         error: "Failed to calculate session price.",
         code: "INTERNAL_ERROR",
+      });
+    }
+  });
+
+  // Secure Payment UTR / Transaction ID Resubmission (Customer Self-Service Retry)
+  app.post("/api/payment/resubmit-transaction", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        error: auth.error || "Authentication required to update payment reference.",
+        code: "UNAUTHENTICATED",
+      });
+    }
+
+    const { paymentId, newTransactionId } = req.body || {};
+    if (!paymentId || typeof paymentId !== "string" || !newTransactionId || typeof newTransactionId !== "string") {
+      return res.status(400).json({
+        success: false,
+        error: "Valid paymentId and newTransactionId are required.",
+        code: "INVALID_INPUT",
+      });
+    }
+
+    // Validate UUID format
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paymentId.trim());
+    if (!isUuid) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid payment record identifier format.",
+        code: "INVALID_PAYMENT_ID",
+      });
+    }
+
+    // Sanitize new transaction ID (alphanumeric, 5-40 chars)
+    const cleanTxn = newTransactionId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+    if (cleanTxn.length < 5 || cleanTxn.length > 40) {
+      return res.status(400).json({
+        success: false,
+        error: "Transaction reference must be 5 to 40 alphanumeric characters.",
+        code: "INVALID_TRANSACTION_ID",
+      });
+    }
+
+    try {
+      // 1. Fetch current payment record
+      const { data: payment, error: fetchError } = await supabaseAdminClient
+        .from("upi_payments")
+        .select("*, bookings(id, user_id, email, status, payment_status)")
+        .eq("id", paymentId.trim())
+        .maybeSingle();
+
+      if (fetchError || !payment) {
+        return res.status(404).json({
+          success: false,
+          error: "Payment record not found.",
+          code: "PAYMENT_NOT_FOUND",
+        });
+      }
+
+      // 2. Strict Ownership Verification: Customer can only update their OWN payment
+      const userId = auth.user.id;
+      const userEmail = (auth.user.email || "").toLowerCase().trim();
+      const booking = Array.isArray(payment.bookings) ? payment.bookings[0] : payment.bookings;
+
+      const isOwner = Boolean(
+        (payment.user_id && payment.user_id === userId) ||
+        (booking?.user_id && booking.user_id === userId) ||
+        (booking?.email && booking.email.toLowerCase().trim() === userEmail)
+      );
+
+      if (!isOwner) {
+        return res.status(403).json({
+          success: false,
+          error: "Forbidden: You are not authorized to modify this payment record.",
+          code: "UNAUTHORIZED_PAYMENT_OWNER",
+        });
+      }
+
+      // 3. Strict Status Check: Customers cannot tamper with already verified payments
+      if (payment.status === "verified") {
+        return res.status(400).json({
+          success: false,
+          error: "This payment has already been verified by an administrator and cannot be modified.",
+          code: "PAYMENT_ALREADY_VERIFIED",
+        });
+      }
+
+      // 4. Update ONLY transaction_id, reset status to 'pending', clear admin_notes
+      // Field tampering protection: payment_amount, verified_by, verified_at, booking_id are strictly protected
+      const { data: updatedPayment, error: updateError } = await supabaseAdminClient
+        .from("upi_payments")
+        .update({
+          transaction_id: cleanTxn,
+          status: "pending",
+          admin_notes: null,
+          verified_by: null,
+          verified_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", paymentId.trim())
+        .select()
+        .single();
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // 5. Ensure linked booking payment_status stays 'pending' (never marked paid until admin approval)
+      if (payment.booking_id) {
+        await supabaseAdminClient
+          .from("bookings")
+          .update({
+            payment_status: "pending",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", payment.booking_id);
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: updatedPayment,
+        message: "Transaction ID updated successfully. Administrator verification is now pending.",
+      });
+    } catch (err: any) {
+      console.error("[Payment Retry] Error updating transaction reference:", err?.message || err);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to update payment reference. Please try again later.",
+        code: "SERVER_ERROR",
       });
     }
   });
@@ -3737,7 +3877,7 @@ async function startServer() {
         });
       }
 
-      console.log(`[Server Email] Sending confirmation email for booking ${dataToSend.bookingId} to ${dataToSend.userEmail}...`);
+      console.log(`[Server Email] Sending confirmation email for booking ${dataToSend.bookingId} to ${maskEmail(dataToSend.userEmail)}...`);
 
       const userHtml = generateUserEmailHTML(dataToSend);
       const userText = generateUserEmailText(dataToSend);

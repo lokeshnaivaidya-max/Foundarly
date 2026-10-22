@@ -1,42 +1,53 @@
 import { motion } from "framer-motion";
-import { Signature } from "@/components/Signature";
 
-// ── Full-page loader (for auth-gated pages and screen transitions) ───────────
+// ── Full-page loader (for auth-gated pages and screen reloads) ───────────────
 export function PageLoader({ text = "Loading..." }: { text?: string }) {
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-6 px-4 select-none relative overflow-hidden">
       {/* Background radial gold glow */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-center">
-        <div className="w-[450px] h-[300px] bg-primary/10 rounded-full blur-[100px] -z-10" />
+        <div className="w-[380px] h-[260px] bg-primary/10 rounded-full blur-[90px] -z-10" />
       </div>
 
       <div className="relative flex flex-col items-center justify-center">
-        {/* Animated Foundarly Signature with website color (#F5A623) & 3s duration */}
-        <Signature
-          text="Foundarly"
-          color="#F5A623"
-          fontSize={48}
-          duration={3}
-          repeat={true}
-          className="drop-shadow-[0_0_30px_rgba(245,166,35,0.4)]"
-        />
-
-        {/* Ambient golden accent line */}
         <motion.div
-          className="h-[2px] w-48 bg-gradient-to-r from-transparent via-primary to-transparent rounded-full mt-2"
-          animate={{
-            scaleX: [0.2, 1, 0.2],
-            opacity: [0.3, 0.9, 0.3],
-          }}
-          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-        />
+          className="relative w-16 h-16 flex items-center justify-center"
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
+        >
+          {/* Outer ring */}
+          <svg className="absolute inset-0 w-full h-full" viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r="28" fill="none" stroke="hsl(45 100% 50% / 0.15)" strokeWidth="3" />
+            <circle
+              cx="32" cy="32" r="28"
+              fill="none"
+              stroke="#F5A623"
+              strokeWidth="3.5"
+              strokeLinecap="round"
+              strokeDasharray="44 132"
+            />
+          </svg>
+          {/* Inner pulsating gold monogram */}
+          <motion.div
+            className="w-7 h-7 rounded-full bg-primary/15 border border-primary/40 flex items-center justify-center text-primary font-serif font-bold text-xs"
+            animate={{ scale: [0.95, 1.1, 0.95] }}
+            transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+          >
+            F
+          </motion.div>
+        </motion.div>
+
+        {/* Brand label */}
+        <p className="font-serif font-bold text-sm tracking-widest text-foreground mt-4">
+          FOUNDARLY
+        </p>
       </div>
 
       {text && (
         <motion.p
-          className="text-xs uppercase tracking-[0.25em] font-medium text-muted-foreground"
+          className="text-[11px] uppercase tracking-[0.2em] font-medium text-muted-foreground"
           animate={{ opacity: [0.4, 0.9, 0.4] }}
-          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
         >
           {text}
         </motion.p>
@@ -48,20 +59,29 @@ export function PageLoader({ text = "Loading..." }: { text?: string }) {
 // ── Inline section loader (for card and section-level loading) ───────────────
 export function SectionLoader({ text }: { text?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-12 gap-4 select-none">
-      <Signature
-        text="Foundarly"
-        color="#F5A623"
-        fontSize={32}
-        duration={3}
-        repeat={true}
-        className="drop-shadow-[0_0_20px_rgba(245,166,35,0.3)]"
-      />
+    <div className="flex flex-col items-center justify-center py-12 gap-3 select-none">
+      <motion.div
+        className="w-10 h-10 relative flex items-center justify-center"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+      >
+        <svg className="w-full h-full" viewBox="0 0 40 40">
+          <circle cx="20" cy="20" r="17" fill="none" stroke="hsl(45 100% 50% / 0.15)" strokeWidth="3" />
+          <circle
+            cx="20" cy="20" r="17"
+            fill="none"
+            stroke="#F5A623"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray="28 84"
+          />
+        </svg>
+      </motion.div>
       {text && (
         <motion.p
           className="text-xs uppercase tracking-wider text-muted-foreground font-medium"
           animate={{ opacity: [0.4, 1, 0.4] }}
-          transition={{ duration: 2, repeat: Infinity }}
+          transition={{ duration: 1.5, repeat: Infinity }}
         >
           {text}
         </motion.p>

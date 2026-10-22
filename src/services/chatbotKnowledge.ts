@@ -51,7 +51,7 @@ export const KNOWLEDGE_BASE: KnowledgeTopic[] = [
       `• Flexible 30-minute and 60-minute video sessions\n` +
       `• Secure browser-based video meeting rooms with screen sharing\n` +
       `• **7-Day Post-Meeting Rejoin Window** for follow-up questions\n` +
-      `• Convenient Indian payments via UPI, NetBanking, and Cards\n` +
+      `• Convenient Indian payments via UPI QR scan and Bank Transfer (NEFT/IMPS)\n` +
       `• Professional networking community for startups and consultants`,
     suggestedFollowUps: [
       'How does consultation booking work?',
@@ -82,7 +82,7 @@ export const KNOWLEDGE_BASE: KnowledgeTopic[] = [
       `1. **Discover Your Consultant**: Browse our verified experts by category, experience, and ratings on the [Consultants](/consultants) page.\n` +
       `2. **Choose Slot & Duration**: Pick a 30 or 60-minute session and select an available time slot in India Standard Time (IST).\n` +
       `3. **Complete Payment**: Pay conveniently via UPI (Google Pay, PhonePe, Paytm) or Bank Transfer and submit your 12-digit UTR reference ID.\n` +
-      `4. **Join 1-on-1 Video Session**: Receive instant email confirmation and access your dedicated HD video meeting room at the scheduled time!`,
+      `4. **Join 1-on-1 Video Session**: Upon prompt administrator verification, you receive email confirmation with your dedicated HD video meeting room link!`,
     suggestedFollowUps: [
       'How to book a consultation?',
       'What are the payment options?',
@@ -234,26 +234,28 @@ export const KNOWLEDGE_BASE: KnowledgeTopic[] = [
   {
     id: 'payments_upi',
     category: 'Payments & Billing',
-    title: 'Payment Methods & Verification',
+    title: 'Payment Methods & Manual Verification',
     keywords: [
       'payment', 'pay', 'upi', 'qr code', 'gpay', 'phonepe', 'paytm',
       'bank transfer', 'utr', 'transaction id', 'reference id', 'verify payment',
-      'payment verification', 'razorpay', 'account number', 'ifsc'
+      'payment verification', 'manual review', 'account number', 'ifsc'
     ],
     teluguKeywords: [
       'payment ela cheyali', 'upi unda', 'qr code ekkada', 'payment success ayindi', 'utr ekkada ivvali'
     ],
-    summary: 'Pay securely via UPI QR scan, bank transfer, or online checkout.',
+    summary: 'Pay securely via UPI QR scan (GPay, PhonePe, Paytm) or NEFT/IMPS bank transfer.',
     detailedResponse:
-      `Foundarly supports convenient, instant Indian payment methods:\n\n` +
+      `Foundarly supports convenient, verified Indian payment methods with transparent manual administrator review:\n\n` +
       `**1. UPI Payment (Recommended):**\n` +
       `• Scan the official UPI QR Code on the [UPI Payment Page](/upi-payment) using any UPI app (Google Pay, PhonePe, Paytm, BHIM).\n` +
       `• Official UPI ID: **aagarwal1019@oksbi** (Account Holder: Abhishek Agarwal).\n\n` +
       `**2. Direct Bank Transfer (NEFT / IMPS):**\n` +
       `• Bank: Kotak Mahindra Bank | Champapet Branch\n` +
       `• Account No: **4549460820** | IFSC: **KKBK0007474**\n\n` +
-      `**Submitting Payment Proof:**\n` +
-      `After transferring, enter your **12-digit UPI UTR / Transaction Reference Number** on the payment screen. Our team verifies payments promptly, and you receive an email confirmation with your meeting room link!`,
+      `**Verification Workflow:**\n` +
+      `• After payment, submit your **12-digit UPI UTR / Bank Reference Number** on the payment page.\n` +
+      `• Our administration team reviews and verifies transactions (typically within 10–30 minutes during business hours).\n` +
+      `• Once verified, your booking updates to Confirmed and your video meeting link is dispatched via email and unlocked under [My Bookings](/my-bookings).`,
     suggestedFollowUps: [
       'What if my payment is not verified yet?',
       'Can I get a refund?',

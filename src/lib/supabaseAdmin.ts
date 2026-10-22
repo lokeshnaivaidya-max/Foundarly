@@ -1,12 +1,21 @@
-import { createClient } from '@supabase/supabase-js';
-import type { Database } from './database.types';
+/**
+ * Client-Side Guarded Supabase Admin Module
+ * 
+ * SECURITY AUDIT NOTICE:
+ * A Supabase service-role key must NEVER be referenced through VITE_* variables
+ * or bundled into client-side browser code.
+ *
+ * All privileged operations requiring the service-role key are strictly isolated
+ * to authenticated backend server routes (/api/*) running in Node.js.
+ */
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://rfyxnshvtfswvaogjzwq.supabase.co';
-const serviceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY || import.meta.env.SUPABASE_SERVICE_ROLE_KEY || '';
+import { supabase } from './supabase';
 
-export const supabaseAdmin = createClient<Database>(supabaseUrl, serviceRoleKey || import.meta.env.VITE_SUPABASE_ANON_KEY || '', {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-});
+/**
+ * In browser runtime, supabaseAdmin aliases the standard authenticated client
+ * governed by Postgres Row-Level Security (RLS).
+ * Under no circumstances does this bundle or leak the Supabase Service Role Key.
+ */
+export const supabaseAdmin = supabase;
+
+export default supabaseAdmin;

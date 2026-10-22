@@ -233,3 +233,37 @@ export function validateEnvVars(): void {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
 }
+
+/**
+ * Redacts an email address for safe diagnostic logging (e.g., "j***e@domain.com")
+ */
+export function maskEmail(email?: string | null): string {
+  if (!email || typeof email !== 'string') return '[REDACTED_EMAIL]';
+  const clean = email.trim();
+  const atIndex = clean.indexOf('@');
+  if (atIndex <= 1) return '[REDACTED_EMAIL]';
+  const user = clean.substring(0, atIndex);
+  const domain = clean.substring(atIndex + 1);
+  const maskedUser = user.length <= 2 ? `${user[0]}*` : `${user[0]}***${user[user.length - 1]}`;
+  return `${maskedUser}@${domain}`;
+}
+
+/**
+ * Redacts a phone number for safe diagnostic logging (e.g., "***-***-1234")
+ */
+export function maskPhone(phone?: string | null): string {
+  if (!phone || typeof phone !== 'string') return '[REDACTED_PHONE]';
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 4) return '[REDACTED_PHONE]';
+  return `***-***-${digits.slice(-4)}`;
+}
+
+/**
+ * Redacts a transaction ID / UTR reference for safe diagnostic logging (e.g., "4291******102")
+ */
+export function maskTransactionId(txnId?: string | null): string {
+  if (!txnId || typeof txnId !== 'string') return '[REDACTED_TXN]';
+  const clean = txnId.trim();
+  if (clean.length <= 6) return '***';
+  return `${clean.slice(0, 4)}******${clean.slice(-3)}`;
+}

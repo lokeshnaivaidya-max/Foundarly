@@ -107,17 +107,11 @@ export default function CurrencyTransfer({
           }
         }
 
-        // Also check booking for confirmed meeting room
+        // Also check booking for confirmed meeting room link
         const b = await bookingsService.getById(bookingId);
         if (b && isMounted) {
           if (b.meeting_room_id) {
             setEffectiveMeetingRoomId(b.meeting_room_id);
-          }
-          if (b.payment_status === "paid" || b.status === "confirmed") {
-            if (status !== "verified") {
-              setStatus("verified");
-              onStatusChanged?.("verified");
-            }
           }
         }
       } catch (err) {

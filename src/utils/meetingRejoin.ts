@@ -319,6 +319,16 @@ export function validateParticipantAccess(
     return { authorized: true, role: 'admin' };
   }
 
+  // Payment verification check: Only admin-confirmed paid bookings unlock meeting rooms
+  if (booking.payment_status !== 'paid') {
+    return {
+      authorized: false,
+      role: null,
+      reason: 'This consultation is awaiting administrator payment verification. Meeting access will unlock once payment is confirmed.',
+      code: 'PAYMENT_PENDING',
+    };
+  }
+
   // 2. Client verification
   const isClientById = Boolean(booking.user_id && booking.user_id === user.id);
   const isClientByEmail = Boolean(userEmail && bookingEmail && userEmail === bookingEmail);

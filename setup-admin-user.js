@@ -1,27 +1,41 @@
 // One-time secure admin setup script using Supabase Admin API
-// Usage: node setup-admin-user.js <SUPABASE_SERVICE_ROLE_KEY>
-// Or: SUPABASE_SERVICE_ROLE_KEY=<KEY> node setup-admin-user.js
+// Usage: SUPABASE_SERVICE_ROLE_KEY=<KEY> ADMIN_PASSWORD=<SECURE_PASSWORD> node setup-admin-user.js
+// Or: node setup-admin-user.js <SERVICE_ROLE_KEY> <SECURE_PASSWORD> [--force-reset-password]
 
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://rfyxnshvtfswvaogjzwq.supabase.co';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd';
-const SUPABASE_SERVICE_ROLE_KEY = process.argv[2] || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.argv[2] || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const ADMIN_EMAIL = 'admin@foundarly.com';
-const ADMIN_PASSWORD = 'admin1234';
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'admin@foundarly.com').trim().toLowerCase();
+const ADMIN_PASSWORD = process.argv[3] || process.env.ADMIN_PASSWORD;
+const FORCE_RESET = process.argv.includes('--force-reset-password');
 
 async function main() {
   console.log('====================================================');
   console.log('  Foundarly Admin User Setup (Supabase Admin API)  ');
   console.log('====================================================');
   console.log(`Supabase URL: ${SUPABASE_URL}`);
+  console.log(`Target Admin Email: ${ADMIN_EMAIL}`);
 
   if (!SUPABASE_SERVICE_ROLE_KEY) {
     console.error('\n❌ ERROR: Supabase Service Role Key is required.');
     console.error('Please run the script with your Service Role Key:');
-    console.error('  node setup-admin-user.js <YOUR_SERVICE_ROLE_KEY>');
-    console.error('Or set SUPABASE_SERVICE_ROLE_KEY in your environment.\n');
+    console.error('  SUPABASE_SERVICE_ROLE_KEY=<KEY> ADMIN_PASSWORD=<SECURE_PASS> node setup-admin-user.js\n');
+    process.exit(1);
+  }
+
+  if (!ADMIN_PASSWORD) {
+    console.error('\n❌ ERROR: Secure ADMIN_PASSWORD must be explicitly provided.');
+    console.error('Do not use predictable default passwords in production.');
+    console.error('Usage:');
+    console.error('  ADMIN_PASSWORD="<STRONG_PASSWORD_MIN_12_CHARS>" node setup-admin-user.js <SERVICE_ROLE_KEY>\n');
+    process.exit(1);
+  }
+
+  if (ADMIN_PASSWORD.length < 12) {
+    console.error('\n❌ ERROR: Password is too short. Minimum 12 characters required for administrator accounts.\n');
     process.exit(1);
   }
 
@@ -29,8 +43,8 @@ async function main() {
   const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       autoRefreshToken: false,
-      persistSession: false
-    }
+      persistSession: false,
+    },
   });
 
   try {
@@ -46,22 +60,26 @@ async function main() {
     let userId = null;
 
     if (existingUser) {
-      console.log(`\n2. Existing user found (ID: ${existingUser.id}). Updating password and confirming email via auth.admin.updateUserById()...`);
       userId = existingUser.id;
+      console.log(`\n2. Existing user found (ID: ${userId}).`);
 
-      const { data: updateData, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-        password: ADMIN_PASSWORD,
-        email_confirm: true,
-        user_metadata: {
-          full_name: 'Admin User'
+      if (FORCE_RESET) {
+        console.log('Flag --force-reset-password supplied. Updating password...');
+        const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+          password: ADMIN_PASSWORD,
+          email_confirm: true,
+          user_metadata: {
+            full_name: 'Super Admin',
+          },
+        });
+
+        if (updateError) {
+          throw new Error(`Failed to update admin password: ${updateError.message}`);
         }
-      });
-
-      if (updateError) {
-        throw new Error(`Failed to update admin user via auth.admin: ${updateError.message}`);
+        console.log('✅ Admin password updated successfully.');
+      } else {
+        console.log('ℹ️ User already exists. Existing credentials preserved (use --force-reset-password to overwrite).');
       }
-
-      console.log('✅ Admin user updated successfully:', updateData.user.email);
     } else {
       console.log(`\n2. User not found. Creating new admin user via auth.admin.createUser()...`);
 
@@ -70,8 +88,8 @@ async function main() {
         password: ADMIN_PASSWORD,
         email_confirm: true,
         user_metadata: {
-          full_name: 'Admin User'
-        }
+          full_name: 'Super Admin',
+        },
       });
 
       if (createError) {
@@ -79,51 +97,44 @@ async function main() {
       }
 
       userId = createData.user.id;
-      console.log('✅ Admin user created successfully:', createData.user.email, `(ID: ${userId})`);
+      console.log('✅ Admin user created successfully (ID:', userId, ')');
     }
 
-    console.log(`\n3. Ensuring public.profiles record has role='admin' for user ID: ${userId}...`);
-    const { data: profileData, error: profileError } = await supabaseAdmin
+    console.log(`\n3. Ensuring public.profiles record has role='super_admin' / 'admin' for user ID: ${userId}...`);
+    const { error: profileError } = await supabaseAdmin
       .from('profiles')
       .upsert({
         id: userId,
-        full_name: 'Admin User',
-        role: 'admin',
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'id' })
-      .select();
+        full_name: 'Super Admin',
+        role: 'super_admin',
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
 
     if (profileError) {
       throw new Error(`Failed to update public.profiles: ${profileError.message}`);
     }
 
-    console.log('✅ public.profiles updated successfully:', profileData);
+    console.log('✅ public.profiles updated successfully with role=super_admin.');
 
-    console.log(`\n4. Verifying login via standard client signInWithPassword(${ADMIN_EMAIL}, '${ADMIN_PASSWORD}')...`);
+    console.log('\n4. Verifying account credentials...');
     const standardClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { autoRefreshToken: false, persistSession: false }
+      auth: { autoRefreshToken: false, persistSession: false },
     });
 
     const { data: loginData, error: loginError } = await standardClient.auth.signInWithPassword({
       email: ADMIN_EMAIL,
-      password: ADMIN_PASSWORD
+      password: ADMIN_PASSWORD,
     });
 
-    console.log('\n--- Login Verification Result ---');
     if (loginError) {
-      console.error('❌ Login verification failed:', {
-        status: loginError.status,
-        name: loginError.name,
-        message: loginError.message
-      });
+      console.warn('⚠️ Verification check warning (credentials may have been preserved from earlier):', loginError.message);
     } else {
-      console.log('✅ LOGIN VERIFIED SUCCESSFULLY!');
-      console.log('User ID:', loginData.user.id);
-      console.log('Email:', loginData.user.email);
-      console.log('Confirmed At:', loginData.user.email_confirmed_at);
-      console.log('Role in metadata:', loginData.user.role);
+      console.log('✅ LOGIN VERIFIED SUCCESSFULLY for user ID:', loginData.user.id);
     }
 
+    console.log('\n====================================================');
+    console.log('🎉 Admin setup completed securely without printing secret credentials.');
+    console.log('====================================================\n');
   } catch (err) {
     console.error('\n❌ Admin setup script failed:', err.message || err);
     process.exit(1);

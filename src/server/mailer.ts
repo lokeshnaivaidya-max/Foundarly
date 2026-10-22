@@ -357,11 +357,22 @@ export async function sendEmail(options: SendMailOptions): Promise<MailSendResul
     };
   }
 
-  const recipients = Array.isArray(options.to) ? options.to.join(', ') : options.to;
+  function maskEmailAddress(email?: string | null): string {
+    if (!email || typeof email !== 'string') return '[REDACTED_EMAIL]';
+    const clean = email.trim();
+    const atIdx = clean.indexOf('@');
+    if (atIdx <= 1) return '[REDACTED_EMAIL]';
+    const u = clean.substring(0, atIdx);
+    const d = clean.substring(atIdx + 1);
+    return `${u[0]}***${u[u.length - 1]}@${d}`;
+  }
+
+  const rawList = Array.isArray(options.to) ? options.to : [options.to];
+  const maskedRecipients = rawList.map(e => maskEmailAddress(String(e))).join(', ');
   const fromAddress = options.from || config.defaultFrom;
   const replyToAddress = options.replyTo || config.replyTo;
 
-  console.log(`[SMTP Mailer] Preparing email from "${fromAddress}" to "${recipients}" | Subject: "${options.subject}"`);
+  console.log(`[SMTP Mailer] Preparing email from "${fromAddress}" to "${maskedRecipients}" | Subject: "${options.subject}"`);
 
   const candidates = getSmtpCandidates();
   const textContent = (options.text && options.text.trim().length > 0)

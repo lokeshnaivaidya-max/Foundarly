@@ -16,6 +16,7 @@ import { consultantsService } from '@/services/consultants';
 import { profilesService } from '@/services/profiles';
 import { emailService } from '@/services/email';
 import { useToast } from '@/hooks/use-toast';
+import { maskEmail } from '@/utils/security';
 import type { Database } from '@/lib/database.types';
 
 type ConsultantApplication = Database['public']['Tables']['consultant_applications']['Row'];
@@ -106,7 +107,7 @@ export default function AdminConsultantApplications() {
 
       // Step 5: Send Application Approval Email Notification to the applicant
       try {
-        console.log(`[AdminApplications] Sending approval email to ${selectedApp.email}...`);
+        console.log(`[AdminApplications] Sending approval email to ${maskEmail(selectedApp.email)}...`);
         const emailResult = await emailService.sendApplicationApproval({
           applicantName: selectedApp.name,
           applicantEmail: selectedApp.email,
@@ -186,7 +187,7 @@ export default function AdminConsultantApplications() {
 
       // Send Application Rejection Email Notification to the applicant
       try {
-        console.log(`[AdminApplications] Sending rejection email to ${selectedApp.email}...`);
+        console.log(`[AdminApplications] Sending rejection email to ${maskEmail(selectedApp.email)}...`);
         const emailResult = await emailService.sendApplicationRejection({
           applicantName: selectedApp.name,
           applicantEmail: selectedApp.email,

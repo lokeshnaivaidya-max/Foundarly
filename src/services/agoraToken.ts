@@ -1,6 +1,6 @@
 // Agora Token Generation Service - Server-backed & Browser-Safe
 
-const APP_ID = import.meta.env.VITE_AGORA_APP_ID || "d5eaf592322846eab2879d2bc086af78";
+const APP_ID = import.meta.env.VITE_AGORA_APP_ID || "";
 
 export interface TokenConfig {
   channelName: string;

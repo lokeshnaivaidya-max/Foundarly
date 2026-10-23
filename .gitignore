@@ -30,3 +30,5 @@ node-compile-cache
 *.hm
 data/
 *.tsbuildinfo
+database/backups/
+*.sql.gz

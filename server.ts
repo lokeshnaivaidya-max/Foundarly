@@ -276,11 +276,13 @@ async function startServer() {
     };
   }
 
-  // Apply rate limiter to sensitive email and booking endpoints
+  // Apply rate limiter to sensitive email, booking, and account endpoints
   app.use("/api/send-booking-email", createRateLimiter("send_booking_email", 30, 60000));
   app.use("/api/send-test-email", createRateLimiter("send_test_email", 10, 60000));
   app.use("/api/verify-smtp", createRateLimiter("verify_smtp", 20, 60000));
   app.use("/api/follow-ups/request", createRateLimiter("followup_request", 20, 60000));
+  app.use("/api/user/delete-account", createRateLimiter("user_delete_account", 5, 15 * 60000));
+  app.use("/api/diagnostics/client-error", createRateLimiter("client_error_diag", 60, 60000));
 
   // API Health Check
   app.get("/api/health", (req, res) => {
@@ -4050,6 +4052,129 @@ async function startServer() {
         success: false,
         error: error?.message || "Internal server error while sending application email",
       });
+    }
+  });
+
+  // User Account Deletion Endpoint
+  app.post("/api/user/delete-account", async (req, res) => {
+    try {
+      const auth = await authenticateSessionUser(req);
+      if (auth.error || !auth.user) {
+        return res.status(auth.status || 401).json({
+          success: false,
+          error: auth.error || "Authentication required.",
+          code: "UNAUTHENTICATED",
+        });
+      }
+
+      const user = auth.user;
+      const { confirmation, password } = req.body || {};
+
+      if (confirmation !== "DELETE") {
+        return res.status(400).json({
+          success: false,
+          error: "Explicit confirmation phrase 'DELETE' is required to proceed with account deletion.",
+          code: "CONFIRMATION_REQUIRED",
+        });
+      }
+
+      // Check user role: Protect Super Admin from self-service deletion
+      const userEmail = (user.email || "").toLowerCase().trim();
+      const { data: profile } = await supabaseAdminClient
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profile?.role === "super_admin" || (process.env.ADMIN_EMAILS || "").toLowerCase().includes(userEmail)) {
+        return res.status(403).json({
+          success: false,
+          error: "Super Administrator accounts cannot be deleted via self-service. Please transfer administrative ownership first.",
+          code: "SUPER_ADMIN_DELETION_FORBIDDEN",
+        });
+      }
+
+      // Verify password if provided (for email/password users)
+      if (password && typeof password === "string") {
+        const { error: signInErr } = await supabaseAdminClient.auth.signInWithPassword({
+          email: userEmail,
+          password,
+        });
+        if (signInErr) {
+          return res.status(401).json({
+            success: false,
+            error: "Password verification failed. Incorrect password.",
+            code: "INVALID_CREDENTIALS",
+          });
+        }
+      }
+
+      // Regulatory & Audit Retention compliance:
+      // Bookings and payment records (upi_payments) are retained for tax/audit compliance.
+      // Anonymize personal identification details in profiles table:
+      const anonymizedName = "Deleted User";
+      const anonymizedEmail = `deleted_${user.id.slice(0, 8)}_${Date.now()}@anonymized.foundarly.in`;
+
+      await supabaseAdminClient
+        .from("profiles")
+        .update({
+          full_name: anonymizedName,
+          email: anonymizedEmail,
+          role: "client",
+          is_consultant: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id);
+
+      // If user was an active consultant, deactivate consultant listing
+      await supabaseAdminClient
+        .from("consultants")
+        .update({
+          is_active: false,
+          name: anonymizedName,
+          email: anonymizedEmail,
+        })
+        .eq("user_id", user.id);
+
+      // Delete user authentication record if service role key is present
+      const hasServiceRole = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+      if (hasServiceRole && supabaseAdminClient.auth?.admin?.deleteUser) {
+        try {
+          await supabaseAdminClient.auth.admin.deleteUser(user.id);
+        } catch (delErr) {
+          console.error("[Account Deletion] Auth admin deletion error:", delErr);
+        }
+      }
+
+      console.log(`[Account Deletion] Account ${maskEmail(userEmail)} (ID: ${user.id.slice(0, 8)}...) successfully deleted and anonymized.`);
+
+      return res.json({
+        success: true,
+        message: "Your account and personal profile details have been successfully deleted.",
+      });
+    } catch (err: any) {
+      console.error("[Account Deletion] Unexpected error:", err);
+      return res.status(500).json({
+        success: false,
+        error: "An unexpected error occurred while deleting your account.",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  });
+
+  // Client-Side Diagnostic Error Logging Endpoint (Privacy-safe)
+  app.post("/api/diagnostics/client-error", (req, res) => {
+    try {
+      const { id, message, component, timestamp } = req.body || {};
+      const safeId = typeof id === "string" ? id.slice(0, 20) : "ERR_UNKNOWN";
+      const safeMsg = typeof message === "string" ? message.slice(0, 300) : "No message";
+      const safeComp = typeof component === "string" ? component.slice(0, 50) : "ClientApp";
+
+      console.warn(`[CLIENT_ERROR_TRACKED] ${safeId} [${safeComp}]: ${safeMsg} at ${timestamp || new Date().toISOString()}`);
+
+      return res.json({ success: true, id: safeId });
+    } catch {
+      return res.json({ success: false });
     }
   });
 

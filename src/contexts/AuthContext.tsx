@@ -22,7 +22,12 @@ interface AuthContextType {
   profile: Profile | null;
   session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: AuthError | null }>;
+  signUp: (email: string, password: string, fullName: string) => Promise<{
+    error: AuthError | null;
+    user?: User | null;
+    session?: Session | null;
+    emailConfirmationRequired?: boolean;
+  }>;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null; profile: Profile | null }>;
   signInWithGoogle: () => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
@@ -241,15 +246,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 };
 
   const signUp = async (email: string, password: string, fullName: string) => {
+    const normalizedEmail = email.trim().toLowerCase();
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: normalizedEmail,
       password,
       options: {
         data: {
-          full_name: fullName,
+          full_name: fullName.trim(),
         },
       },
     });
+
+    const emailConfirmationRequired = Boolean(!error && data.user && !data.session);
 
     if (!error && data.user) {
       if (data.session) setSession(data.session);
@@ -257,7 +265,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await fetchProfile(data.user.id, data.user);
     }
 
-    return { error };
+    return { error, user: data?.user || null, session: data?.session || null, emailConfirmationRequired };
   };
 
   const signIn = async (email: string, password: string) => {

@@ -5,9 +5,10 @@ import Footer from "@/components/Footer";
 import { SEO } from "@/components/SEO";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, User, MessageSquare, CreditCard, Video, Star, AlertCircle, Trash2, LogIn, CheckCircle, RefreshCw, RotateCcw } from "lucide-react";
+import { Calendar, Clock, User, MessageSquare, CreditCard, Video, Star, AlertCircle, Trash2, LogIn, CheckCircle, RefreshCw, RotateCcw, Sparkles, UserX, ShieldAlert } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { isUserAdmin } from "@/lib/authorization";
+import { supabase } from "@/lib/supabase";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { bookingsService } from "@/services/bookings";
 import { consultantDashboardService } from "@/services/consultantDashboard";
@@ -451,7 +452,7 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
 }
 
 export default function MyBookingsPage() {
-  const { user, profile, isAdmin, isConsultant, loading: authLoading } = useAuth();
+  const { user, profile, isAdmin, isConsultant, loading: authLoading, signOut } = useAuth();
   const { formatPrice } = useCurrency();
   const navigate = useNavigate();
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -467,6 +468,12 @@ export default function MyBookingsPage() {
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("");
 
+  // Delete Account states
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
   // Follow-up workflow states
   const [followUps, setFollowUps] = useState<Record<string, FollowUpRequest>>({});
   const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
@@ -476,6 +483,49 @@ export default function MyBookingsPage() {
   const [followUpDate, setFollowUpDate] = useState("");
   const [followUpTime, setFollowUpTime] = useState("");
   const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmationText !== "DELETE") {
+      toast.error("Please type 'DELETE' exactly to confirm account deletion.");
+      return;
+    }
+
+    setDeleteLoading(true);
+    try {
+      const session = (await supabase.auth.getSession())?.data?.session;
+      const token = session?.access_token;
+      if (!token) {
+        toast.error("Session expired. Please sign in again.");
+        return;
+      }
+
+      const res = await fetch("/api/user/delete-account", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          confirmation: deleteConfirmationText,
+          password: deletePassword,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to delete account");
+      }
+
+      toast.success("Account deleted successfully. Personal data has been anonymized.");
+      setDeleteAccountOpen(false);
+      await signOut();
+      navigate("/", { replace: true });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete account.");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mouseX = useMotionValue(0);
@@ -794,15 +844,66 @@ export default function MyBookingsPage() {
         <div className="absolute top-0 right-0 w-[400px] h-[400px] rounded-full bg-primary/3 blur-[100px] pointer-events-none" />
         <div className="container mx-auto px-6 max-w-4xl relative z-10">
           {bookings.length === 0 ? (
-            <motion.div className="bg-gradient-card border border-border rounded-2xl p-16 text-center"
-              initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-5">
-                <Calendar className="h-8 w-8 text-primary/60" />
-              </div>
-              <h3 className="font-display text-xl font-bold mb-2">No Bookings Yet</h3>
-              <p className="text-muted-foreground text-sm mb-6">You haven't booked any consultation sessions yet.</p>
-              <Button onClick={() => navigate("/booking")} className="glow-gold-sm">Book Your First Session</Button>
-            </motion.div>
+            <div className="space-y-6">
+              {/* Onboarding Guide for New Users */}
+              <motion.div
+                className="bg-gradient-card border border-border rounded-2xl p-6 md:p-8"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-display text-lg font-bold">Welcome to Foundarly</h3>
+                    <p className="text-xs text-muted-foreground">Follow these 3 simple steps to start your first mentorship session</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 text-xs">
+                  <div className="p-4 rounded-xl bg-secondary/40 border border-border/80">
+                    <span className="font-semibold text-primary block mb-1">1. Explore Experts</span>
+                    <p className="text-muted-foreground leading-relaxed">
+                      Browse verified consultants across strategy, operations, marketing, and finance.
+                    </p>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={() => navigate("/consultants")}
+                      className="p-0 h-auto text-primary text-xs mt-2"
+                    >
+                      Browse Experts →
+                    </Button>
+                  </div>
+                  <div className="p-4 rounded-xl bg-secondary/40 border border-border/80">
+                    <span className="font-semibold text-primary block mb-1">2. Select Slot &amp; Plan</span>
+                    <p className="text-muted-foreground leading-relaxed">
+                      Choose 30 or 60 minute consultations matching your schedule and requirements.
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-secondary/40 border border-border/80">
+                    <span className="font-semibold text-primary block mb-1">3. Scan &amp; Video Call</span>
+                    <p className="text-muted-foreground leading-relaxed">
+                      Transfer via official UPI QR code, get verified, and join via secure video room with 7-day rejoin access.
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+
+              {/* No Bookings Card */}
+              <motion.div className="bg-gradient-card border border-border rounded-2xl p-12 text-center"
+                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}>
+                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                  <Calendar className="h-7 w-7 text-primary/60" />
+                </div>
+                <h3 className="font-display text-xl font-bold mb-2">No Active Bookings</h3>
+                <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
+                  You haven't scheduled any consultation sessions yet. Ready to accelerate your business?
+                </p>
+                <Button onClick={() => navigate("/booking")} className="glow-gold-sm">Book Your First Session</Button>
+              </motion.div>
+            </div>
           ) : (
             <div className="space-y-5">
               {bookings.map((booking, i) => (
@@ -817,6 +918,62 @@ export default function MyBookingsPage() {
               ))}
             </div>
           )}
+
+          {/* Account Profile & Privacy Settings Card */}
+          <motion.div
+            className="mt-12 bg-gradient-card border border-border rounded-2xl p-6"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.2 }}
+          >
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-border/70">
+              <div>
+                <h4 className="font-display font-semibold text-base text-foreground">Account &amp; Security</h4>
+                <p className="text-xs text-muted-foreground mt-0.5">Manage your identity, verification, and privacy options.</p>
+              </div>
+              <Badge variant="outline" className="text-xs border-primary/30 text-primary">
+                {profile?.role === 'admin' || profile?.role === 'super_admin' || profile?.role === 'developer_admin'
+                  ? 'Administrator'
+                  : profile?.role === 'consultant' || profile?.is_consultant
+                  ? 'Verified Consultant'
+                  : 'Client Account'}
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4 text-xs">
+              <div>
+                <span className="text-muted-foreground block text-[11px] uppercase tracking-wider">Registered Email</span>
+                <span className="font-medium text-foreground">{user?.email || 'N/A'}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-[11px] uppercase tracking-wider">Email Verification</span>
+                <span className="inline-flex items-center gap-1 font-medium text-emerald-500">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  {user?.email_confirmed_at ? "Confirmed" : "Verified via Session"}
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-border/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground block">Delete Account</span>
+                Permanently delete your profile and anonymize personal information.
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setDeleteConfirmationText("");
+                  setDeletePassword("");
+                  setDeleteAccountOpen(true);
+                }}
+                className="text-xs text-destructive hover:bg-destructive/10 border-destructive/30 shrink-0"
+              >
+                <UserX className="w-3.5 h-3.5 mr-1.5" />
+                Delete Account
+              </Button>
+            </div>
+          </motion.div>
         </div>
       </section>
 
@@ -1051,6 +1208,78 @@ export default function MyBookingsPage() {
             >
               <RotateCcw className="h-4 w-4" />
               {followUpSubmitting ? "Submitting..." : "Send Request to Consultant"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Account Confirmation Dialog */}
+      <Dialog open={deleteAccountOpen} onOpenChange={setDeleteAccountOpen}>
+        <DialogContent className="bg-card border-border sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <ShieldAlert className="w-5 h-5 text-destructive" />
+              Delete Account Confirmation
+            </DialogTitle>
+            <DialogDescription>
+              Please read carefully before proceeding. This action cannot be reversed.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="p-3.5 rounded-xl bg-destructive/10 border border-destructive/20 text-xs text-muted-foreground space-y-2">
+              <p className="font-semibold text-destructive">What happens when your account is deleted:</p>
+              <ul className="list-disc list-inside space-y-1 text-[11px] leading-relaxed">
+                <li>Your personal identity, profile name, and login credentials will be removed or anonymized.</li>
+                <li>You will be immediately logged out and unable to log in with this email again.</li>
+                <li>Completed consultations and payment receipts are retained for statutory tax, fraud-prevention, and audit compliance.</li>
+              </ul>
+            </div>
+
+            <div>
+              <Label className="text-xs font-medium text-foreground">
+                Enter your password to verify ownership:
+              </Label>
+              <Input
+                type="password"
+                placeholder="Account password"
+                className="mt-1.5 bg-secondary border-border"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <Label className="text-xs font-medium text-foreground">
+                Type <span className="font-mono font-bold text-destructive">DELETE</span> in capital letters to confirm:
+              </Label>
+              <Input
+                type="text"
+                placeholder="DELETE"
+                className="mt-1.5 bg-secondary border-border font-mono text-xs"
+                value={deleteConfirmationText}
+                onChange={(e) => setDeleteConfirmationText(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteAccountOpen(false)}
+              disabled={deleteLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleDeleteAccount}
+              disabled={deleteConfirmationText !== "DELETE" || deleteLoading}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 gap-1.5"
+            >
+              <UserX className="w-4 h-4" />
+              {deleteLoading ? "Deleting Account..." : "Permanently Delete Account"}
             </Button>
           </DialogFooter>
         </DialogContent>

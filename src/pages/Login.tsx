@@ -9,7 +9,8 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { isUserAdmin } from "@/lib/authorization";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Eye, EyeOff, Mail, CheckCircle2 } from "lucide-react";
+import { Eye, EyeOff, Mail, CheckCircle2, AlertCircle } from "lucide-react";
+import { validateEmail } from "@/utils/security";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,7 @@ export default function LoginPage() {
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
+  const [signupConfirmationRequired, setSignupConfirmationRequired] = useState(false);
   const { user, profile, isAdmin, isConsultant, signUp, signIn, signInWithGoogle, resetPassword, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -57,25 +59,45 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !validateEmail(cleanEmail)) {
+      toast.error("Please enter a valid email address.");
+      return;
+    }
+
+    if (password.length < 8) {
+      toast.error("Password must be at least 8 characters long.");
+      return;
+    }
+
     setLoading(true);
 
     try {
       if (isSignup) {
-        const { error } = await signUp(email, password, fullName);
-        if (error) throw error;
-        toast.success("Account created successfully! Please check your email to verify your account if prompted.");
+        if (!fullName.trim()) {
+          toast.error("Please enter your full name.");
+          setLoading(false);
+          return;
+        }
+
+        const res = await signUp(cleanEmail, password, fullName);
+        if (res.error) throw res.error;
+
+        if (res.emailConfirmationRequired) {
+          setSignupConfirmationRequired(true);
+          toast.success("Account created! Please check your email to verify your account.");
+          return;
+        }
+
+        toast.success("Account created successfully!");
         navigate("/my-bookings", { replace: true });
       } else {
-        const { error, profile: userProfile } = await signIn(email, password);
+        const { error, profile: userProfile } = await signIn(cleanEmail, password);
         if (error) throw error;
         toast.success("Welcome back!");
 
         const activeProfile = userProfile || profile;
-
-        console.log("user:", user);
-        console.log("profile:", activeProfile);
-        console.log("profile?.role:", activeProfile?.role);
-        console.log("profile?.is_consultant:", activeProfile?.is_consultant);
 
         const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from;
 
@@ -91,7 +113,14 @@ export default function LoginPage() {
         }
       }
     } catch (error: any) {
-      toast.error(error.message || "An error occurred");
+      const msg = error.message || "An authentication error occurred.";
+      if (msg.toLowerCase().includes("email not confirmed")) {
+        toast.error("Please verify your email address before signing in. Check your inbox for the confirmation link.");
+      } else if (msg.toLowerCase().includes("invalid login credentials")) {
+        toast.error("Invalid email or password. Please verify your credentials.");
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -99,19 +128,30 @@ export default function LoginPage() {
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!forgotEmail.trim()) {
-      toast.error("Please enter your account email address");
+    const cleanEmail = forgotEmail.trim().toLowerCase();
+    if (!cleanEmail || !validateEmail(cleanEmail)) {
+      toast.error("Please enter a valid account email address");
       return;
     }
 
     setForgotLoading(true);
     try {
-      const { error } = await resetPassword(forgotEmail);
-      if (error) throw error;
+      const { error } = await resetPassword(cleanEmail);
+      if (error) {
+        if (error.message?.toLowerCase().includes("rate limit") || (error as any).status === 429) {
+          toast.error("Too many reset attempts. Please wait a few minutes before trying again.");
+          return;
+        }
+        console.warn("[Auth] Password reset notice:", error.message);
+      }
       setForgotSent(true);
-      toast.success("Password reset link sent to your email!");
+      toast.success("If an account exists, a password reset link has been dispatched.");
     } catch (err: any) {
-      toast.error(err?.message || "Failed to send reset link. Please check the email entered.");
+      if (err?.message?.toLowerCase().includes("rate limit")) {
+        toast.error("Too many reset attempts. Please wait a few minutes before trying again.");
+      } else {
+        setForgotSent(true);
+      }
     } finally {
       setForgotLoading(false);
     }
@@ -137,13 +177,36 @@ export default function LoginPage() {
             <div className="bg-gradient-card border border-border rounded-lg p-8">
               <div className="text-center mb-8">
                 <span className="font-display text-2xl font-bold text-gradient-gold">Foundarly</span>
-                <h1 className="font-display text-2xl font-bold mt-4">{isSignup ? "Create Account" : "Welcome Back"}</h1>
-                <p className="text-sm text-muted-foreground mt-2">
-                  {isSignup ? "Join the Foundarly community." : "Sign in to your account."}
-                </p>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
+              {signupConfirmationRequired ? (
+                <div className="space-y-6 text-center py-4">
+                  <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm flex items-start gap-3 text-left">
+                    <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-emerald-300">Verification Email Sent</p>
+                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                        We sent a secure activation link to <span className="font-medium text-foreground">{email}</span>. Please check your inbox and verify your email address to activate your account.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      setSignupConfirmationRequired(false);
+                      setIsSignup(false);
+                    }}
+                    className="w-full glow-gold-sm"
+                  >
+                    Proceed to Sign In
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <h1 className="font-display text-2xl font-bold mt-4 text-center">{isSignup ? "Create Account" : "Welcome Back"}</h1>
+                  <p className="text-sm text-muted-foreground mt-2 text-center mb-6">
+                    {isSignup ? "Join the Foundarly community." : "Sign in to your account."}
+                  </p>
+                  <form onSubmit={handleSubmit} className="space-y-4">
                 {isSignup && (
                   <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">Full Name</label>
@@ -251,8 +314,10 @@ export default function LoginPage() {
               <p className="text-center text-xs text-muted-foreground mt-3">
                 Admin users sign in with their registered admin account credentials.
               </p>
-            </div>
-          </AnimatedSection>
+            </>
+          )}
+        </div>
+      </AnimatedSection>
         </div>
       </main>
 

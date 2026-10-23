@@ -1,6 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw, Home, ShieldAlert } from "lucide-react";
+import { trackClientError, TrackedErrorRecord } from "@/services/errorTracker";
 
 interface Props {
   children?: ReactNode;
@@ -10,24 +11,30 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+  errorRecord: TrackedErrorRecord | null;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
+    errorRecord: null,
   };
 
-  public static getDerivedStateFromError(error: Error): State {
+  public static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("Uncaught runtime error caught by ErrorBoundary:", error, errorInfo);
+    const errorRecord = trackClientError(error, {
+      component: "ErrorBoundary",
+      info: errorInfo.componentStack?.slice(0, 300),
+    });
+    this.setState({ errorRecord });
   }
 
   private handleReset = () => {
-    this.setState({ hasError: false, error: null });
+    this.setState({ hasError: false, error: null, errorRecord: null });
     window.location.reload();
   };
 
@@ -36,6 +43,8 @@ export class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) {
         return this.props.fallback;
       }
+
+      const referenceId = this.state.errorRecord?.id || "ERR_FOUNDARLY";
 
       return (
         <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center">
@@ -48,14 +57,17 @@ export class ErrorBoundary extends Component<Props, State> {
                 Something went wrong
               </h1>
               <p className="text-sm text-muted-foreground">
-                An unexpected application error occurred. Click below to reload the page.
+                An unexpected application error occurred. We have logged this occurrence securely to improve platform reliability.
               </p>
-              {this.state.error?.message && (
-                <div className="mt-4 p-3 bg-secondary/50 rounded-lg text-left text-xs font-mono text-muted-foreground overflow-auto max-h-32 border border-border/40">
-                  {this.state.error.message}
-                </div>
-              )}
+              
+              <div className="mt-4 p-3 bg-secondary/50 rounded-lg text-center text-xs font-mono text-muted-foreground border border-border/40">
+                <span className="text-[10px] uppercase tracking-wider block text-muted-foreground/80 mb-0.5">
+                  Reference Code
+                </span>
+                <span className="font-semibold text-primary">{referenceId}</span>
+              </div>
             </div>
+
             <div className="flex flex-col gap-2 pt-2">
               <Button
                 onClick={this.handleReset}
@@ -67,12 +79,13 @@ export class ErrorBoundary extends Component<Props, State> {
               <Button
                 variant="ghost"
                 onClick={() => {
-                  this.setState({ hasError: false, error: null });
+                  this.setState({ hasError: false, error: null, errorRecord: null });
                   window.location.href = "/";
                 }}
-                className="w-full text-xs text-muted-foreground rounded-full"
+                className="w-full text-xs text-muted-foreground rounded-full gap-1.5"
               >
-                Go to Home
+                <Home className="h-3.5 w-3.5" />
+                Return to Home
               </Button>
             </div>
           </div>

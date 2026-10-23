@@ -9,7 +9,15 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { isUserAdmin } from "@/lib/authorization";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Mail, CheckCircle2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 export default function LoginPage() {
   const [isSignup, setIsSignup] = useState(false);
@@ -19,7 +27,11 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const { user, profile, isAdmin, isConsultant, signUp, signIn, signInWithGoogle, loading: authLoading } = useAuth();
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
+  const { user, profile, isAdmin, isConsultant, signUp, signIn, signInWithGoogle, resetPassword, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -51,7 +63,7 @@ export default function LoginPage() {
       if (isSignup) {
         const { error } = await signUp(email, password, fullName);
         if (error) throw error;
-        toast.success("Account created successfully!");
+        toast.success("Account created successfully! Please check your email to verify your account if prompted.");
         navigate("/my-bookings", { replace: true });
       } else {
         const { error, profile: userProfile } = await signIn(email, password);
@@ -82,6 +94,26 @@ export default function LoginPage() {
       toast.error(error.message || "An error occurred");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) {
+      toast.error("Please enter your account email address");
+      return;
+    }
+
+    setForgotLoading(true);
+    try {
+      const { error } = await resetPassword(forgotEmail);
+      if (error) throw error;
+      setForgotSent(true);
+      toast.success("Password reset link sent to your email!");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to send reset link. Please check the email entered.");
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -155,6 +187,21 @@ export default function LoginPage() {
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
+                  {!isSignup && (
+                    <div className="flex justify-end mt-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotEmail(email);
+                          setForgotSent(false);
+                          setForgotOpen(true);
+                        }}
+                        className="text-xs text-primary hover:underline font-medium"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <Button type="submit" className="w-full glow-gold-sm" disabled={loading}>
                   {loading ? "Loading..." : isSignup ? "Create Account" : "Sign In"}
@@ -208,6 +255,73 @@ export default function LoginPage() {
           </AnimatedSection>
         </div>
       </main>
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={forgotOpen} onOpenChange={setForgotOpen}>
+        <DialogContent className="bg-card border-border sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="w-5 h-5 text-primary" />
+              Reset Your Password
+            </DialogTitle>
+            <DialogDescription>
+              Enter your registered account email and we will send you a secure link to reset your password.
+            </DialogDescription>
+          </DialogHeader>
+
+          {forgotSent ? (
+            <div className="py-4 space-y-4 text-center">
+              <div className="p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+                <div className="text-left">
+                  <p className="font-semibold">Reset Email Sent</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    If an account exists for <span className="font-medium text-foreground">{forgotEmail}</span>, you will receive password reset instructions shortly.
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setForgotOpen(false)}
+              >
+                Close
+              </Button>
+            </div>
+          ) : (
+            <form onSubmit={handleForgotPassword} className="space-y-4 py-2">
+              <div>
+                <label className="text-xs font-medium text-foreground mb-1 block">Account Email</label>
+                <Input
+                  required
+                  type="email"
+                  placeholder="name@example.com"
+                  className="bg-secondary border-border"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                />
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0 pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setForgotOpen(false)}
+                  disabled={forgotLoading}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  className="glow-gold-sm"
+                  disabled={forgotLoading}
+                >
+                  {forgotLoading ? "Sending Link..." : "Send Reset Link"}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
       <Footer />
     </div>
   );

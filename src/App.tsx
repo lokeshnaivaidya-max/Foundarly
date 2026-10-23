@@ -24,6 +24,7 @@ import Blog from "./pages/Blog";
 import BlogPost from "./pages/BlogPost";
 import FAQs from "./pages/FAQs";
 import Login from "./pages/Login";
+import ResetPasswordPage from "./pages/ResetPassword";
 import AdminLoginPage from "./pages/AdminLogin";
 import NotFound from "./pages/NotFound";
 import AdminLayout from "./components/admin/AdminLayout";
@@ -131,6 +132,7 @@ const App = () => (
                     <Route path="/review/:bookingId" element={<Review />} />
                     <Route path="/upi-payment" element={<UPIPaymentPage />} />
                     <Route path="/login" element={<Login />} />
+                    <Route path="/reset-password" element={<ResetPasswordPage />} />
                     <Route path="/admin/login" element={<AdminLoginPage />} />
                     <Route
                       path="/admin"

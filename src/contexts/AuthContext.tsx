@@ -26,6 +26,8 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null; profile: Profile | null }>;
   signInWithGoogle: () => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
+  resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
+  updateUserPassword: (newPassword: string) => Promise<{ error: AuthError | null }>;
   isSuperAdmin: boolean;
   isDeveloperAdmin: boolean;
   isAdmin: boolean;
@@ -323,6 +325,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const resetPassword = async (email: string) => {
+    try {
+      const redirectTo = `${window.location.origin}/reset-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo,
+      });
+      return { error };
+    } catch (err: any) {
+      return { error: err };
+    }
+  };
+
+  const updateUserPassword = async (newPassword: string) => {
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      return { error };
+    } catch (err: any) {
+      return { error: err };
+    }
+  };
+
   const signOut = async () => {
     localStorage.removeItem('foundarly_admin_active_session');
     localStorage.removeItem('foundarly_admin_auth');
@@ -355,6 +380,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signIn,
     signInWithGoogle,
     signOut,
+    resetPassword,
+    updateUserPassword,
     isSuperAdmin: isCurrentSuperAdmin,
     isDeveloperAdmin: isCurrentDevAdmin,
     isAdmin: isCurrentAdmin,

@@ -13,6 +13,7 @@ import {
   CreditCard,
   Video,
   Clock,
+  AlertTriangle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -205,6 +206,7 @@ export default function AIChatWidget() {
         timestamp: new Date(),
         followUps: response.followUps,
         links: response.links,
+        isRefusal: response.isRefusal,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -383,25 +385,42 @@ export default function AIChatWidget() {
                   <>
                     {messages.map((msg, idx) => {
                       const isUser = msg.role === 'user';
+                      const isRefusal = !isUser && (msg.isRefusal || msg.content.includes('Unable to Process Request'));
                       return (
                         <div key={idx} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} space-y-1.5`}>
                           <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} w-full`}>
                             {!isUser && (
-                              <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center mr-2 mt-1 shrink-0">
-                                <Bot className="h-3.5 w-3.5 text-primary" />
+                              <div
+                                className={`w-7 h-7 rounded-full flex items-center justify-center mr-2 mt-1 shrink-0 ${
+                                  isRefusal
+                                    ? 'bg-destructive/15 border border-destructive/30 text-destructive shadow-xs'
+                                    : 'bg-primary/10 border border-primary/20 text-primary'
+                                }`}
+                              >
+                                {isRefusal ? (
+                                  <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+                                ) : (
+                                  <Bot className="h-3.5 w-3.5 text-primary" />
+                                )}
                               </div>
                             )}
                             <div
                               className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 sm:px-4 sm:py-3 shadow-sm break-words [overflow-wrap:anywhere] ${
                                 isUser
                                   ? 'bg-primary text-primary-foreground rounded-br-xs font-medium'
+                                  : isRefusal
+                                  ? 'bg-destructive/10 border border-destructive/25 text-foreground rounded-bl-xs'
                                   : 'bg-card border border-border/80 text-foreground rounded-bl-xs'
                               }`}
                             >
                               <FormattedMessage text={msg.content} onNavigate={handleNavigate} />
                               <span
                                 className={`block text-[10px] mt-1 text-right ${
-                                  isUser ? 'text-primary-foreground/75' : 'text-muted-foreground'
+                                  isUser
+                                    ? 'text-primary-foreground/75'
+                                    : isRefusal
+                                    ? 'text-destructive/80 font-medium'
+                                    : 'text-muted-foreground'
                                 }`}
                               >
                                 {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

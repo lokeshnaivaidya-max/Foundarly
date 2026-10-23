@@ -29,6 +29,39 @@ export const SUPPORT_EMAIL = 'hello@foundarlybusinessworld.in';
 export const PLATFORM_TIMEZONE = 'Asia/Kolkata (IST, UTC+05:30)';
 
 export const KNOWLEDGE_BASE: KnowledgeTopic[] = [
+  // 0. GREETING & WELCOME
+  {
+    id: 'welcome_greeting',
+    category: 'About Foundarly',
+    title: 'Welcome to Foundarly',
+    keywords: [
+      'hi', 'hello', 'hey', 'greetings', 'namaste', 'start', 'good morning', 'good afternoon', 'good evening', 'help'
+    ],
+    teluguKeywords: [
+      'namaskaram', 'namaste', 'halo', 'bagunnara', 'hi foundarly'
+    ],
+    summary: 'Warm greeting and overview of Foundarly Assistant capabilities.',
+    detailedResponse:
+      `Hello! 👋 Welcome to **Foundarly**.\n\n` +
+      `I am your guide for everything on our platform:\n` +
+      `• **Consultants**: Browse verified business, tech, marketing, and finance mentors\n` +
+      `• **Consultation Fees**: Check transparent 30-min & 60-min session pricing\n` +
+      `• **Booking**: Select dates, time slots (IST), and apply referral codes\n` +
+      `• **Payments**: UPI QR scan (GPay, PhonePe, Paytm) & Bank Transfer verification\n` +
+      `• **Video Meetings**: Browser rooms with lobby countdown & 7-day post-meeting rejoin\n\n` +
+      `How can I help you today?`,
+    suggestedFollowUps: [
+      'How do I book a consultation?',
+      'What are the consultation fees?',
+      'Which consultants are available?',
+      'How does UPI payment work?'
+    ],
+    actionLinks: [
+      { label: 'Browse Consultants', url: '/consultants' },
+      { label: 'Book a Session', url: '/booking' }
+    ]
+  },
+
   // 1. ABOUT FOUNDARLY
   {
     id: 'about_foundarly',
@@ -101,7 +134,7 @@ export const KNOWLEDGE_BASE: KnowledgeTopic[] = [
     title: 'Verified Consultants',
     keywords: [
       'consultant', 'consultants', 'experts', 'advisors', 'mentors',
-      'who are the consultants', 'verified', 'qualifications', 'credentials',
+      'who are the consultants', 'verified', 'expert qualifications', 'consultant credentials',
       'find consultant', 'industry experts'
     ],
     teluguKeywords: [

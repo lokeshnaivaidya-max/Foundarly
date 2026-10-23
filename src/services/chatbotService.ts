@@ -8,7 +8,7 @@
  * - Actionable internal navigation links and follow-up prompt suggestions.
  */
 
-import { matchIntent, MatchResult } from './chatbotIntentMatcher';
+import { matchIntent, MatchResult, REFUSAL_MESSAGE } from './chatbotIntentMatcher';
 import { KNOWLEDGE_BASE, SUPPORT_EMAIL } from './chatbotKnowledge';
 import { consultantsService } from './consultants';
 
@@ -18,13 +18,27 @@ export interface ChatMessage {
   timestamp: Date;
   followUps?: string[];
   links?: { label: string; url: string }[];
+  isRefusal?: boolean;
 }
 
 export interface ChatbotResponse {
   content: string;
   followUps: string[];
   links: { label: string; url: string }[];
+  isRefusal?: boolean;
 }
+
+const SAFE_FOUNDARLY_FOLLOW_UPS = [
+  'How do I book a consultation?',
+  'What are the consultation fees?',
+  'Which consultants are available?',
+  'How does UPI payment work?',
+];
+
+const SAFE_FOUNDARLY_LINKS = [
+  { label: 'Browse Consultants', url: '/consultants' },
+  { label: 'Book a Session', url: '/booking' },
+];
 
 export const chatbotService = {
   /**
@@ -35,33 +49,20 @@ export const chatbotService = {
     if (!clean) {
       return {
         content: 'Please enter a question about our consultants, booking process, session pricing, or meetings.',
-        followUps: [
-          'How do I book a consultation?',
-          'What are the consultation fees?',
-          'Which consultants are available?',
-        ],
-        links: [
-          { label: 'Browse Consultants', url: '/consultants' },
-          { label: 'Book a Session', url: '/booking' },
-        ],
+        followUps: SAFE_FOUNDARLY_FOLLOW_UPS,
+        links: SAFE_FOUNDARLY_LINKS,
       };
     }
 
     const match: MatchResult = matchIntent(clean);
 
-    // 1. Security & Privacy Guardrail Triggered
+    // 1. Security & Privacy Guardrail Triggered (credentials, passwords, API keys, env vars, customer info, system details)
     if (match.isSecurityBlock && match.securityMessage) {
       return {
         content: match.securityMessage,
-        followUps: [
-          'What is Foundarly?',
-          'How does consultation booking work?',
-          'What are the consultation fees?',
-        ],
-        links: [
-          { label: 'About Foundarly', url: '/about' },
-          { label: 'Browse Consultants', url: '/consultants' },
-        ],
+        isRefusal: true,
+        followUps: SAFE_FOUNDARLY_FOLLOW_UPS,
+        links: SAFE_FOUNDARLY_LINKS,
       };
     }
 
@@ -96,32 +97,16 @@ export const chatbotService = {
         content: finalContent,
         followUps: match.topic.suggestedFollowUps,
         links: match.topic.actionLinks || [],
+        isRefusal: false,
       };
     }
 
-    // 4. Fallback for unclassified questions
+    // 4. Refusal for questions outside Foundarly services
     return {
-      content:
-        `I want to make sure you get accurate information about Foundarly, but I couldn't find a direct answer for your question.\n\n` +
-        `Here are the most popular topics I can help you with:\n` +
-        `• **Consultation Pricing & Durations**: 30-min & 60-min sessions in INR (₹)\n` +
-        `• **Booking Instructions**: Selecting dates, available slots, and referral codes\n` +
-        `• **Payment Methods**: UPI QR scan (GPay, PhonePe, Paytm) & Bank Transfer verification\n` +
-        `• **Meeting Access**: Browser video rooms, 5-minute lobby, and 7-day post-meeting rejoin\n` +
-        `• **Rescheduling & Cancellation**: Submitting change requests from My Bookings\n` +
-        `• **Becoming a Consultant**: Join our roster of verified business mentors\n\n` +
-        `If your question requires personalized help, reach our team at **${SUPPORT_EMAIL}**.`,
-      followUps: [
-        'How do I book a consultation?',
-        'What are the consultation fees?',
-        'How does UPI payment work?',
-        'How to join my video meeting?',
-      ],
-      links: [
-        { label: 'Browse Consultants', url: '/consultants' },
-        { label: 'Book a Session', url: '/booking' },
-        { label: 'Frequently Asked Questions', url: '/faqs' },
-      ],
+      content: REFUSAL_MESSAGE,
+      isRefusal: true,
+      followUps: SAFE_FOUNDARLY_FOLLOW_UPS,
+      links: SAFE_FOUNDARLY_LINKS,
     };
   },
 

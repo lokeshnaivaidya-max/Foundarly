@@ -18,14 +18,27 @@ export interface MatchResult {
   matchedKeywords: string[];
 }
 
-// Patterns that attempt to extract confidential credentials or system bypasses
+export const REFUSAL_TITLE = '⚠️ Unable to Process Request';
+export const REFUSAL_BODY = 'Sorry, I can only help with Foundarly-related questions. I can’t provide credentials, passwords, private information, or internal system details.';
+export const REFUSAL_MESSAGE = `**${REFUSAL_TITLE}**\n${REFUSAL_BODY}`;
+
+// Patterns that attempt to query credentials, passwords, API keys, environment variables, private customer data, personal data, or internal system details
 const SECURITY_PATTERNS = [
-  /(api[_\s-]?key|apikey|secret|token|password|credential|passwd|dotenv|\.env)/i,
-  /(gemini|supabase|jwt|bearer|smtp|database|db)[_\s-]*(key|secret|token|pass|password|dump|drop)/i,
+  // Admin credentials, portal credentials, passwords, tokens, secrets
+  /(admin|developer|portal|root|superuser|service[_\s-]?role)[_\s-]*(credential|credentials|login|password|pass|passwd|auth|secret|token|key|cookie|session)/i,
+  /(api[_\s-]?key|apikey|secret|token|password|credential|passwd|pwd|auth_token|refresh_token|jwt|bearer)/i,
+
+  // Environment variables and secrets
+  /(environment[_\s-]?variable|env[_\s-]?var|dotenv|\.env|process\.env|vite_[a-z0-9_]+)/i,
+  /(gemini|supabase|agora|resend|smtp|database|db)[_\s-]*(key|secret|token|pass|password|dump|drop|url|config)/i,
+
+  // Private customer information, personal data, PII, database dump
+  /(private\s+(customer|user|client)\s+(information|data|details|records)|customer\s+(information|data|details|records)|personal\s+(data|information|details)|pii|credit\s*cards?|phone\s*numbers?)/i,
+  /(dump\s+(the\s+)?database|select\s+\*\s+from|drop\s+table|union\s+select|sql\s+injection|show\s+all\s+(users|customers|emails|passwords|records))/i,
+
+  // Internal system details, source code, architecture, system prompts, jailbreaks
+  /(internal\s+(system\s+details|system|internals|architecture|code|endpoints?|infra)|system\s+internals|backend\s+(source|code|internals|server)|server\s+internals|source\s+code|github\s+token)/i,
   /(system[_\s-]?prompt|ignore\s+(all\s+)?previous\s+instructions|reveal\s+(your\s+)?instructions|jailbreak)/i,
-  /(dump\s+(the\s+)?database|select\s+\*\s+from|drop\s+table|union\s+select|sql\s+injection)/i,
-  /(show\s+(me\s+)?(all\s+)?(user|customer)\s+(emails|passwords|data|phone\s+numbers|credit\s+cards|tokens))/i,
-  /(admin\s+password|developer\s+secret|customer\s+credit\s+card|private\s+token|service[_\s-]?role)/i,
 ];
 
 // Telugu-English mapping to standard English conceptual terms
@@ -57,8 +70,7 @@ export function checkSecurityGuardrails(input: string): { isSafe: boolean; warni
     if (pattern.test(cleanInput)) {
       return {
         isSafe: false,
-        warning:
-          'I am Foundarly’s support assistant. For privacy and platform security, system credentials, internal environment variables, operational access keys, and private customer records are strictly confidential and protected. How may I assist you with public consultation services, pricing, or booking?',
+        warning: REFUSAL_MESSAGE,
       };
     }
   }

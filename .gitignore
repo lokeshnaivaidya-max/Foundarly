@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 .env
+.env.*
+.env*.local
+!.env.example
 
 # Editor directories and files
 .vscode/*
@@ -26,3 +29,4 @@ dist-ssr
 node-compile-cache
 *.hm
 data/
+*.tsbuildinfo

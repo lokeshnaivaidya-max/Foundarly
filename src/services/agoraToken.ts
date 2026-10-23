@@ -1,7 +1,6 @@
 // Agora Token Generation Service - Server-backed & Browser-Safe
 
 const APP_ID = import.meta.env.VITE_AGORA_APP_ID || "d5eaf592322846eab2879d2bc086af78";
-const APP_CERTIFICATE = import.meta.env.VITE_AGORA_APP_CERTIFICATE || "620cccf9c8e94046aa4da9359c6d7275";
 
 export interface TokenConfig {
   channelName: string;
@@ -70,7 +69,7 @@ export function canGenerateTokens(): boolean {
 export function getTokenInfo() {
   return {
     appId: APP_ID,
-    hasCertificate: Boolean(APP_CERTIFICATE),
+    hasCertificate: true,
     canGenerate: true,
     recommendation: 'Using secure server-side Agora token generation via /api/agora/token',
   };

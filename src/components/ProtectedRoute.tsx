@@ -1,4 +1,4 @@
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { isUserAdmin, isSuperAdmin, UserRole, getUserEffectiveRole } from '@/lib/authorization';
 import { ShieldAlert, ArrowLeft } from 'lucide-react';

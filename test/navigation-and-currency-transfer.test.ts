@@ -154,3 +154,44 @@ test("Currency formatting: Formats INR properly with ₹ symbol", () => {
   assert.equal(formatINR(10000), "₹10,000");
   assert.equal(formatINR(150000), "₹1,50,000");
 });
+
+test("Regression check: ProtectedRoute must explicitly import useNavigate from react-router-dom", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const protectedRoutePath = path.resolve(process.cwd(), "src/components/ProtectedRoute.tsx");
+  const content = fs.readFileSync(protectedRoutePath, "utf-8");
+
+  // Ensure useNavigate is imported from react-router-dom
+  const importMatch = content.match(/import\s*\{[^}]*useNavigate[^}]*\}\s*from\s*['"]react-router-dom['"]/);
+  assert.ok(importMatch, "ProtectedRoute.tsx must import useNavigate from react-router-dom to prevent 'useNavigate is not defined' error on /admin");
+
+  // Ensure useNavigate() is invoked
+  assert.ok(content.includes("const navigate = useNavigate();"), "ProtectedRoute must instantiate navigate hook");
+});
+
+test("Codebase audit: All files calling useNavigate must import it from react-router-dom", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+
+  function walk(dir: string): string[] {
+    let files: string[] = [];
+    for (const item of fs.readdirSync(dir)) {
+      const p = path.join(dir, item);
+      if (fs.statSync(p).isDirectory()) {
+        files = files.concat(walk(p));
+      } else if (p.endsWith(".ts") || p.endsWith(".tsx")) {
+        files.push(p);
+      }
+    }
+    return files;
+  }
+
+  const srcFiles = walk(path.resolve(process.cwd(), "src"));
+  for (const file of srcFiles) {
+    const code = fs.readFileSync(file, "utf-8");
+    if (/\buseNavigate\s*\(/.test(code)) {
+      const hasImport = /import\s*\{[^}]*\buseNavigate\b[^}]*\}\s*from\s*['"]react-router-dom['"]/.test(code);
+      assert.ok(hasImport, `${file} calls useNavigate() but is missing 'import { useNavigate } from "react-router-dom"'`);
+    }
+  }
+});

@@ -988,12 +988,17 @@ async function startServer() {
     try {
       const appId =
         process.env.AGORA_APP_ID ||
-        process.env.VITE_AGORA_APP_ID ||
-        "d5eaf592322846eab2879d2bc086af78";
+        process.env.VITE_AGORA_APP_ID;
       const appCertificate =
         process.env.AGORA_APP_CERTIFICATE ||
-        process.env.VITE_AGORA_APP_CERTIFICATE ||
-        "620cccf9c8e94046aa4da9359c6d7275";
+        process.env.VITE_AGORA_APP_CERTIFICATE;
+
+      if (!appId || !appCertificate) {
+        return res.status(503).json({
+          success: false,
+          error: "Agora credentials (AGORA_APP_ID and AGORA_APP_CERTIFICATE) are not configured on the server",
+        });
+      }
 
       const { channelName, uid } = req.body || {};
       if (!channelName) {

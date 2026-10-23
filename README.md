@@ -1,71 +1,125 @@
-# Foundarly - 1-on-1 Business Mentorship & Consulting Platform
+<div align="center">
 
-Foundarly is a professional consulting platform connecting founders and businesses with verified expert consultants for private, encrypted 1-on-1 video consultations, scheduled follow-ups, and streamlined booking management.
+# Foundarly
+
+**1-on-1 Business Mentorship & Expert Consulting Platform**
+
+Connect founders, entrepreneurs, and teams with verified industry experts for private video consultations, structured 7-day post-meeting follow-ups, and streamlined scheduling.
+
+[![Tests Passing](https://img.shields.io/badge/tests-114%20passed-success?style=flat-square)](./test)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-18.3-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-5.4-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-3.4-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
+[![Express](https://img.shields.io/badge/Express-5.2-000000?style=flat-square&logo=express&logoColor=white)](https://expressjs.com/)
+[![Supabase](https://img.shields.io/badge/Supabase-Auth%20%26%20RLS-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com/)
+
+[Live Platform](https://www.foundarlybusinessworld.in) • [Explore Experts](https://www.foundarlybusinessworld.in/consultants) • [Admin Portal](https://www.foundarlybusinessworld.in/admin)
+
+</div>
 
 ---
 
-## 📑 Table of Contents
+## 📋 Table of Contents
 
-1. [Technology Stack](#-technology-stack)
-2. [Prerequisites & Quick Start](#-prerequisites--quick-start)
-3. [Environment Variables & Secrets Configuration](#-environment-variables--secrets-configuration)
-   - [Environment Variables Reference Table](#environment-variables-reference-table)
-   - [Local Development Setup](#local-development-setup)
-   - [Production Deployment Setup](#production-deployment-setup)
-   - [Security & Secrets Policy](#security--secrets-policy)
-4. [Development & Build Scripts](#-development--build-scripts)
-5. [Authentication & Role-Based Access Control (RBAC)](#-authentication--role-based-access-control-rbac)
-6. [Booking & Meeting Room Architecture](#-booking--meeting-room-architecture)
-7. [7-Day Post-Session Rejoin Policy](#-7-day-post-session-rejoin-policy)
-8. [Email Notification System](#-email-notification-system)
-9. [In-App Support Chatbot & Knowledge Engine](#-in-app-support-chatbot--knowledge-engine)
-10. [API Endpoints Reference](#-api-endpoints-reference)
-11. [Testing & Quality Assurance](#-testing--quality-assurance)
-12. [Troubleshooting & FAQs](#-troubleshooting--faqs)
+- [About Foundarly](#-about-foundarly)
+- [Key Features](#-key-features)
+  - [Client / Founder Experience](#client--founder-experience)
+  - [Consultant Experience](#consultant-experience)
+  - [Administrative Operations](#administrative-operations)
+- [Technology Stack](#-technology-stack)
+- [Platform Preview](#-platform-preview)
+- [Getting Started](#-getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation & Quick Start](#installation--quick-start)
+- [Environment Variables Configuration](#-environment-variables-configuration)
+  - [Security Notice](#-security-notice)
+  - [Supabase Client Configuration](#1-supabase-client-configuration)
+  - [Server-Only Supabase Credentials](#2-server-only-supabase-credentials)
+  - [Administrator Authorization](#3-administrator-authorization)
+  - [Email Infrastructure (Titan SMTP)](#4-email-infrastructure-titan-smtp)
+  - [Agora Video Engine](#5-agora-video-engine)
+  - [Site URL & Runtime Settings](#6-site-url--runtime-settings)
+  - [Optional Integrations](#7-optional-integrations)
+  - [Local vs. Production Setup](#local-vs-production-setup)
+- [Development Commands](#-development-commands)
+- [Architecture & Project Structure](#-architecture--project-structure)
+- [Security & Access Control](#-security--access-control)
+- [Testing & Quality Assurance](#-testing--quality-assurance)
+- [Deployment Guide](#-deployment-guide)
+- [Troubleshooting](#-troubleshooting)
+- [License & Contributions](#-license--contributions)
+
+---
+
+## 💡 About Foundarly
+
+Foundarly is an end-to-end consulting ecosystem designed to make high-impact business advice accessible, structured, and accountable. Rather than one-off, transactional calls, Foundarly bridges founders with seasoned advisors across Strategy, Fundraising, Go-To-Market, Product, and Finance with an integrated **7-day post-meeting clarification window**.
+
+- **Founders & Leaders**: Discover verified domain mentors, schedule synchronized time slots, pay seamlessly via direct UPI or cards, and consult via encrypted video rooms.
+- **Consultants**: Define availability windows, publish hourly and 30-minute rates, review booking requests, confirm follow-ups, and manage payouts.
+- **Platform Operators**: Verify payments, approve consultant credentials, review customer feedback, and audit platform health with comprehensive role hierarchy.
+
+---
+
+## ✨ Key Features
+
+### Client / Founder Experience
+- **Verified Expert Directory**: Browse mentors filtered by domain, rate, ratings, and language.
+- **Interactive Booking**: Real-time slot picker with timezone synchronization and duration selection (30 or 60 min).
+- **Flexible Payments**: Seamless checkout supporting direct manual UPI payment (instant QR code and transaction screenshot upload) and Razorpay.
+- **Private Video Rooms**: Canonical room URL (`/meeting/:roomId`) with WebRTC and Agora engines, screen sharing, and participant waiting notifications.
+- **7-Day Rejoin Policy**: Re-enter the same meeting room for 7 calendar days post-call for quick clarifications.
+- **Structured Follow-Up Requests**: Submit formal follow-up timing proposals from the `MyBookings` portal.
+- **In-App Support Chatbot**: Instant answers to platform queries via an embedded client-side knowledge assistant.
+
+### Consultant Experience
+- **Consultant Dashboard**: Unified view of upcoming consultations, completed sessions, and client details (`/consultant/dashboard`).
+- **Availability & Pricing Control**: Configure active days, daily slot limits, and custom pricing tiers.
+- **Direct Follow-Up Management**: Accept, reschedule, or decline client 7-day follow-up requests without administrator intervention.
+- **Earnings & Payout Tracking**: Transparent breakdown of completed consultation revenues and payout statuses.
+
+### Administrative Operations
+- **Role Hierarchy**: Strict separation between **Super Administrators** (financial payouts, administrator provisioning, settings) and **Developer Admins** (operational triage, logs, health checks).
+- **UPI Payment Verification Portal**: Dedicated queue (`/admin/upi-verification`) to inspect payment screenshots, match transaction references (UTR), and approve bookings.
+- **Consultant Vetting**: Application review workflow to approve, request revisions, or reject prospective mentors.
+- **Developer & Health Suite**: Live diagnostics for SMTP connectivity, database health, sanitized server logs, and error tracing.
 
 ---
 
 ## 🛠️ Technology Stack
 
-- **Frontend**:
-  - React 18 (`react: ^18.3.1`, `react-dom: ^18.3.1`)
-  - TypeScript 5 (`typescript: ^5.8.3`)
-  - Vite 5 (`vite: ^5.4.19`, `@vitejs/plugin-react-swc: ^3.7.2`)
-  - Tailwind CSS v3 (`tailwindcss: ^3.4.17`, `tailwindcss-animate: ^1.0.7`)
-  - Radix UI primitives & Lucide React icons (`lucide-react: ^0.462.0`)
-  - Framer Motion & Motion (`motion: ^14.5.0`, `framer-motion: ^12.34.3`)
-  - React Router DOM v6 (`react-router-dom: ^6.30.1`)
-- **Backend / Server**:
-  - Full-stack Node.js server with Express 5 (`server.ts`, `express: ^5.2.1`)
-  - Vite middleware mounted during development (`npm run dev` running `tsx server.ts`)
-  - Production bundled via esbuild (`npm run build` producing `dist/server.cjs`)
-  - Serverless API route handlers under `/api/` (Vercel & Node compatible)
-- **Database & Authentication**:
-  - Supabase PostgreSQL with Row-Level Security (RLS) policies
-  - Supabase Auth (JWT session management and role verification)
-  - Database schema migrations under `database/` and `supabase/`
-- **Video & Real-Time Rooms**:
-  - Agora RTC SDK (`agora-rtc-sdk-ng: ^4.24.3`) with server-side token generation (`agora-access-token: ^2.0.4`)
-  - Built-in WebRTC fallback engine (`src/services/webrtcService.ts`)
-  - Screen sharing, participant presence tracking, and waiting alert notifications
-- **Email Infrastructure**:
-  - Nodemailer (`nodemailer: ^9.0.5`) with Titan SMTP (`smtp.titan.email`)
-  - Responsive HTML and plain-text transactional email templates
-  - Idempotent deduplication tracking (`data/sent_completion_emails.json`)
-- **Payments**:
-  - Razorpay checkout integration (`VITE_RAZORPAY_KEY_ID`)
-  - Direct UPI payment verification workflow (`/upi-payment`, `/admin/upi-verification`)
+| Layer | Technologies |
+| :--- | :--- |
+| **Frontend Framework** | React 18.3, TypeScript 5.8, Vite 5.4 |
+| **Routing & UI** | React Router DOM 6.30, Tailwind CSS 3.4, Radix UI Primitives, Lucide Icons |
+| **Animations** | Framer Motion 12.34, Motion 14.5 |
+| **Full-Stack Server** | Node.js 20+, Express 5.2, Vite Dev Middleware, esbuild CJS production bundler |
+| **Database & Auth** | Supabase (PostgreSQL, Supabase Auth JWT, Row-Level Security) |
+| **Video & RTC** | Agora RTC SDK (`agora-rtc-sdk-ng`), server-side token builder (`agora-access-token`), WebRTC fallback |
+| **Email Delivery** | Nodemailer 9.0 with Titan SMTP (`smtp.titan.email`), idempotent file logging |
+| **Payments** | Manual UPI workflow with client-side QR generation, Razorpay checkout modal |
+| **Testing** | Node.js native test runner (`tsx --test`), 114 automated test suites |
 
 ---
 
-## 🏁 Prerequisites & Quick Start
+## 🖼️ Platform Preview
+
+<div align="center">
+  <img src="public/og-image.jpg" alt="Foundarly Platform Preview" width="800" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" />
+</div>
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
-- **Node.js**: v18.x or v20.x+ (tested on Node.js 20+)
+- **Node.js**: v18.18+ or v20.x LTS (recommended)
 - **Package Manager**: `npm` (v9+) or `bun`
-- **Git**
+- **Supabase Account**: An active Supabase project with PostgreSQL and Auth enabled
 
-### Quick Start
+### Installation & Quick Start
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/lokeshnaivaidya-max/Foundarly.git
@@ -77,292 +131,315 @@ npm install
 # 3. Create your local environment file
 cp .env.example .env
 
-# 4. Fill in your credentials in .env (see table below)
+# 4. Fill in your credentials in .env (refer to section below)
 
-# 5. Start the full-stack development server
+# 5. Start the full-stack development server (Express + Vite on port 3000)
 npm run dev
 ```
 
-The application will be accessible at: `http://localhost:3000`
+Visit `http://localhost:3000` in your browser.
 
 ---
 
-## 🔐 Environment Variables & Secrets Configuration
+## 🔐 Environment Variables Configuration
 
-### Environment Variables Reference Table
+### ⚠️ Security Notice
 
-The table below documents every environment variable utilized by Foundarly. Variables prefixed with `VITE_` are bundled by Vite and exposed to the browser client; variables without `VITE_` are strictly private server-side secrets.
+> **Critical Warning**: Never commit real secrets. Store privileged credentials only in server-side environment variables or your hosting provider's secret manager.
+> - **Client-Side Variables (`VITE_*`)**: Are bundled into client JavaScript and exposed publicly in the browser. Never put service-role keys, SMTP passwords, or private certificates into `VITE_*` variables.
+> - **Server-Side Variables**: Are accessible only to Node.js backend processes (`server.ts`, `/api/*`) and are never sent to the browser.
+> - **Public Anon Keys**: The Supabase anon key is safe for browser usage **only when protected by Row-Level Security (RLS) policies**.
 
-| Variable Name | Purpose & Usage | Classification | Scope | Example Placeholder |
+---
+
+### 1. Supabase Client Configuration
+Used by browser code to query PostgreSQL via Supabase Auth and RLS.
+
+| Variable | Purpose | Status | Scope | Safe Placeholder |
 | :--- | :--- | :--- | :--- | :--- |
-| **`VITE_SUPABASE_URL`** | Supabase Project URL used for database and authentication requests | **Required** | Client & Server | `https://your-project-id.supabase.co` |
-| **`VITE_SUPABASE_ANON_KEY`** | Supabase Anonymous Client Public Key (protected by RLS) | **Required** | Client & Server | `eyJhbGciOi...` or `sb_publishable_...` |
-| **`SUPABASE_SERVICE_ROLE_KEY`** | Privileged Supabase service-role secret for admin backend operations | **Required** *(Server)* | **Server-Only Secret** | `your_supabase_service_role_secret_here` |
-| **`ADMIN_EMAILS`** | Comma-separated allowlist of verified Super Administrator email addresses | **Required** *(Admin)* | **Server-Only Secret** | `admin@foundarly.com,owner@foundarly.com` |
-| **`VITE_ADMIN_EMAILS`** | Client-side mirror of admin email allowlist for navigation hints | Optional | Client Public | `admin@foundarly.com` |
-| **`SMTP_HOST`** | SMTP server hostname for transactional email delivery (Titan Mail) | **Required** *(Email)* | **Server-Only Secret** | `smtp.titan.email` |
-| **`SMTP_PORT`** | SMTP port (`587` for STARTTLS / `465` for SSL) | **Required** *(Email)* | **Server-Only Secret** | `587` |
-| **`SMTP_SECURE`** | Connection security (`false` for port 587 STARTTLS, `true` for 465) | Optional | Server-Only | `false` |
-| **`SMTP_USER`** | Primary SMTP account username (mailbox address) | **Required** *(Email)* | **Server-Only Secret** | `hello@foundarlybusinessworld.in` |
-| **`SMTP_PASS`** | Primary SMTP account password | **Required** *(Email)* | **Server-Only Secret** | `your_smtp_app_password_here` |
-| **`FROM_EMAIL`** | Sender email address for outgoing messages | Optional | Server-Only | `hello@foundarlybusinessworld.in` |
-| **`FROM_NAME`** | Sender display name for email recipients | Optional | Server-Only | `Foundarly` |
-| **`EMAIL_FROM`** | Full RFC 5322 formatted sender string | Optional | Server-Only | `Foundarly <hello@foundarlybusinessworld.in>` |
-| **`EMAIL_REPLY_TO`** | Reply-To address for client responses | Optional | Server-Only | `hello@foundarlybusinessworld.in` |
-| **`SITE_URL`** | Canonical application URL for links in email notifications | **Required** | Server-Only | `https://www.foundarlybusinessworld.in` |
-| **`APP_URL`** | Alternative alias for application base URL | Optional | Server-Only | `https://www.foundarlybusinessworld.in` |
-| **`VITE_SITE_URL`** | Client-side canonical base URL | Optional | Client Public | `https://www.foundarlybusinessworld.in` |
-| **`VITE_AGORA_APP_ID`** | Agora Project App ID for video room connection | Optional *(Video)* | Client & Server | `your_agora_app_id_here` |
-| **`AGORA_APP_CERTIFICATE`** | Agora App Certificate for signing secure RTC tokens on the backend | Optional *(Video)* | **Server-Only Secret** | `your_agora_app_certificate_here` |
-| **`VITE_RAZORPAY_KEY_ID`** | Razorpay public Key ID for checkout popup | Optional *(Pay)* | Client Public | `rzp_test_your_key_id_here` |
-| **`GEMINI_API_KEY`** | Google Gemini API key for server diagnostics / AI capabilities | Optional *(AI)* | **Server-Only Secret** | `your_gemini_api_key_here` |
-| **`PORT`** | HTTP server listening port (defaults to `3000`) | Optional | Server-Only | `3000` |
-| **`HOST`** | HTTP server network interface bind address (defaults to `0.0.0.0`) | Optional | Server-Only | `0.0.0.0` |
-| **`NODE_ENV`** | Node.js execution environment (`development` or `production`) | Optional | Server-Only | `development` |
+| `VITE_SUPABASE_URL` | Supabase project URL | **Required** | Public Client | `https://your-project.supabase.co` |
+| `VITE_SUPABASE_ANON_KEY` | Public client anon key | **Required** | Public Client | `your_supabase_anon_key_here` |
 
 ---
 
-### Local Development Setup
+### 2. Server-Only Supabase Credentials
+Used exclusively by backend endpoints (`/api/*`, `server.ts`) for administrative workflows.
 
-1. **Copy the Template**:
+| Variable | Purpose | Status | Scope | Safe Placeholder |
+| :--- | :--- | :--- | :--- | :--- |
+| `SUPABASE_SERVICE_ROLE_KEY` | Privileged key bypassing RLS | **Required** *(Server)* | **Server Secret** | `your_service_role_key_here` |
+
+---
+
+### 3. Administrator Authorization
+Configures admin allowlists and setup credentials.
+
+| Variable | Purpose | Status | Scope | Safe Placeholder |
+| :--- | :--- | :--- | :--- | :--- |
+| `ADMIN_EMAILS` | Comma-separated Super Admin emails | **Required** | **Server Secret** | `admin@foundarly.com,owner@foundarly.com` |
+| `VITE_ADMIN_EMAILS` | Client mirror for UI navigation hints | Optional | Public Client | `admin@foundarly.com` |
+| `ADMIN_PASSWORD` | Password for `setup-admin-user.js` | Optional | CLI/Setup | `your_secure_password_min_12_chars` |
+| `DEV_ADMIN_PASSWORD` | Password for developer admin provisioning | Optional | CLI/Setup | `your_dev_password_min_12_chars` |
+
+---
+
+### 4. Email Infrastructure (Titan SMTP)
+Used by Nodemailer on the server to dispatch transactional emails.
+
+| Variable | Purpose | Status | Scope | Safe Placeholder |
+| :--- | :--- | :--- | :--- | :--- |
+| `SMTP_HOST` | SMTP server host | **Required** | **Server Secret** | `smtp.titan.email` |
+| `SMTP_PORT` | SMTP connection port | **Required** | **Server Secret** | `587` |
+| `SMTP_SECURE` | Connection encryption (`false` for 587) | Optional | Server-Side | `false` |
+| `SMTP_USER` | Mailbox email account | **Required** | **Server Secret** | `hello@foundarlybusinessworld.in` |
+| `SMTP_PASS` | Mailbox password | **Required** | **Server Secret** | `your_smtp_app_password_here` |
+| `FROM_EMAIL` | Outgoing sender email address | Optional | Server-Side | `hello@foundarlybusinessworld.in` |
+| `FROM_NAME` | Outgoing sender display name | Optional | Server-Side | `Foundarly` |
+| `EMAIL_FROM` | Full RFC 5322 formatted sender | Optional | Server-Side | `Foundarly <hello@foundarlybusinessworld.in>` |
+| `EMAIL_REPLY_TO` | Reply-To mailbox address | Optional | Server-Side | `hello@foundarlybusinessworld.in` |
+
+---
+
+### 5. Agora Video Engine
+Generates signed ephemeral RTC tokens for video rooms via `/api/agora/token`.
+
+| Variable | Purpose | Status | Scope | Safe Placeholder |
+| :--- | :--- | :--- | :--- | :--- |
+| `VITE_AGORA_APP_ID` | Agora App ID for client SDK | Optional | Public Client | `your_agora_app_id_here` |
+| `AGORA_APP_ID` | Agora App ID for backend token generator | Optional | Server-Side | `your_agora_app_id_here` |
+| `AGORA_APP_CERTIFICATE` | Private signing certificate | Optional | **Server Secret** | `your_agora_certificate_here` |
+
+---
+
+### 6. Site URL & Runtime Settings
+Defines application base URLs used in email links and meeting redirects.
+
+| Variable | Purpose | Status | Scope | Safe Placeholder |
+| :--- | :--- | :--- | :--- | :--- |
+| `SITE_URL` | Canonical site URL for email links | **Required** | Server-Side | `https://www.foundarlybusinessworld.in` |
+| `APP_URL` | Application base URL alias | Optional | Server-Side | `https://www.foundarlybusinessworld.in` |
+| `PORT` | Local HTTP server port (default: 3000) | Optional | Server-Side | `3000` |
+| `HOST` | Local HTTP host bind address | Optional | Server-Side | `0.0.0.0` |
+| `NODE_ENV` | Environment mode | Optional | Server-Side | `development` or `production` |
+
+---
+
+### 7. Optional Integrations
+
+| Variable | Purpose | Status | Scope | Safe Placeholder |
+| :--- | :--- | :--- | :--- | :--- |
+| `VITE_RAZORPAY_KEY_ID` | Public Key ID for Razorpay modal | Optional | Public Client | `rzp_test_your_key_id_here` |
+| `GEMINI_API_KEY` | Server-side Gemini API key for diagnostics | Optional | **Server Secret** | `your_gemini_api_key_here` |
+
+---
+
+### Local vs. Production Setup
+
+<details>
+<summary><b>Local Development Setup Guide</b></summary>
+
+1. Copy `.env.example` to `.env`:
    ```bash
    cp .env.example .env
    ```
-
-2. **Configure Provider Credentials**:
-   - **Supabase**: Obtain your project URL and publishable `anon` key from your Supabase Dashboard under `Settings > API`.
-   - **Supabase Service Role Key**: Obtain the `service_role` secret key from the same dashboard. Paste it only into `SUPABASE_SERVICE_ROLE_KEY` in `.env`.
-   - **Admin Allowlist**: Add your administrative email address to `ADMIN_EMAILS` (and `VITE_ADMIN_EMAILS` if you want immediate client menu indicators).
-   - **Titan SMTP**: Set `SMTP_HOST=smtp.titan.email`, `SMTP_PORT=587`, `SMTP_SECURE=false`, `SMTP_USER=hello@foundarlybusinessworld.in`, and your mailbox password in `SMTP_PASS`.
-   - **Agora (Optional)**: If using authenticated video rooms, add your App ID to `VITE_AGORA_APP_ID` and your App Certificate to `AGORA_APP_CERTIFICATE`.
-   - **Site URL**: For local development, set `SITE_URL=http://localhost:3000` and `APP_URL=http://localhost:3000`.
-
-3. **Verify Git Protection**:
-   Ensure `.env` is ignored by Git before making any commits:
+2. Populate `.env` with your Supabase local or cloud credentials.
+3. For local email testing, configure your Titan SMTP account or use a local SMTP test tool.
+4. Set `SITE_URL=http://localhost:3000` and `APP_URL=http://localhost:3000`.
+5. Verify `.env` is ignored by Git:
    ```bash
    git status --ignored
-   # .env must appear under Ignored files, never under Changes to be committed
    ```
+</details>
+
+<details>
+<summary><b>Production Deployment Configuration Guide</b></summary>
+
+1. Open your hosting provider dashboard (Vercel, Netlify, Render, Railway, or Cloud Run).
+2. Navigate to **Environment Variables** / **Secrets**.
+3. Add the server-side secrets:
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `ADMIN_EMAILS`
+   - `SMTP_USER` & `SMTP_PASS`
+   - `AGORA_APP_CERTIFICATE` (if using Agora token signing)
+   - `SITE_URL=https://www.foundarlybusinessworld.in`
+4. Add client build variables:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_AGORA_APP_ID`
+   - `VITE_RAZORPAY_KEY_ID`
+5. **Always trigger a new deployment** after updating environment variables so Vite bundles the client settings and Node loads server secrets.
+</details>
 
 ---
 
-### Production Deployment Setup
+## 💻 Development Commands
 
-When deploying to production hosting platforms (e.g. Vercel, Netlify, Render, Railway, AWS, GCP Cloud Run):
-
-1. **Configure Environment Settings via Provider UI**:
-   - Do **NOT** upload a `.env` file to your server or push it to Git.
-   - Go to your hosting provider's dashboard:
-     - **Vercel**: Project Settings > Environment Variables
-     - **Netlify**: Site configuration > Environment variables
-     - **Render / Railway**: Service Dashboard > Environment
-     - **Cloud Run / Docker**: Environment variable injection or Google Cloud Secret Manager
-2. **Add Required Variables**:
-   Configure all production variables from the table above:
-   - `VITE_SUPABASE_URL` (e.g. `https://rfyxnshvtfswvaogjzwq.supabase.co`)
-   - `VITE_SUPABASE_ANON_KEY` (public publishable key)
-   - `SUPABASE_SERVICE_ROLE_KEY` (private service role secret)
-   - `ADMIN_EMAILS` (comma-separated verified admins)
-   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`
-   - `SITE_URL` & `APP_URL` (`https://www.foundarlybusinessworld.in`)
-   - `VITE_AGORA_APP_ID` & `AGORA_APP_CERTIFICATE` (if Agora video is enabled)
-3. **Trigger Redeployment**:
-   - Environment variables injected at build time (`VITE_*`) require a rebuild.
-   - Always trigger a new deployment or click **Redeploy** after saving environment variables.
-4. **Maintenance & .env.example Sync**:
-   - Whenever a new configuration variable is introduced, add a commented placeholder entry to `.env.example`.
-
----
-
-### Security & Secrets Policy
-
-1. **Privileged Keys Must Remain Server-Side**:
-   - `SUPABASE_SERVICE_ROLE_KEY`, `SMTP_PASS`, `AGORA_APP_CERTIFICATE`, and `ADMIN_PASSWORD` must **NEVER** be prefixed with `VITE_` or imported into files inside `src/`.
-   - Vite bundles all `VITE_*` variables directly into public JavaScript chunks readable by anyone inspecting network traffic or page source.
-2. **Client-Side Key Distinctions & RLS**:
-   - `VITE_SUPABASE_ANON_KEY` is a public anonymous token designed for browser usage.
-   - Public access is safely governed by PostgreSQL Row-Level Security (RLS) policies defined in the database.
-   - Always verify RLS is enabled on all tables in Supabase (`profiles`, `bookings`, `consultants`, `reviews`, `upi_payments`, `payout_requests`).
-3. **Audit Finding & Remediation (Agora App Certificate)**:
-   - *Audit Finding*: Earlier versions of `src/services/agoraToken.ts` contained a client-side reference to `VITE_AGORA_APP_CERTIFICATE` and a fallback certificate.
-   - *Remediation*: The client service was updated to strictly request ephemeral tokens from the backend endpoint `/api/agora/token`. The private certificate secret is now read exclusively server-side via `process.env.AGORA_APP_CERTIFICATE`.
-4. **Never Commit Secrets**:
-   - Never commit `.env`, `.env.local`, production secrets, UPI PINs, admin passwords, or real credentials to GitHub.
-   - `.gitignore` is configured to ignore all `.env` variants (`.env`, `.env.*`, `.env*.local`) while explicitly preserving `.env.example`.
-
----
-
-## 📜 Development & Build Scripts
-
-All commands are defined in `package.json`:
+All scripts are configured in `package.json`:
 
 ```bash
-# Start full-stack local server (Express + Vite middleware on port 3000)
+# Start full-stack development server with Vite middleware on port 3000
 npm run dev
 
-# Run the complete automated test suite (11 test suites covering workflows)
+# Run all 11 automated test suites (114 tests)
 npm test
 
 # Run tests in watch mode
 npm run test:watch
 
-# Run ESLint validation
+# Run ESLint across code files
 npm run lint
 
-# Build production bundle (Vite static assets + esbuild server bundle)
+# Build production bundle (Vite frontend bundle + esbuild server bundle)
 npm run build
 
 # Start the compiled production server
 npm start
 
-# Preview the Vite static production build locally
+# Preview production build assets locally
 npm run preview
 ```
 
 ---
 
-## 👥 Authentication & Role-Based Access Control (RBAC)
+## 🏛️ Architecture & Project Structure
 
-Foundarly implements a hierarchical role-based access system with strict permission boundaries:
+Foundarly follows a clear separation of concerns across client, full-stack server routes, and database migrations:
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                   Super Admin                          │
-│  - Complete executive authority & admin management     │
-│  - Financial controls, payout approvals & settings     │
-└───────────────────────────┬────────────────────────────┘
-                            │
-┌───────────────────────────▼────────────────────────────┐
-│                 Developer Admin                        │
-│  - Operational admin functions & developer logs        │
-│  - Cannot manage administrators or self-promote        │
-└───────────────────────────┬────────────────────────────┘
-                            │
-┌───────────────────────────▼────────────────────────────┐
-│                    Consultant                          │
-│  - Availability management, bookings, earnings         │
-│  - 7-day post-meeting follow-up direct confirmation    │
-└───────────────────────────┬────────────────────────────┘
-                            │
-┌───────────────────────────▼────────────────────────────┐
-│                   Client / User                        │
-│  - Public consultant discovery, booking & checkout     │
-│  - Video room access & 7-day follow-up requests        │
-└────────────────────────────────────────────────────────┘
+Foundarly/
+├── api/                       # Serverless API endpoints (Vercel/Node compatible)
+│   ├── agora/token.ts         # Secure Agora RTC token endpoint
+│   ├── meeting/               # Meeting validation, join recording, waiting alerts
+│   ├── send-booking-email.ts  # Transactional booking notifications
+│   └── health.ts              # Service health and SMTP diagnostic endpoint
+├── database/                  # SQL migration files and role setup scripts
+├── public/                    # Static assets, branding logos, open-graph graphics
+├── scripts/                   # CLI maintenance scripts (admin provisioning)
+├── src/
+│   ├── components/            # Reusable UI components (modals, forms, navigation)
+│   │   ├── admin/             # Admin sidebar, layout, and overview panels
+│   │   ├── kokonutui/         # Profile dropdown, theme switches, currency stepper
+│   │   └── ui/                # Accessible Radix UI primitives
+│   ├── contexts/              # React Context providers (Auth, Theme, RolePreview)
+│   ├── lib/                   # Supabase client, authorization matrix, utilities
+│   ├── pages/                 # Top-level application route views
+│   │   ├── admin/             # Administrator management, verification, settings
+│   │   ├── Booking.tsx        # Slot selection and consultation scheduling
+│   │   ├── Meeting.tsx        # Video room consultation interface
+│   │   ├── MyBookings.tsx     # Client consultation hub & 7-day follow-up
+│   │   └── UPIPayment.tsx     # Manual UPI QR code & proof upload workflow
+│   ├── server/                # Server-side mailer and local fallback storage
+│   ├── services/              # API clients (meetings, bookings, UPI, chatbot)
+│   └── utils/                 # Time slots, meeting rejoin logic, security helpers
+├── test/                      # Node.js automated test suites
+├── server.ts                  # Production full-stack Express server
+└── vite.config.ts             # Vite configuration and plugin setup
 ```
 
-### Route Protection Architecture
-- Route access is governed by `ProtectedRoute.tsx` (`requireAdmin`, `requireSuperAdmin`, and `allowedRoles`).
-- The router correctly imports and instantiates `useNavigate` from `react-router-dom` to handle authorized transitions, fallback redirects, and permission denial displays without runtime crashes.
-
 ---
 
-## 🔄 Booking & Meeting Room Architecture
+## 🛡️ Security & Access Control
 
-1. **Booking & Checkout**:
-   - Client selects an approved expert consultant, session duration (30 or 60 min), and time slot.
-   - Payment processed via direct UPI screenshot upload (`/upi-payment`) or Razorpay checkout.
-   - Automated booking record created with canonical ID.
-2. **Canonical Room ID Resolution**:
-   - Room IDs are canonicalized to `foundarly-{bookingId}`.
-   - Both client and consultant resolve to the exact same canonical room ID regardless of query parameters.
-3. **Meeting Access Control & Join Window**:
-   - **Upcoming**: Before the 5-minute pre-call window, room entry is locked with a real-time countdown timer.
-   - **Live**: 5 minutes before scheduled start through scheduled duration, participants can enter the call.
-   - **Join vs Rejoin**: The UI tracks individual join history per participant. First-time participants see **"Join Meeting"**; returning participants see **"Rejoin Meeting"**.
+### 1. Multi-Tier Role Hierarchy
+Foundarly enforces a strict 4-tier permission model audited via `src/lib/authorization.ts`:
+- **Super Administrator**: Complete administrative authority, financial payout approvals, admin user provisioning, and platform settings.
+- **Developer Administrator**: Operational admin dashboard access, developer diagnostics, and sanitized server logs. Strictly prevented from promoting accounts or managing admins.
+- **Consultant**: Profile, availability, and session management. Direct approval/rejection of client 7-day follow-up requests.
+- **Client / End User**: Consultation bookings, payment submissions, video room entry, and review submissions.
 
----
+### 2. Route Protection & Navigation Safety
+- Routes are protected via `<ProtectedRoute />` checking both Supabase Auth session state and database profile roles.
+- `ProtectedRoute` imports and utilizes `useNavigate` from `react-router-dom` to cleanly navigate unauthorized users or display role-restricted access notices.
 
-## ⏱️ 7-Day Post-Session Rejoin Policy
+### 3. Payment Verification Security
+- Manual UPI payments require client UTR/Reference ID and screenshot proof.
+- Payment records enter a `pending` state until an administrator verifies the receipt against bank records in the Admin Verification portal.
+- Bookings remain unconfirmed until payment verification is approved, preventing unauthorized meeting room access.
 
-- **7-Day Eligibility Window**:
-  - Following consultation completion, both client and consultant are authorized to re-enter the meeting room for **7 calendar days** (604,800,000 ms) for follow-up questions.
-  - Calculated server-side via `calculateRejoinEligibility(booking, referenceDate)`.
-- **Follow-Up Clarification Workflow**:
-  - Within the 7-day window, clients can submit a structured follow-up request from `MyBookings`.
-  - The assigned consultant can accept the proposed time, suggest an alternate time, or decline from the Consultant Dashboard.
-- **Expiry**:
-  - After 7 days, session access transitions to `expired` and room entry is rejected.
-
----
-
-## 📧 Email Notification System
-
-All transactional emails are sent via Titan SMTP (`smtp.titan.email`) using responsive HTML and plain-text templates:
-
-1. **Booking Confirmation**: Dispatched to client and consultant upon booking confirmation (`/api/send-booking-email` with `type: 'confirmed'`).
-2. **Booking Rejection / Cancellation**: Dispatched to client if a booking cannot be confirmed (`type: 'rejected'`).
-3. **Participant Waiting Notice**: Dispatched when one party is waiting in the meeting room (`/api/meeting/notify-waiting`). Throttled by a 5-minute cooldown to prevent spam.
-4. **Post-Session Completion Email (`type: 'completed'`)**:
-   - Dispatched immediately after a genuine meeting completion is recorded.
-   - Explains the **7-day follow-up clarification policy** with exact expiration dates and links.
-   - **Idempotent Delivery**: Tracked via `completionEmailStorage` (`data/sent_completion_emails.json`) to prevent duplicate deliveries.
-
----
-
-## 💬 In-App Support Chatbot & Knowledge Engine
-
-Foundarly features an embedded, responsive support chatbot (`src/components/AIChatWidget.tsx`):
-- **Curated Knowledge Engine**: Backed by `src/services/chatbotKnowledge.ts` covering platform FAQs, booking steps, payment methods, refund policies, consultant onboarding, and 7-day rejoin rules.
-- **Privacy & Reliability**: Operates client-side with zero external API latency or risk of exposing backend API keys to browser sessions.
-- **Quick Prompts & Navigation**: Supports direct action suggestions linking clients and consultants to relevant sections (e.g. `/consultants`, `/my-bookings`, `/apply-consultant`).
-
----
-
-## 🔌 API Endpoints Reference
-
-| Method | Endpoint | Description | Auth Required |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/health` | Service status, database connectivity, and SMTP configuration diagnostic | No |
-| `POST` | `/api/agora/token` | Generates secure signed Agora RTC token using server-side App Certificate | Yes |
-| `POST` | `/api/meeting/validate-access` | Validates session authorization, 7-day eligibility, and participant history | Yes |
-| `GET` | `/api/meeting/:roomId/access` | GET alias for meeting room access validation | Yes |
-| `POST` | `/api/meeting/record-join` | Records participant entry into a meeting session | Yes |
-| `POST` | `/api/meeting/notify-waiting` | Dispatches waiting alert email to absent participant (5-min cooldown) | Yes |
-| `POST` | `/api/send-booking-email` | Handles confirmation, rejection, and post-session completion emails | Yes |
-| `POST` | `/api/send-application-email`| Dispatches consultant application approval/rejection notifications | Admin |
-| `POST` | `/api/verify-smtp` | Verifies Titan SMTP transporter credentials and connection | Admin |
-| `POST` | `/api/send-test-email` | Sends diagnostic test email to verify mailbox delivery | Admin |
-| `POST` | `/api/follow-ups/request` | Submits client 7-day follow-up consultation request | Client |
-| `POST` | `/api/follow-ups/respond` | Consultant accepts, reschedules, or declines follow-up request | Consultant |
+### 4. Meeting Access Isolation
+- Access to video rooms is locked until 5 minutes before scheduled session time.
+- Both participants resolve to the exact same canonical room ID (`foundarly-{bookingId}`).
+- After the session completes, room re-entry is permitted for exactly **7 calendar days** (604,800,000 ms) before transitioning to `expired`.
 
 ---
 
 ## 🧪 Testing & Quality Assurance
 
-Automated tests verify all mission-critical workflows:
+Automated tests cover all core business logic, role boundaries, and routing imports:
 
 ```bash
 npm test
 ```
 
-### Test Suites Covered
-- `navigation-and-currency-transfer.test.ts`: Routing links, tab state preservation, regression tests ensuring `useNavigate` is cleanly imported in `ProtectedRoute.tsx` and all routing files, currency formatting.
-- `role-hierarchy.test.ts`: 13-test role hierarchy matrix (Super Admin, Developer Admin, Consultant, Client, RLS query permissions, payout controls).
-- `meeting-rejoin-and-email.test.ts`: 7-day rejoin calculation, join vs rejoin labels, canonical room IDs, idempotent completion emails.
-- `review-and-followup-fixes.test.ts`: Review submission flow, moderation, follow-up request lifecycle, timing validation.
-- `reschedule-workflow.test.ts`: Client reschedule requests, consultant approval/rejection, duplicate prevention.
-- `consultant-availability-pricing.test.ts` & `consultant-self-availability.test.ts`: Slot calculation, pricing rules, availability storage.
-- `knowledge-chatbot.test.ts`: Knowledge retrieval, prompt sanitization, secret redaction protection.
-- `navbar-viewport-overflow.test.ts`: Responsive viewport navigation safety.
+### Verified Test Suites (114 passing tests)
+1. **`navigation-and-currency-transfer.test.ts`**: Verifies routing paths, tab preservation, currency formatting, and includes regression checks ensuring `useNavigate` is cleanly imported across all routing components.
+2. **`role-hierarchy.test.ts`**: Validates the 13-point permission matrix across Super Admin, Developer Admin, Consultant, and Client roles.
+3. **`meeting-rejoin-and-email.test.ts`**: Checks 7-day rejoin eligibility calculation, "Join" vs "Rejoin" button labels, canonical room IDs, and idempotent completion emails.
+4. **`review-and-followup-fixes.test.ts`**: Ensures clients cannot publish reviews without moderation, validates 7-day follow-up request lifecycles, and prevents duplicate submissions.
+5. **`reschedule-workflow.test.ts`**: Verifies client reschedule requests and consultant approval workflows.
+6. **`consultant-availability-pricing.test.ts`**: Tests slot calculations and pricing rules.
+7. **`knowledge-chatbot.test.ts`**: Tests curated knowledge retrieval, query normalization, and redacts sensitive environment keys.
+8. **`navbar-viewport-overflow.test.ts`**: Guarantees responsive layout integrity without horizontal page overflow.
 
 ---
 
-## ❓ Troubleshooting & FAQs
+## 🌐 Deployment Guide
 
-### 1. "useNavigate is not defined" when accessing `/admin`
-- **Cause**: `src/components/ProtectedRoute.tsx` previously referenced `useNavigate()` without including it in the `react-router-dom` import statement.
-- **Resolution**: Fixed in `src/components/ProtectedRoute.tsx` with regression test coverage in `test/navigation-and-currency-transfer.test.ts`.
+### Recommended Platforms
 
-### 2. Emails are not sending (`ECONNREFUSED` or `Invalid login`)
-- **Check**: Verify `SMTP_USER` and `SMTP_PASS` in your hosting environment variables or `.env`.
-- **Titan Mail**: Ensure `SMTP_HOST=smtp.titan.email`, `SMTP_PORT=587`, and `SMTP_SECURE=false`.
-- **Diagnostic**: Call `/api/health` or use the Admin Developer Portal (`/admin/developer`) to test SMTP connectivity.
+#### 1. Vercel / Netlify
+1. Connect the GitHub repository to your Vercel or Netlify project.
+2. Set build command: `npm run build`.
+3. Set output directory: `dist`.
+4. Configure all environment variables in project settings (see [Production Setup](#local-vs-production-setup)).
 
-### 3. Agora Video Room: "Invalid Token" or Token Generation Failure
-- **Check**: Verify `AGORA_APP_CERTIFICATE` is configured in your server environment variables.
-- **Note**: The client requests tokens from `/api/agora/token`. Ensure the server process has access to `AGORA_APP_ID` and `AGORA_APP_CERTIFICATE`.
+#### 2. Self-Hosted Node.js / Docker
+```bash
+# 1. Install production dependencies
+npm ci
 
-### 4. Admin Dashboard Access Denied
-- **Check**: Verify the authenticated user's email address is included in `ADMIN_EMAILS` (comma-separated).
-- **Database**: Ensure the user's record in `profiles` has `role = 'super_admin'`, `'developer_admin'`, or `'admin'`.
+# 2. Compile frontend and backend bundles
+npm run build
+
+# 3. Launch production server
+NODE_ENV=production npm start
+```
+
+The production server starts on `http://0.0.0.0:3000` (or the port defined by `PORT`).
+
+---
+
+## 🔍 Troubleshooting
+
+<details>
+<summary><b>1. Error: "useNavigate is not defined" on /admin</b></summary>
+
+- **Cause**: Occurred when `ProtectedRoute.tsx` used `useNavigate()` without importing it from `react-router-dom`.
+- **Resolution**: Fully resolved in `src/components/ProtectedRoute.tsx` with automated regression tests in `test/navigation-and-currency-transfer.test.ts`.
+</details>
+
+<details>
+<summary><b>2. Titan SMTP Connection Issues (ECONNREFUSED or Auth Failed)</b></summary>
+
+- **Resolution**: Verify that `SMTP_HOST=smtp.titan.email`, `SMTP_PORT=587`, and `SMTP_SECURE=false`. Test SMTP connectivity using `/api/health` or via the Developer Portal at `/admin/developer`.
+</details>
+
+<details>
+<summary><b>3. Agora Video Room: Token Generation Fails</b></summary>
+
+- **Resolution**: Ensure `AGORA_APP_CERTIFICATE` and `AGORA_APP_ID` are configured as server environment variables. The server endpoint `/api/agora/token` signs tokens using `agora-access-token`.
+</details>
+
+<details>
+<summary><b>4. Access Denied on Admin Portal</b></summary>
+
+- **Resolution**: Confirm that your account email is listed in `ADMIN_EMAILS` (comma-separated in your server environment variables) and your user profile in Supabase has `role = 'super_admin'`, `'developer_admin'`, or `'admin'`.
+</details>
+
+---
+
+## 📄 License & Contributions
+
+- **Repository**: [https://github.com/lokeshnaivaidya-max/Foundarly](https://github.com/lokeshnaivaidya-max/Foundarly)
+- **Author**: Lokesh Naivaidya (`lokesh.naivaidya@gmail.com`)
+- **Contribution Policy**: Pull requests are welcome. Please ensure `npm test` and `npm run build` pass before submitting PRs.

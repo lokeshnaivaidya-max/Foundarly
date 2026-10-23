@@ -37,9 +37,9 @@ npm run test
 ```env
 VITE_SUPABASE_URL=https://tzihsuzxwziirpkvxysr.supabase.co
 VITE_SUPABASE_ANON_KEY=sb_publishable_c4jK0TXwjmReU0t0iCEHCw_bKDdjXxZ
-VITE_RAZORPAY_KEY_ID=rzp_test_Sc4KU (test) / rzp_live_XXX (prod)
+VITE_RAZORPAY_KEY_ID=rzp_test_Sc4KU (test) / rzp_test_your_key_id_here (prod)
 VITE_AGORA_APP_ID=aa0d1c4df33a4cddafaadf3c326d83d8
-VITE_GEMINI_API_KEY=AIzaSyBPYPKT2FhbVBnqvrS_v3VX6ioYLHcX57g
+VITE_GEMINI_API_KEY=your_gemini_api_key_here
 VITE_SITE_URL=http://localhost:5173 (dev) / https://yourdomain.com (prod)
 ```
 

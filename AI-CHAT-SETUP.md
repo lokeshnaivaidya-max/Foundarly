@@ -36,7 +36,7 @@ npm install @google/generative-ai
 ### 2. Configure API Key
 Add to `.env` file:
 ```env
-VITE_GEMINI_API_KEY=AIzaSyADtWtdwqExK3K-TeWqj6QsS93d0oddEug
+VITE_GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
 ### 3. Files Created

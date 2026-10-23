@@ -4,8 +4,14 @@
 import { createClient } from '@supabase/supabase-js';
 import fs from 'fs';
 
-const supabaseUrl = 'https://tzihsuzxwziirpkvxysr.supabase.co';
-const supabaseServiceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR6aWhzdXp4d3ppaXJwa3Z4eXNyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczMTkzNzI2NCwiZXhwIjoyMDQ3NTEzMjY0fQ.Kh8Jk9Lm2Np3Qr4St5Vw6Xy7Za8Bc9De0Fg1Hi2Jk3L'; // Service role key
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://rfyxnshvtfswvaogjzwq.supabase.co';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.argv[2];
+
+if (!supabaseServiceKey) {
+  console.error('\n❌ ERROR: Supabase Service Role Key is required.');
+  console.error('Usage: SUPABASE_SERVICE_ROLE_KEY=<KEY> node setup-consultant-roles.js');
+  process.exit(1);
+}
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 

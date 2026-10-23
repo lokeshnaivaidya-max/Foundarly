@@ -74,7 +74,7 @@ npm run build
 
 ### Environment Variables
 ```env
-VITE_GEMINI_API_KEY=AIzaSyADtWtdwqExK3K-TeWqj6QsS93d0oddEug
+VITE_GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
 ### API Settings

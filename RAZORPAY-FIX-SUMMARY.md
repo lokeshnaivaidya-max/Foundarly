@@ -305,12 +305,12 @@ After applying fixes:
 1. **Get Production Keys:**
    - Login to Razorpay Dashboard
    - Complete KYC verification
-   - Generate live keys: `rzp_live_XXXXXXXXXXXXXXXX`
+   - Generate live keys: `rzp_test_your_key_id_here`
 
 2. **Update Environment Variables:**
    ```bash
    # Vercel/Netlify Dashboard
-   VITE_RAZORPAY_KEY_ID=rzp_live_YOUR_PRODUCTION_KEY
+   VITE_RAZORPAY_KEY_ID=rzp_test_your_key_id_here_PRODUCTION_KEY
    ```
 
 3. **Update Edge Function:**

@@ -17,7 +17,7 @@ yarn add agora-access-token
 ## Environment Variables Added
 
 Added to your `.env` file:
-- `VITE_AGORA_APP_CERTIFICATE=620cccf9c8e94046aa4da9359c6d7275`
+- `VITE_AGORA_APP_CERTIFICATE=your_agora_app_certificate_here`
 
 ## Security Note
 

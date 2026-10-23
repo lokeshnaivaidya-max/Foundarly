@@ -93,7 +93,7 @@ const { token } = await response.json();
 ## 📊 Current Status
 
 ✅ App ID: `d5eaf592322846eab2879d2bc086af78`
-✅ App Certificate: `620cccf9c8e94046aa4da9359c6d7275`
+✅ App Certificate: `your_agora_app_certificate_here`
 ✅ Browser-safe token service
 ✅ Graceful fallback handling
 ⏳ **Action needed**: Enable "App ID only" mode in Agora Console

@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { bookingsService } from "@/services/bookings";
+import { emailService } from "@/services/email";
 
 export default function UPIVerificationPage() {
   const { user } = useAuth();
@@ -116,6 +118,7 @@ export default function UPIVerificationPage() {
     if (!selectedPayment || !user) return;
 
     setVerifying(true);
+    const toastId = toast.loading("Verifying payment and confirming consultation...");
     try {
       await upiPaymentService.verifyPayment(
         selectedPayment.id,
@@ -123,12 +126,34 @@ export default function UPIVerificationPage() {
         adminNotes
       );
 
-      toast.success("Payment verified successfully!");
+      // If linked to a booking, ensure booking is marked confirmed and send confirmation email
+      if (selectedPayment.booking_id) {
+        try {
+          const meetingRoomId = `foundarly-${selectedPayment.booking_id}`;
+          await bookingsService.update(selectedPayment.booking_id, {
+            status: "confirmed",
+            payment_status: "paid",
+            meeting_room_id: meetingRoomId,
+          });
+          const emailRes = await emailService.sendBookingConfirmation(selectedPayment.booking_id);
+          if (emailRes.success) {
+            toast.success("Payment verified! Meeting room active and confirmation emails sent.", { id: toastId });
+          } else {
+            toast.success("Payment verified and booking confirmed in database.", { id: toastId });
+          }
+        } catch (bookingErr) {
+          console.warn("[UPIVerification] Booking sync notice:", bookingErr);
+          toast.success("Payment verified successfully!", { id: toastId });
+        }
+      } else {
+        toast.success("Payment verified successfully!", { id: toastId });
+      }
+
       setShowDetailsModal(false);
       loadPayments();
       loadStats();
     } catch (error: any) {
-      toast.error(error.message || "Failed to verify payment");
+      toast.error(error.message || "Failed to verify payment", { id: toastId });
     } finally {
       setVerifying(false);
     }
@@ -143,6 +168,7 @@ export default function UPIVerificationPage() {
     }
 
     setVerifying(true);
+    const toastId = toast.loading("Rejecting payment...");
     try {
       await upiPaymentService.rejectPayment(
         selectedPayment.id,
@@ -150,12 +176,25 @@ export default function UPIVerificationPage() {
         adminNotes
       );
 
-      toast.success("Payment rejected");
+      // If linked to a booking, mark booking payment as rejected and send notification
+      if (selectedPayment.booking_id) {
+        try {
+          await bookingsService.update(selectedPayment.booking_id, {
+            payment_status: "rejected",
+            rejection_reason: adminNotes.trim(),
+          });
+          await emailService.sendBookingRejection(selectedPayment.booking_id, adminNotes.trim());
+        } catch (bErr) {
+          console.warn("[UPIVerification] Booking rejection update notice:", bErr);
+        }
+      }
+
+      toast.success("Payment marked rejected and customer notified.", { id: toastId });
       setShowDetailsModal(false);
       loadPayments();
       loadStats();
     } catch (error: any) {
-      toast.error(error.message || "Failed to reject payment");
+      toast.error(error.message || "Failed to reject payment", { id: toastId });
     } finally {
       setVerifying(false);
     }

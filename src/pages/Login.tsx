@@ -44,6 +44,12 @@ export default function LoginPage() {
 
       const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from;
 
+      // Critical: If user came directly from an email meeting link (/meeting/:roomId), preserve destination for all roles
+      if (typeof fromPath === 'string' && fromPath.startsWith('/meeting/')) {
+        navigate(fromPath, { replace: true });
+        return;
+      }
+
       if (isAdmin || isUserAdmin(user, profile)) {
         const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
         navigate(validAdminFrom, { replace: true });
@@ -100,6 +106,11 @@ export default function LoginPage() {
         const activeProfile = userProfile || profile;
 
         const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from;
+
+        if (typeof fromPath === 'string' && fromPath.startsWith('/meeting/')) {
+          navigate(fromPath, { replace: true });
+          return;
+        }
 
         if (isUserAdmin(user, activeProfile)) {
           const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';

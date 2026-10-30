@@ -27,12 +27,26 @@ import {
   generateParticipantWaitingEmailText,
   generateSessionCompletedEmailHTML,
   generateSessionCompletedEmailText,
+  generateRescheduleRequestedEmailHTML,
+  generateRescheduleRequestedEmailText,
+  generateRescheduleConfirmedEmailHTML,
+  generateRescheduleConfirmedEmailText,
+  generateMeetingReminderEmailHTML,
+  generateMeetingReminderEmailText,
+  generateMeetingRoomInviteEmailHTML,
+  generateMeetingRoomInviteEmailText,
+  generatePaymentConfirmationEmailHTML,
+  generatePaymentConfirmationEmailText,
   EmailBookingData,
   EmailBookingRejectedData,
   EmailApplicationApprovedData,
   EmailApplicationRejectedData,
   EmailParticipantWaitingData,
   EmailSessionCompletedData,
+  EmailMeetingReminderData,
+  EmailMeetingRoomInviteData,
+  EmailRescheduleData,
+  EmailPaymentConfirmationData,
 } from "./src/utils/emailTemplates.js";
 import { sendEmail, verifySmtpConnection, getSmtpConfig, getSmtpAuditInfo } from "./src/server/mailer.js";
 import { createClient } from "@supabase/supabase-js";
@@ -1567,28 +1581,35 @@ async function startServer() {
       if (consultantObj?.email) {
         (async () => {
           try {
-            const siteUrl = process.env.VITE_APP_URL || "https://foundarly-delta.vercel.app";
-            const emailHtml = `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h2 style="color: #d97706;">Reschedule Request for Consultation #${booking.id.slice(0, 8)}</h2>
-                <p>Hello ${consultantObj.name || "Consultant"},</p>
-                <p>Your client <strong>${booking.name || userEmail}</strong> has requested to reschedule their consultation session.</p>
-                <div style="background-color: #fef3c7; border: 1px solid #fde68a; border-radius: 8px; padding: 15px; margin: 20px 0;">
-                  <p><strong>Original Session:</strong> ${booking.date} at ${booking.time || "10:00 AM"}</p>
-                  <p><strong>Proposed New Schedule:</strong> ${newDate} at ${newTime}</p>
-                  <p><strong>Reason:</strong> ${reason.trim()}</p>
-                </div>
-                <p>Please log in to your Consultant Dashboard to accept or propose an alternative time.</p>
-                <a href="${siteUrl}/consultant-dashboard" style="display: inline-block; background-color: #d97706; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; margin-top: 10px;">Open Consultant Dashboard</a>
-              </div>
-            `;
+            const siteUrl = (process.env.APP_URL || process.env.VITE_APP_URL || process.env.VITE_SITE_URL || "https://www.foundarlybusinessworld.in").trim();
+            const dashboardUrl = `${siteUrl}/consultant/dashboard`;
+            const meetingLink = `${siteUrl}/meeting/${booking.meeting_room_id || `foundarly-${booking.id}`}`;
+
+            const reschedulePayload: EmailRescheduleData = {
+              bookingId: booking.id,
+              clientName: booking.name || userEmail,
+              clientEmail: booking.email || userEmail,
+              consultantName: consultantObj.name || "Consultant",
+              consultantEmail: consultantObj.email,
+              originalDate: booking.date,
+              originalTime: booking.time || "10:00 AM",
+              newDate,
+              newTime,
+              reason: reason.trim(),
+              meetingLink,
+              dashboardUrl,
+            };
+
+            const emailHtml = generateRescheduleRequestedEmailHTML(reschedulePayload);
+            const emailText = generateRescheduleRequestedEmailText(reschedulePayload);
+
             const emailPromise = sendEmail({
               from: smtpConfig.defaultFrom,
               to: consultantObj.email,
               replyTo: booking.email || smtpConfig.replyTo,
-              subject: `Reschedule Request: ${booking.name || "Client"} - Consultation #${booking.id.slice(0, 8)} | Foundarly`,
+              subject: `Consultation Reschedule Request: ${booking.name || "Client"} - Consultation #${booking.id.slice(0, 8)} | Foundarly`,
               html: emailHtml,
-              text: `Client ${booking.name} requested to reschedule Consultation #${booking.id.slice(0, 8)} to ${newDate} at ${newTime}. Reason: ${reason.trim()}`,
+              text: emailText,
             });
             const timeoutPromise = new Promise<{ success: boolean; error: string }>((resolve) =>
               setTimeout(() => resolve({ success: false, error: "Email delivery timeout" }), 5000)
@@ -3820,7 +3841,147 @@ async function startServer() {
         });
       }
 
-      // ── C. CONFIRMATION FLOW (CLIENT + CONSULTANT) ──
+      // ── C. MEETING REMINDER FLOW ──
+      if (type === "reminder") {
+        const targetBookingId = bookingId || emailData?.bookingId;
+        const targetRoom = emailData?.meetingRoomId || `foundarly-${targetBookingId}`;
+        const meetingLink = emailData?.meetingLink || `${siteUrl}/meeting/${targetRoom}`;
+        const recipientEmail = (emailData?.recipientEmail || emailData?.userEmail || "").trim();
+        const recipientName = emailData?.recipientName || emailData?.userName || "Participant";
+        const partnerName = emailData?.partnerName || emailData?.consultantName || "Consultant";
+
+        if (!recipientEmail || !recipientEmail.includes("@")) {
+          return res.status(400).json({ success: false, error: "Recipient email is required for meeting reminder." });
+        }
+
+        const reminderPayload: EmailMeetingReminderData = {
+          bookingId: targetBookingId,
+          recipientName,
+          recipientEmail,
+          recipientRole: emailData?.recipientRole || "client",
+          partnerName,
+          date: emailData?.date || new Date().toISOString().split("T")[0],
+          time: emailData?.time || "10:00 AM",
+          duration: emailData?.duration || 60,
+          meetingLink,
+          meetingRoomId: targetRoom,
+          timeframeLabel: emailData?.timeframeLabel || "Starting Soon",
+        };
+
+        const reminderHtml = generateMeetingReminderEmailHTML(reminderPayload);
+        const reminderText = generateMeetingReminderEmailText(reminderPayload);
+        const reminderSubject = `Your Foundarly Meeting Reminder – Consultation Starting Soon`;
+
+        const mailRes = await sendEmail({
+          from: smtpConfig.defaultFrom,
+          to: recipientEmail,
+          replyTo: smtpConfig.replyTo,
+          subject: reminderSubject,
+          html: reminderHtml,
+          text: reminderText,
+        });
+
+        if (!mailRes.success) {
+          return res.status(500).json({ success: false, error: mailRes.error, diagnostic: mailRes.diagnostic });
+        }
+
+        return res.json({ success: true, message: "Meeting reminder email dispatched successfully", messageId: mailRes.messageId });
+      }
+
+      // ── D. MEETING ROOM INVITATION FLOW ──
+      if (type === "invite") {
+        const targetBookingId = bookingId || emailData?.bookingId;
+        const targetRoom = emailData?.meetingRoomId || `foundarly-${targetBookingId}`;
+        const meetingLink = emailData?.meetingLink || `${siteUrl}/meeting/${targetRoom}`;
+        const recipientEmail = (emailData?.recipientEmail || emailData?.userEmail || "").trim();
+
+        if (!recipientEmail || !recipientEmail.includes("@")) {
+          return res.status(400).json({ success: false, error: "Recipient email is required for invitation." });
+        }
+
+        const invitePayload: EmailMeetingRoomInviteData = {
+          bookingId: targetBookingId,
+          recipientName: emailData?.recipientName || "Participant",
+          recipientEmail,
+          inviterName: emailData?.inviterName || "Foundarly",
+          consultantName: emailData?.consultantName || "Consultant",
+          clientName: emailData?.clientName || emailData?.userName || "Client",
+          date: emailData?.date || new Date().toISOString().split("T")[0],
+          time: emailData?.time || "10:00 AM",
+          duration: emailData?.duration || 60,
+          meetingLink,
+          meetingRoomId: targetRoom,
+          customMessage: emailData?.customMessage,
+        };
+
+        const inviteHtml = generateMeetingRoomInviteEmailHTML(invitePayload);
+        const inviteText = generateMeetingRoomInviteEmailText(invitePayload);
+        const inviteSubject = `Join Video Meeting Room – Foundarly Consultation`;
+
+        const mailRes = await sendEmail({
+          from: smtpConfig.defaultFrom,
+          to: recipientEmail,
+          replyTo: smtpConfig.replyTo,
+          subject: inviteSubject,
+          html: inviteHtml,
+          text: inviteText,
+        });
+
+        if (!mailRes.success) {
+          return res.status(500).json({ success: false, error: mailRes.error, diagnostic: mailRes.diagnostic });
+        }
+
+        return res.json({ success: true, message: "Meeting invitation email dispatched successfully", messageId: mailRes.messageId });
+      }
+
+      // ── E. PAYMENT CONFIRMATION FLOW ──
+      if (type === "payment" || type === "payment_confirmed") {
+        const targetBookingId = bookingId || emailData?.bookingId;
+        const targetRoom = emailData?.meetingRoomId || `foundarly-${targetBookingId}`;
+        const meetingLink = emailData?.meetingLink || `${siteUrl}/meeting/${targetRoom}`;
+        const recipientEmail = (emailData?.userEmail || emailData?.recipientEmail || "").trim();
+
+        if (!recipientEmail || !recipientEmail.includes("@")) {
+          return res.status(400).json({ success: false, error: "Recipient email is required for payment confirmation." });
+        }
+
+        const paymentPayload: EmailPaymentConfirmationData = {
+          bookingId: targetBookingId,
+          userName: emailData?.userName || "Client",
+          userEmail: recipientEmail,
+          consultantName: emailData?.consultantName || "Consultant",
+          amount: emailData?.amount || emailData?.price || 1500,
+          currency: emailData?.currency || "INR",
+          paymentMethod: emailData?.paymentMethod || "UPI",
+          transactionId: emailData?.transactionId,
+          date: emailData?.date || new Date().toISOString().split("T")[0],
+          time: emailData?.time || "10:00 AM",
+          duration: emailData?.duration || 60,
+          meetingLink,
+          meetingRoomId: targetRoom,
+        };
+
+        const paymentHtml = generatePaymentConfirmationEmailHTML(paymentPayload);
+        const paymentText = generatePaymentConfirmationEmailText(paymentPayload);
+        const paymentSubject = `Payment Confirmation – Foundarly Consultation with ${paymentPayload.consultantName}`;
+
+        const mailRes = await sendEmail({
+          from: smtpConfig.defaultFrom,
+          to: recipientEmail,
+          replyTo: smtpConfig.replyTo,
+          subject: paymentSubject,
+          html: paymentHtml,
+          text: paymentText,
+        });
+
+        if (!mailRes.success) {
+          return res.status(500).json({ success: false, error: mailRes.error, diagnostic: mailRes.diagnostic });
+        }
+
+        return res.json({ success: true, message: "Payment confirmation email dispatched successfully", messageId: mailRes.messageId });
+      }
+
+      // ── F. CONFIRMATION FLOW (CLIENT + CONSULTANT) ──
       let dataToSend: EmailBookingData = emailData;
 
       if (!dataToSend || !dataToSend.userEmail) {
@@ -3888,7 +4049,7 @@ async function startServer() {
 
       const userHtml = generateUserEmailHTML(dataToSend);
       const userText = generateUserEmailText(dataToSend);
-      const clientSubject = `Booking Confirmation: Consultation with ${dataToSend.consultantName} | Foundarly`;
+      const clientSubject = `Booking Confirmation – Your Foundarly Consultation with ${dataToSend.consultantName} Is Scheduled`;
 
       // Send to user via Titan SMTP
       const mailResult = await sendEmail({
@@ -3918,7 +4079,7 @@ async function startServer() {
         try {
           const consultantHtml = generateConsultantEmailHTML(dataToSend);
           const consultantText = generateConsultantEmailText(dataToSend);
-          const consultantSubject = `New Consultation Booked: ${dataToSend.userName} | Foundarly`;
+          const consultantSubject = `New Consultation Booking – Foundarly (${dataToSend.userName})`;
 
           const consultantMailRes = await sendEmail({
             from: smtpConfig.defaultFrom,

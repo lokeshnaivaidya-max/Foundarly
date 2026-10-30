@@ -32,3 +32,5 @@ data/
 *.tsbuildinfo
 database/backups/
 *.sql.gz
+.playwright-cli/
+.aistudio/

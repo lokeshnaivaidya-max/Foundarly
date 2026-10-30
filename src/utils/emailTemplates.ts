@@ -270,12 +270,61 @@ function resolveSiteUrl(link?: string): string {
   if (link && link.startsWith('http')) {
     try {
       const u = new URL(link);
-      return u.origin;
+      if (
+        u.hostname === 'localhost' ||
+        u.hostname === '127.0.0.1' ||
+        u.hostname.endsWith('.internal') ||
+        u.hostname.includes('vercel.app') ||
+        u.hostname.includes('run.app')
+      ) {
+        return FOUNDARLY_BRAND.domain;
+      }
+      return `${u.protocol === 'http:' ? 'https:' : u.protocol}//${u.host}`;
     } catch {
       // fallback
     }
   }
   return FOUNDARLY_BRAND.domain;
+}
+
+export function canonicalizeUrl(url?: string): string {
+  if (!url || typeof url !== 'string' || !url.trim()) {
+    return FOUNDARLY_BRAND.domain;
+  }
+  const clean = url.trim();
+  if (clean.startsWith('mailto:')) {
+    return clean;
+  }
+  if (clean.startsWith('/')) {
+    return `${FOUNDARLY_BRAND.domain}${clean}`;
+  }
+  try {
+    const parsed = new URL(clean);
+    const isOutdatedOrLocal =
+      parsed.hostname === 'localhost' ||
+      parsed.hostname === '127.0.0.1' ||
+      parsed.hostname.endsWith('.internal') ||
+      parsed.hostname.includes('vercel.app') ||
+      parsed.hostname.includes('run.app');
+
+    if (isOutdatedOrLocal) {
+      return `${FOUNDARLY_BRAND.domain}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    if (parsed.protocol === 'http:') {
+      parsed.protocol = 'https:';
+    }
+    return parsed.toString();
+  } catch {
+    return `${FOUNDARLY_BRAND.domain}/${clean.replace(/^\/+/, '')}`;
+  }
+}
+
+export function resolveMeetingLink(meetingLink?: string, meetingRoomId?: string, bookingId?: string): string {
+  if (meetingLink && typeof meetingLink === 'string' && meetingLink.trim()) {
+    return canonicalizeUrl(meetingLink);
+  }
+  const effectiveRoom = meetingRoomId || (bookingId ? (bookingId.startsWith('foundarly-') ? bookingId : `foundarly-${bookingId}`) : 'default-room');
+  return `${FOUNDARLY_BRAND.domain}/meeting/${effectiveRoom}`;
 }
 
 // ── BRANDED HEADER & FOOTER BUILDERS ──
@@ -385,6 +434,7 @@ function renderFooter(options?: { recipientEmail?: string; customNote?: string }
 }
 
 function renderCtaButton(url: string, label: string, color: 'gold' | 'emerald' | 'navy' | 'rose' = 'gold'): string {
+  const safeUrl = canonicalizeUrl(url);
   let bg = 'background-color: #d97706; background: linear-gradient(135deg, #d97706 0%, #b45309 100%);';
   let shadow = 'box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3);';
 
@@ -404,13 +454,13 @@ function renderCtaButton(url: string, label: string, color: 'gold' | 'emerald' |
       <tr>
         <td align="center">
           <!--[if mso]>
-          <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${url}" style="height:48px;v-text-anchor:middle;width:280px;" arcsize="15%" stroke="f" fillcolor="#d97706">
+          <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${safeUrl}" style="height:48px;v-text-anchor:middle;width:280px;" arcsize="15%" stroke="f" fillcolor="#d97706">
           <w:anchorlock/>
           <center style="color:#ffffff;font-family:sans-serif;font-size:15px;font-weight:bold;">${escapeHTML(label)}</center>
           </v:roundrect>
           <![endif]-->
           <!--[if !mso]><!-- -->
-          <a href="${url}" target="_blank" rel="noopener noreferrer" style="display: inline-block; ${bg} ${shadow} color: #ffffff; text-decoration: none; padding: 15px 36px; border-radius: 8px; font-size: 15px; font-weight: 600; letter-spacing: 0.2px; text-align: center;">
+          <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; ${bg} ${shadow} color: #ffffff; text-decoration: none; padding: 15px 36px; border-radius: 8px; font-size: 15px; font-weight: 600; letter-spacing: 0.2px; text-align: center;">
             ${escapeHTML(label)} &rarr;
           </a>
           <!--<![endif]-->
@@ -421,12 +471,13 @@ function renderCtaButton(url: string, label: string, color: 'gold' | 'emerald' |
 }
 
 function renderDirectLinkBox(url: string, label: string = 'Direct Link to Join:'): string {
+  const safeUrl = canonicalizeUrl(url);
   return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin: 16px 0; padding: 14px;">
       <tr>
         <td>
           <p style="margin: 0 0 6px; color: #64748b; font-size: 11px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">${escapeHTML(label)}</p>
-          <a href="${url}" target="_blank" rel="noopener noreferrer" style="color: #b45309; font-size: 13px; font-family: monospace; word-break: break-all; text-decoration: underline;">${escapeHTML(url)}</a>
+          <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color: #b45309; font-size: 13px; font-family: monospace; word-break: break-all; text-decoration: underline;">${escapeHTML(safeUrl)}</a>
         </td>
       </tr>
     </table>
@@ -1273,8 +1324,8 @@ Foundarly Consultation Platform`;
    ========================================================================== */
 
 export function generateApplicationApprovedEmailHTML(data: EmailApplicationApprovedData): string {
-  const siteUrl = data.dashboardUrl || FOUNDARLY_BRAND.domain;
-  const loginUrl = `${siteUrl}/login`;
+  const dashboardUrl = canonicalizeUrl(data.dashboardUrl || '/consultant/dashboard');
+  const loginUrl = `${FOUNDARLY_BRAND.domain}/login?from=/consultant/dashboard`;
 
   const header = renderHeader({
     title: 'Application Approved',
@@ -1339,8 +1390,7 @@ export function generateApplicationApprovedEmailHTML(data: EmailApplicationAppro
 }
 
 export function generateApplicationApprovedEmailText(data: EmailApplicationApprovedData): string {
-  const siteUrl = data.dashboardUrl || FOUNDARLY_BRAND.domain;
-  const loginUrl = `${siteUrl}/login`;
+  const loginUrl = `${FOUNDARLY_BRAND.domain}/login?from=/consultant/dashboard`;
 
   return `Application Approved - Foundarly
 

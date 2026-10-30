@@ -42,7 +42,9 @@ export default function LoginPage() {
       console.log("user:", user);
       console.log("profile:", profile);
 
-      const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from;
+      const queryParams = new URLSearchParams(location.search);
+      const queryFrom = queryParams.get('from') || queryParams.get('returnUrl') || queryParams.get('redirect');
+      const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from || queryFrom;
 
       // Critical: If user came directly from an email meeting link (/meeting/:roomId), preserve destination for all roles
       if (typeof fromPath === 'string' && fromPath.startsWith('/meeting/')) {
@@ -105,7 +107,9 @@ export default function LoginPage() {
 
         const activeProfile = userProfile || profile;
 
-        const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from;
+        const queryParams = new URLSearchParams(location.search);
+        const queryFrom = queryParams.get('from') || queryParams.get('returnUrl') || queryParams.get('redirect');
+        const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from || queryFrom;
 
         if (typeof fromPath === 'string' && fromPath.startsWith('/meeting/')) {
           navigate(fromPath, { replace: true });

@@ -370,4 +370,264 @@ describe('Foundarly Email Notification System & Link Verification Suite', () => 
     assert.ok(text.includes('Jane Doe is waiting in the room'));
     assert.ok(text.includes(baseBookingData.meetingLink));
   });
+
+  test('13. Comprehensive Link Audit: Zero Localhost/Insecure URLs & Valid Route Destinations', () => {
+    // Generate all email templates with diverse inputs (including dirty inputs like localhost or relative links)
+    const templates: { name: string; html: string; text: string }[] = [
+      {
+        name: 'User Booking Confirmation',
+        html: generateUserEmailHTML({ ...baseBookingData, meetingLink: 'http://localhost:3000/meeting/foundarly-123' }),
+        text: generateUserEmailText(baseBookingData),
+      },
+      {
+        name: 'Consultant Booking Notification',
+        html: generateConsultantEmailHTML({ ...baseBookingData, meetingLink: 'http://localhost:3000/meeting/foundarly-123' }),
+        text: generateConsultantEmailText(baseBookingData),
+      },
+      {
+        name: 'Meeting Reminder (Client)',
+        html: generateMeetingReminderEmailHTML({
+          bookingId: baseBookingData.bookingId,
+          recipientName: 'Jane Doe',
+          recipientEmail: 'jane.doe@example.com',
+          recipientRole: 'client',
+          partnerName: 'Dr. Sarah Jenkins',
+          date: '2026-11-15',
+          time: '14:30',
+          duration: 60,
+          meetingLink: 'http://127.0.0.1:3000/meeting/foundarly-123',
+          meetingRoomId: 'foundarly-123',
+        }),
+        text: generateMeetingReminderEmailText({
+          bookingId: baseBookingData.bookingId,
+          recipientName: 'Jane Doe',
+          recipientEmail: 'jane.doe@example.com',
+          recipientRole: 'client',
+          partnerName: 'Dr. Sarah Jenkins',
+          date: '2026-11-15',
+          time: '14:30',
+          duration: 60,
+          meetingLink: 'https://www.foundarlybusinessworld.in/meeting/foundarly-123',
+          meetingRoomId: 'foundarly-123',
+        }),
+      },
+      {
+        name: 'Meeting Room Invite',
+        html: generateMeetingRoomInviteEmailHTML({
+          bookingId: baseBookingData.bookingId,
+          recipientName: 'Jane Doe',
+          recipientEmail: 'jane.doe@example.com',
+          inviterName: 'Dr. Sarah Jenkins',
+          consultantName: 'Dr. Sarah Jenkins',
+          clientName: 'Jane Doe',
+          date: '2026-11-15',
+          time: '14:30',
+          duration: 60,
+          meetingLink: 'https://foundarly-delta.vercel.app/meeting/foundarly-123',
+          meetingRoomId: 'foundarly-123',
+        }),
+        text: generateMeetingRoomInviteEmailText({
+          bookingId: baseBookingData.bookingId,
+          recipientName: 'Jane Doe',
+          recipientEmail: 'jane.doe@example.com',
+          inviterName: 'Dr. Sarah Jenkins',
+          consultantName: 'Dr. Sarah Jenkins',
+          clientName: 'Jane Doe',
+          date: '2026-11-15',
+          time: '14:30',
+          duration: 60,
+          meetingLink: 'https://www.foundarlybusinessworld.in/meeting/foundarly-123',
+          meetingRoomId: 'foundarly-123',
+        }),
+      },
+      {
+        name: 'Reschedule Requested',
+        html: generateRescheduleRequestedEmailHTML({
+          bookingId: baseBookingData.bookingId,
+          clientName: 'Jane Doe',
+          clientEmail: 'jane.doe@example.com',
+          consultantName: 'Dr. Sarah Jenkins',
+          originalDate: '2026-11-15',
+          originalTime: '14:30',
+          newDate: '2026-11-18',
+          newTime: '16:00',
+          reason: 'Client travel',
+          dashboardUrl: 'http://localhost:3000/consultant/dashboard',
+        }),
+        text: generateRescheduleRequestedEmailText({
+          bookingId: baseBookingData.bookingId,
+          clientName: 'Jane Doe',
+          clientEmail: 'jane.doe@example.com',
+          consultantName: 'Dr. Sarah Jenkins',
+          originalDate: '2026-11-15',
+          originalTime: '14:30',
+          newDate: '2026-11-18',
+          newTime: '16:00',
+        }),
+      },
+      {
+        name: 'Payment Confirmation',
+        html: generatePaymentConfirmationEmailHTML({
+          bookingId: baseBookingData.bookingId,
+          userName: 'Jane Doe',
+          userEmail: 'jane.doe@example.com',
+          consultantName: 'Dr. Sarah Jenkins',
+          amount: 2500,
+          currency: 'INR',
+          transactionId: 'UPI-TXN-9876543210',
+          date: '2026-11-15',
+          time: '14:30',
+          duration: 60,
+          meetingLink: 'http://localhost:3000/meeting/foundarly-123',
+          meetingRoomId: 'foundarly-123',
+        }),
+        text: generatePaymentConfirmationEmailText({
+          bookingId: baseBookingData.bookingId,
+          userName: 'Jane Doe',
+          userEmail: 'jane.doe@example.com',
+          consultantName: 'Dr. Sarah Jenkins',
+          amount: 2500,
+          currency: 'INR',
+          date: '2026-11-15',
+          time: '14:30',
+          duration: 60,
+          meetingLink: 'https://www.foundarlybusinessworld.in/meeting/foundarly-123',
+          meetingRoomId: 'foundarly-123',
+        }),
+      },
+      {
+        name: 'Email Verification',
+        html: generateEmailVerificationEmailHTML({
+          userName: 'Jane Doe',
+          userEmail: 'jane.doe@example.com',
+          verificationUrl: 'http://localhost:3000/login?verify_token=test-token-123',
+        }),
+        text: generateEmailVerificationEmailText({
+          userName: 'Jane Doe',
+          userEmail: 'jane.doe@example.com',
+          verificationUrl: 'https://www.foundarlybusinessworld.in/login?verify_token=test-token-123',
+        }),
+      },
+      {
+        name: 'Password Reset',
+        html: generatePasswordResetEmailHTML({
+          userName: 'Jane Doe',
+          userEmail: 'jane.doe@example.com',
+          resetUrl: 'http://localhost:3000/reset-password?token=test-reset-123',
+        }),
+        text: generatePasswordResetEmailText({
+          userName: 'Jane Doe',
+          userEmail: 'jane.doe@example.com',
+          resetUrl: 'https://www.foundarlybusinessworld.in/reset-password?token=test-reset-123',
+        }),
+      },
+      {
+        name: 'Consultant Application Approved',
+        html: generateApplicationApprovedEmailHTML({
+          applicantName: 'Dr. Sarah Jenkins',
+          applicantEmail: 'sarah.jenkins@foundarlybusinessworld.in',
+          dashboardUrl: '/consultant/dashboard',
+        }),
+        text: generateApplicationApprovedEmailText({
+          applicantName: 'Dr. Sarah Jenkins',
+          applicantEmail: 'sarah.jenkins@foundarlybusinessworld.in',
+        }),
+      },
+      {
+        name: 'Consultant Application Rejected',
+        html: generateApplicationRejectedEmailHTML({
+          applicantName: 'John Candidate',
+          applicantEmail: 'john@example.com',
+          reason: 'Application does not meet current criteria',
+        }),
+        text: generateApplicationRejectedEmailText({
+          applicantName: 'John Candidate',
+          applicantEmail: 'john@example.com',
+        }),
+      },
+      {
+        name: 'Session Completed (7-Day Rejoin)',
+        html: generateSessionCompletedEmailHTML({
+          bookingId: baseBookingData.bookingId,
+          userName: 'Jane Doe',
+          userEmail: 'jane.doe@example.com',
+          consultantName: 'Dr. Sarah Jenkins',
+          recipientRole: 'client',
+          recipientName: 'Jane Doe',
+          recipientEmail: 'jane.doe@example.com',
+          date: '2026-11-15',
+          time: '14:30',
+          sessionDuration: 60,
+          meetingRoomId: 'foundarly-123',
+          meetingLink: 'http://localhost:3000/meeting/foundarly-123',
+          rejoinDeadline: '2026-11-22T15:30:00.000Z',
+          rejoinExpiryFormatted: 'November 22, 2026 at 3:30 PM UTC',
+          rejoinDaysRemaining: 7,
+        }),
+        text: generateSessionCompletedEmailText({
+          bookingId: baseBookingData.bookingId,
+          userName: 'Jane Doe',
+          userEmail: 'jane.doe@example.com',
+          consultantName: 'Dr. Sarah Jenkins',
+          recipientRole: 'client',
+          recipientName: 'Jane Doe',
+          recipientEmail: 'jane.doe@example.com',
+          date: '2026-11-15',
+          time: '14:30',
+          sessionDuration: 60,
+          meetingRoomId: 'foundarly-123',
+          meetingLink: 'https://www.foundarlybusinessworld.in/meeting/foundarly-123',
+          rejoinDeadline: '2026-11-22T15:30:00.000Z',
+          rejoinExpiryFormatted: 'November 22, 2026 at 3:30 PM UTC',
+          rejoinDaysRemaining: 7,
+        }),
+      },
+    ];
+
+    const validPaths = [
+      '/',
+      '/my-bookings',
+      '/consultant/dashboard',
+      '/consultants',
+      '/login',
+      '/reset-password',
+      '/pricing',
+      '/terms',
+      '/privacy',
+      '/meeting/foundarly-123',
+      '/meeting/foundarly-f94e1122-3344-5566-7788-99aabbccdde0',
+    ];
+
+    for (const t of templates) {
+      // 1. Extract all href attributes
+      const hrefRegex = /href="([^"]+)"/g;
+      let match;
+      let linkCount = 0;
+
+      while ((match = hrefRegex.exec(t.html)) !== null) {
+        const rawUrl = match[1];
+        linkCount++;
+
+        // No localhost or staging hostnames
+        assert.ok(!rawUrl.includes('localhost'), `[${t.name}] Link ${rawUrl} must not contain localhost`);
+        assert.ok(!rawUrl.includes('127.0.0.1'), `[${t.name}] Link ${rawUrl} must not contain 127.0.0.1`);
+        assert.ok(!rawUrl.includes('vercel.app'), `[${t.name}] Link ${rawUrl} must not contain vercel.app`);
+        assert.ok(!rawUrl.includes('run.app'), `[${t.name}] Link ${rawUrl} must not contain run.app`);
+
+        if (rawUrl.startsWith('mailto:')) {
+          assert.ok(rawUrl.includes('@foundarlybusinessworld.in'), `[${t.name}] Support email must be @foundarlybusinessworld.in`);
+        } else {
+          assert.ok(rawUrl.startsWith('https://www.foundarlybusinessworld.in'), `[${t.name}] URL must start with canonical HTTPS domain: ${rawUrl}`);
+          const parsed = new URL(rawUrl);
+          assert.equal(parsed.protocol, 'https:');
+          assert.equal(parsed.hostname, 'www.foundarlybusinessworld.in');
+          
+          const isKnownPath = validPaths.some((vp) => parsed.pathname === vp || parsed.pathname.startsWith('/meeting/'));
+          assert.ok(isKnownPath, `[${t.name}] Path "${parsed.pathname}" must be a registered application route`);
+        }
+      }
+
+      assert.ok(linkCount >= 2, `[${t.name}] Must have at least 2 verified links (found ${linkCount})`);
+    }
+  });
 });

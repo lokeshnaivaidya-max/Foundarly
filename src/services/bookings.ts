@@ -33,20 +33,60 @@ export const bookingsService = {
     }
 
     try {
+      // 1. Try server-side endpoint first (service_role privileges can read all bookings and filter cancelled/expired)
+      if (typeof window !== 'undefined' && typeof fetch === 'function') {
+        try {
+          const res = await fetch(`/api/consultants/${encodeURIComponent(consultantId)}/available-slots?date=${encodeURIComponent(date)}`);
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success && Array.isArray(json.slots)) {
+              return json.slots
+                .filter((s: any) => s.reason === 'booked')
+                .map((s: any) => (s.time || '').trim())
+                .filter(Boolean);
+            }
+          }
+        } catch {
+          // Fall back to direct database query
+        }
+      }
+
+      // 2. Fallback query to Supabase
       const { data, error } = await supabase
         .from('bookings')
-        .select('time, status, payment_status')
+        .select('time, status, payment_status, created_at')
         .eq('consultant_id', consultantId)
-        .eq('date', date)
-        .not('status', 'in', '("cancelled","rejected")')
-        .neq('payment_status', 'rejected');
+        .eq('date', date);
 
       if (error || !data) {
         console.warn('[BookingsService.getBookedSlots] Warning fetching booked slots:', error);
         return [];
       }
 
+      const nowMs = Date.now();
+      const PENDING_EXPIRY_MS = 15 * 60 * 1000; // 15-minute checkout hold
+
       return data
+        .filter((b: any) => {
+          const status = (b.status || '').toLowerCase().trim();
+          const paymentStatus = (b.payment_status || '').toLowerCase().trim();
+
+          // Cancelled or rejected bookings NEVER block slots
+          if (status === 'cancelled' || status === 'rejected') return false;
+          // Failed, rejected, or refunded payments NEVER block slots
+          if (paymentStatus === 'failed' || paymentStatus === 'rejected' || paymentStatus === 'refunded') return false;
+
+          // Confirmed / completed bookings ALWAYS block slots
+          if (status === 'confirmed' || status === 'completed') return true;
+
+          // Pending checkout: blocks ONLY if created within the 15-minute window
+          if (status === 'pending' || paymentStatus === 'pending') {
+            const createdAtMs = b.created_at ? new Date(b.created_at).getTime() : 0;
+            return (nowMs - createdAtMs) < PENDING_EXPIRY_MS;
+          }
+
+          return false;
+        })
         .map((b: any) => (b.time || '').trim())
         .filter((t: string) => t && t.toLowerCase() !== 'flexible');
     } catch (err) {
@@ -262,16 +302,37 @@ export const bookingsService = {
       // Check slot availability in Supabase to prevent double-booking
       const { data: existingBookings, error: slotCheckError } = await supabase
         .from('bookings')
-        .select('id, time, status, payment_status')
+        .select('id, time, status, payment_status, created_at')
         .eq('consultant_id', validConsultantId)
-        .eq('date', booking.date)
-        .not('status', 'in', '("cancelled","rejected")')
-        .neq('payment_status', 'rejected');
+        .eq('date', booking.date);
 
       if (!slotCheckError && existingBookings && existingBookings.length > 0) {
+        const nowMs = Date.now();
+        const PENDING_EXPIRY_MS = 15 * 60 * 1000;
+
         const isConflict = existingBookings.some((b: any) => {
           const bookedTime = (b.time || '').trim();
-          return bookedTime.toLowerCase() !== 'flexible' && normalizeTimeSlot(bookedTime) === normalizedTime;
+          if (!bookedTime || bookedTime.toLowerCase() === 'flexible') return false;
+          if (normalizeTimeSlot(bookedTime) !== normalizedTime) return false;
+
+          const status = (b.status || '').toLowerCase().trim();
+          const paymentStatus = (b.payment_status || '').toLowerCase().trim();
+
+          // Cancelled or rejected bookings NEVER block slots
+          if (status === 'cancelled' || status === 'rejected') return false;
+          // Failed, rejected, or refunded payments NEVER block slots
+          if (paymentStatus === 'failed' || paymentStatus === 'rejected' || paymentStatus === 'refunded') return false;
+
+          // Confirmed / completed bookings ALWAYS block
+          if (status === 'confirmed' || status === 'completed') return true;
+
+          // Pending checkout: blocks ONLY if created within 15 minutes
+          if (status === 'pending' || paymentStatus === 'pending') {
+            const createdAtMs = b.created_at ? new Date(b.created_at).getTime() : 0;
+            return (nowMs - createdAtMs) < PENDING_EXPIRY_MS;
+          }
+
+          return false;
         });
 
         if (isConflict) {

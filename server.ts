@@ -298,6 +298,11 @@ async function startServer() {
   app.use("/api/user/delete-account", createRateLimiter("user_delete_account", 5, 15 * 60000));
   app.use("/api/diagnostics/client-error", createRateLimiter("client_error_diag", 60, 60000));
 
+  // Availability browsing & slot validation rate limiters (generous limits to prevent scraper abuse while never blocking users)
+  app.use("/api/consultants/:id/available-slots", createRateLimiter("consultant_slots", 120, 60000));
+  app.use("/api/bookings/validate-slot", createRateLimiter("validate_slot", 60, 60000));
+  app.use("/api/bookings/calculate-price", createRateLimiter("calc_price", 60, 60000));
+
   // API Health Check
   app.get("/api/health", (req, res) => {
     const config = getSmtpConfig();
@@ -1686,17 +1691,38 @@ async function startServer() {
       // Fetch active bookings for this consultant on the specified date
       const { data: activeBookings, error: bErr } = await supabaseAdminClient
         .from("bookings")
-        .select("id, time, status, payment_status")
+        .select("id, time, status, payment_status, created_at")
         .eq("consultant_id", id)
-        .eq("date", date)
-        .not("status", "in", '("cancelled","rejected")')
-        .neq("payment_status", "rejected");
+        .eq("date", date);
 
       if (bErr) {
         console.warn("[Slot Server] Notice querying active bookings:", bErr);
       }
 
+      const nowMs = Date.now();
+      const PENDING_EXPIRY_MS = 15 * 60 * 1000;
+
       const bookedTimes: string[] = (activeBookings || [])
+        .filter((b) => {
+          const status = (b.status || '').toLowerCase().trim();
+          const paymentStatus = (b.payment_status || '').toLowerCase().trim();
+
+          // Cancelled or rejected bookings NEVER block slots
+          if (status === 'cancelled' || status === 'rejected') return false;
+          // Failed, rejected, or refunded payments NEVER block slots
+          if (paymentStatus === 'failed' || paymentStatus === 'rejected' || paymentStatus === 'refunded') return false;
+
+          // Confirmed / completed bookings ALWAYS block
+          if (status === 'confirmed' || status === 'completed') return true;
+
+          // Pending checkout: blocks ONLY if created within 15 minutes
+          if (status === 'pending' || paymentStatus === 'pending') {
+            const createdAtMs = b.created_at ? new Date(b.created_at).getTime() : 0;
+            return (nowMs - createdAtMs) < PENDING_EXPIRY_MS;
+          }
+
+          return false;
+        })
         .map((b) => b.time)
         .filter((t): t is string => Boolean(t && t !== "Flexible"));
 
@@ -1815,19 +1841,40 @@ async function startServer() {
       const normalizedReqTime = normalizeTimeSlot(time);
       const { data: conflicts, error: conflictErr } = await supabaseAdminClient
         .from("bookings")
-        .select("id, time, status, payment_status")
+        .select("id, time, status, payment_status, created_at")
         .eq("consultant_id", consultant_id)
-        .eq("date", date)
-        .not("status", "in", '("cancelled","rejected")')
-        .neq("payment_status", "rejected");
+        .eq("date", date);
 
       if (conflictErr) {
         console.warn("[Slot Server] Conflict check query notice:", conflictErr);
       }
 
+      const nowMs = Date.now();
+      const PENDING_EXPIRY_MS = 15 * 60 * 1000;
+
       const hasConflict = (conflicts || []).some((b: any) => {
         const bTime = (b.time || '').trim();
-        return bTime.toLowerCase() !== 'flexible' && normalizeTimeSlot(bTime) === normalizedReqTime;
+        if (!bTime || bTime.toLowerCase() === 'flexible') return false;
+        if (normalizeTimeSlot(bTime) !== normalizedReqTime) return false;
+
+        const status = (b.status || '').toLowerCase().trim();
+        const paymentStatus = (b.payment_status || '').toLowerCase().trim();
+
+        // Cancelled or rejected bookings NEVER block
+        if (status === 'cancelled' || status === 'rejected') return false;
+        // Failed, rejected, or refunded payments NEVER block
+        if (paymentStatus === 'failed' || paymentStatus === 'rejected' || paymentStatus === 'refunded') return false;
+
+        // Confirmed / completed bookings ALWAYS block
+        if (status === 'confirmed' || status === 'completed') return true;
+
+        // Pending checkout: blocks ONLY if created within 15 minutes
+        if (status === 'pending' || paymentStatus === 'pending') {
+          const createdAtMs = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return (nowMs - createdAtMs) < PENDING_EXPIRY_MS;
+        }
+
+        return false;
       });
 
       if (hasConflict) {

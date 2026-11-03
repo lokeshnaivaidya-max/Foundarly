@@ -82,25 +82,57 @@ export function validatePaymentStatus(status: string): boolean {
  */
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
-export function checkRateLimit(
+export interface ClientRateLimitResult {
+  allowed: boolean;
+  retryAfter: number; // in seconds
+  remaining: number;
+}
+
+/**
+ * Enhanced client-side sliding window rate limiter that returns exact retryAfter seconds
+ */
+export function checkClientRateLimit(
   key: string,
   maxRequests: number = 10,
   windowMs: number = 60000
-): boolean {
+): ClientRateLimitResult {
   const now = Date.now();
   const record = rateLimitMap.get(key);
 
   if (!record || now > record.resetTime) {
     rateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
-    return true;
+    return { allowed: true, retryAfter: 0, remaining: maxRequests - 1 };
   }
 
   if (record.count >= maxRequests) {
-    return false;
+    const retryAfter = Math.max(1, Math.ceil((record.resetTime - now) / 1000));
+    return { allowed: false, retryAfter, remaining: 0 };
   }
 
   record.count++;
-  return true;
+  return {
+    allowed: true,
+    retryAfter: 0,
+    remaining: Math.max(0, maxRequests - record.count),
+  };
+}
+
+/**
+ * Standard boolean rate limiter (compatible with legacy callers)
+ */
+export function checkRateLimit(
+  key: string,
+  maxRequests: number = 10,
+  windowMs: number = 60000
+): boolean {
+  return checkClientRateLimit(key, maxRequests, windowMs).allowed;
+}
+
+/**
+ * Helper to manually reset rate limit for a key (e.g. after successful auth or during tests)
+ */
+export function resetClientRateLimit(key: string): void {
+  rateLimitMap.delete(key);
 }
 
 /**

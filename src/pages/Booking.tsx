@@ -25,9 +25,10 @@ import {
   validateEmail, 
   sanitizeString, 
   checkRateLimit,
+  checkClientRateLimit,
   secureLog 
 } from "@/utils/security";
-import { generateAvailableSlots, TimeSlot } from "@/utils/timeSlots";
+import { generateAvailableSlots, getNowInIST, TimeSlot } from "@/utils/timeSlots";
 
 function Particle({ x, y, size, delay, dur }: { x: string; y: string; size: number; delay: number; dur: number }) {
   return (
@@ -78,6 +79,13 @@ export default function BookingPage() {
   const rotateY = useTransform(mouseX, [-300, 300], [-4, 4]);
   const formRef = useRef<HTMLDivElement>(null);
   const formInView = useInView(formRef, { once: true, margin: "-60px" });
+
+  // India Standard Time (IST) calendar dates for booking
+  const todayIstStr = getNowInIST().dateStr;
+  const tomorrowIstStr = (() => {
+    const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    return getNowInIST(d).dateStr;
+  })();
 
   useEffect(() => {
     if (!authLoading && user) {
@@ -214,19 +222,17 @@ export default function BookingPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (paymentProcessing) {
+      return; // Prevent duplicate submissions
+    }
+
     if (!user) { 
-      toast.error("Please login"); 
+      toast.error("Please login to book a consultation"); 
       navigate("/login"); 
       return; 
     }
 
-    // Rate limiting (max 3 bookings per minute per user)
-    if (!checkRateLimit(`booking-${user.id}`, 3, 60000)) {
-      toast.error("Too many booking attempts. Please wait a moment.");
-      return;
-    }
-
-    // Validate inputs
+    // 1. Validate inputs FIRST - client-side errors, missing fields, or slot choices NEVER consume booking limits
     if (!formData.consultant_id) { 
       toast.error("Please select a consultant"); 
       return; 
@@ -235,10 +241,32 @@ export default function BookingPage() {
       toast.error("Please select a preferred date"); 
       return; 
     }
+
+    // Validate date is not in the past in India Standard Time
+    const istDateToday = getNowInIST().dateStr;
+    if (formData.date < istDateToday) {
+      toast.error("Please select a valid date (today or future in IST)");
+      return;
+    }
+
     if (!formData.time || formData.time.toLowerCase() === "flexible") { 
       toast.error("Please select an available consultation time slot"); 
       return; 
     }
+
+    // Verify selected slot is actually available
+    const chosenSlot = availableSlots.find(s => s.time === formData.time);
+    if (!chosenSlot || !chosenSlot.available) {
+      toast.error(
+        chosenSlot?.reason === 'past'
+          ? "The selected time slot has already passed today in IST. Please select a future time slot."
+          : chosenSlot?.reason === 'booked'
+          ? "The selected time slot is already booked for this consultant. Please choose another slot."
+          : "The selected time slot is unavailable. Please select another slot or future date."
+      );
+      return;
+    }
+
     if (!validateEmail(formData.email)) {
       toast.error("Please enter a valid email address");
       return;
@@ -248,10 +276,10 @@ export default function BookingPage() {
       return;
     }
 
-    // Validate date is not in the past (allow today and future dates)
-    const todayStr = new Date().toISOString().split("T")[0];
-    if (formData.date < todayStr) {
-      toast.error("Please select a valid date (today or future)");
+    // 2. ONLY genuine booking submissions count towards booking rate limit (10 attempts per minute per user)
+    const rateLimitResult = checkClientRateLimit(`booking-${user.id}`, 10, 60000);
+    if (!rateLimitResult.allowed) {
+      toast.error(`Too many booking attempts. Please wait ${rateLimitResult.retryAfter}s before trying again.`);
       return;
     }
 
@@ -522,7 +550,7 @@ export default function BookingPage() {
                   </label>
                   <Input required type="date" className="bg-secondary border-border focus:border-primary/50 w-full"
                     value={formData.date} onChange={(e) => handleChange("date", e.target.value)}
-                    min={new Date().toISOString().split("T")[0]} />
+                    min={todayIstStr} />
                 </div>
 
                 {/* Preferred Time / Available Time Slots */}
@@ -569,11 +597,26 @@ export default function BookingPage() {
                       </p>
                     </div>
                   ) : availableSlots.every(s => !s.available) ? (
-                    <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-500 text-center space-y-1">
-                      <p className="font-semibold">All slots unavailable for this date</p>
-                      <p className="text-muted-foreground text-[11px]">
-                        All time slots for {formData.date} are either booked or have passed. Please select a future date.
+                    <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-500 text-center space-y-2">
+                      <p className="font-semibold text-sm">
+                        {formData.date === todayIstStr
+                          ? "All time slots for today have passed or are booked"
+                          : `All slots unavailable for ${formData.date}`}
                       </p>
+                      <p className="text-muted-foreground text-[11px]">
+                        {formData.date === todayIstStr
+                          ? `All scheduled consultation slots for today (${formData.date}) have already passed in IST or are reserved. Please select tomorrow or a future date.`
+                          : `All time slots for ${formData.date} are either booked or have passed. Please select another date.`}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleChange("date", tomorrowIstStr)}
+                        className="mt-1 text-xs border-amber-500/40 hover:bg-amber-500/20 text-foreground cursor-pointer"
+                      >
+                        Select Tomorrow ({tomorrowIstStr})
+                      </Button>
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -712,12 +755,31 @@ der-primary/50"
                 )}
 
                 {/* Submit */}
-                <Button type="submit" size="lg" className="w-full glow-gold py-6 text-base" disabled={paymentProcessing || !selectedConsultant}>
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="w-full glow-gold py-6 text-base"
+                  disabled={
+                    paymentProcessing ||
+                    !selectedConsultant ||
+                    !formData.date ||
+                    !formData.time ||
+                    (availableSlots.length > 0 && availableSlots.every(s => !s.available))
+                  }
+                >
                   {paymentProcessing ? (
                     <span className="flex items-center gap-2">
                       <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Processing...
+                      Processing Booking...
                     </span>
+                  ) : !selectedConsultant ? (
+                    "Please Select a Consultant"
+                  ) : !formData.date ? (
+                    "Please Select a Preferred Date"
+                  ) : availableSlots.length > 0 && availableSlots.every(s => !s.available) ? (
+                    "Please Select an Available Future Date"
+                  ) : !formData.time ? (
+                    "Select an Available Time Slot to Continue"
                   ) : (
                     <span className="flex items-center gap-2">
                       <CreditCard className="h-4 w-4" />

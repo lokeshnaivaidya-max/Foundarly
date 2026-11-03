@@ -249,6 +249,9 @@ export function parseConsultantAvailabilityHours(preferredTime?: string | null):
   const clean = preferredTime.trim().toLowerCase();
 
   // 1. Explicit application form options presets
+  if ((clean.includes('9 am') || clean.includes('9:00 am')) && (clean.includes('12 pm') || clean.includes('12:00 pm'))) {
+    return { startHour: 9, endHour: 12 };
+  }
   if (clean.includes('8 am') && clean.includes('12 pm')) {
     return { startHour: 8, endHour: 12 };
   }
@@ -689,7 +692,13 @@ export function parseAvailabilitySettings(consultantOrSettings: any): Consultant
     const hours = parseConsultantAvailabilityHours(consultantOrSettings.preferred_time);
     const start24 = `${String(hours.startHour).padStart(2, '0')}:00`;
     const end24 = `${String(hours.endHour).padStart(2, '0')}:00`;
-    for (const d of ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as WeekdayKey[]) {
+    const cleanPref = consultantOrSettings.preferred_time.trim().toLowerCase();
+    const includeSunday = cleanPref.includes('sun') || cleanPref.includes('any time') || cleanPref.includes('all days') || cleanPref.includes('7 days');
+    const days: WeekdayKey[] = includeSunday
+      ? ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+      : ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+    for (const d of days) {
       defaults.weeklySchedule[d] = {
         enabled: true,
         windows: [{ start: start24, end: end24 }],

@@ -273,11 +273,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Safety timeout: loading will never block the UI past 2000ms, even if an
-    // authoritative profile fetch is still in flight. The profile will continue
-    // resolving in the background and update state when complete.
+    // Safety timeout: loading will never block the UI past 2000ms, but only when no
+    // authoritative profile fetch is in flight so we never render with a stale /
+    // unresolved role. ProtectedRoute must not make authorization decisions before
+    // the user's role is resolved.
     const safetyTimer = setTimeout(() => {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && inFlightFetchRef.current.size === 0) {
         setLoading(false);
       }
     }, 2000);

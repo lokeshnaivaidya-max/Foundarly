@@ -152,9 +152,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       retryCount = 0
     ) => {
       try {
-        // Skip re-resolution if profile already resolved for this user/role
+        // Skip re-resolution if profile already resolved for this user AND role
         const existing = profileResolvedRef.current;
-        if (existing && existing.userId === userId) {
+        if (existing && existing.userId === userId && existing.role !== 'null') {
           // Role already resolved; no need to re-fetch on TOKEN_REFRESHED
           return;
         }
@@ -385,11 +385,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             is_consultant: false,
           };
           if (!data || data.role !== 'developer_admin') {
-            supabase.from('profiles').upsert({
+            const { error: upsertErr } = await supabase.from('profiles').upsert({
               id: userId,
               role: 'developer_admin',
               full_name: resolvedDevProfile.full_name,
-            }).then();
+            });
+            if (upsertErr) {
+              secureLog.warn('[AuthContext] Failed to upsert developer_admin profile:', {
+                userId,
+                error: upsertErr?.message || String(upsertErr),
+              });
+            }
           }
           setCachedProfile(userId, resolvedDevProfile);
           setProfile(resolvedDevProfile);
@@ -540,12 +546,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
 
           if (!profileData || profileData.role !== 'consultant') {
-            supabase.from('profiles').upsert({
+            const { error: upsertErr } = await supabase.from('profiles').upsert({
               id: userId,
               full_name: consultantProfile.full_name,
               role: 'consultant',
               is_consultant: true,
-            }).then();
+            });
+            if (upsertErr) {
+              secureLog.warn('[AuthContext] Failed to upsert consultant profile:', {
+                userId,
+                error: upsertErr?.message || String(upsertErr),
+              });
+            }
           }
 
           setCachedProfile(userId, consultantProfile);

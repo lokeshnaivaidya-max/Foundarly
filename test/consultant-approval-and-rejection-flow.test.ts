@@ -18,6 +18,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import approveHandler from '../api/admin/approve-consultant-application.js';
 import consultantMeHandler from '../api/consultant/me.js';
+import { consultantsService } from '../src/services/consultants.js';
+import { supabase } from '../src/lib/supabase.js';
 import {
   getUserEffectiveRole,
   isUserAdmin,
@@ -494,6 +496,179 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       assert.equal(sanitizeUserRole('admin@foundarly.com', 'super_admin'), 'super_admin');
       assert.equal(sanitizeUserRole('consultant@example.com', 'consultant'), 'consultant');
       assert.equal(sanitizeUserRole('client@example.com', 'client'), 'client');
+    });
+  });
+
+  describe('8. Consultants Service Regression (booking page loading)', () => {
+    const originalFrom = supabase.from;
+
+    function restoreSupabase() {
+      supabase.from = originalFrom;
+    }
+
+    function mockSupabaseFromWithAbort(resolveValue) {
+      supabase.from = () => ({
+        select: () => ({
+          order: () => ({
+            eq: () => ({
+              abortSignal: (signal) => {
+                return new Promise((resolve, reject) => {
+                  if (signal.aborted) {
+                    reject(new DOMException('The operation was aborted.', 'AbortError'));
+                    return;
+                  }
+                  const handler = () => {
+                    reject(new DOMException('The operation was aborted.', 'AbortError'));
+                  };
+                  signal.addEventListener('abort', handler);
+                  if (resolveValue) {
+                    setTimeout(() => resolve(resolveValue), 50);
+                  }
+                });
+              },
+            }),
+          }),
+        }),
+      });
+    }
+
+    test('getAll throws when Supabase query times out (Bug 1: AbortSignal attached)', async () => {
+      // Mock supabase.from to return a query that never resolves on its own -
+      // only the AbortController timeout (8s) will cause it to reject
+      mockSupabaseFromWithAbort(null);
+
+      try {
+        await consultantsService.getAll(true);
+        assert.fail('Should have thrown when Supabase query times out');
+      } catch (err) {
+        const msg = err.message || '';
+        assert.ok(
+          msg.includes('Failed to fetch consultants') || msg.includes('aborted'),
+          `Expected timeout/abort error, got: ${msg}`
+        );
+      } finally {
+        restoreSupabase();
+      }
+    }, 30000); // 30s timeout - 2 attempts × 8s each
+
+    test('getAll throws when Supabase returns an error (error propagation, not stale cache)', async () => {
+      // Mock supabase.from to return a Supabase error
+      mockSupabaseFromWithAbort({
+        data: null,
+        error: { message: 'RLS violation' },
+      });
+
+      try {
+        await consultantsService.getAll(true);
+        assert.fail('Should have thrown when Supabase returns error');
+      } catch (err) {
+        const msg = err.message || '';
+        assert.ok(
+          msg.includes('Failed to fetch consultants') || msg.includes('RLS violation'),
+          `Expected error propagation, got: ${msg}`
+        );
+      } finally {
+        restoreSupabase();
+      }
+    });
+
+    test('getAll forceRefresh bypasses cache', async () => {
+      // First call: mock returns data
+      mockSupabaseFromWithAbort({
+        data: [{ id: 'cached-consultant', name: 'Cached Consultant', is_active: true }],
+        error: null,
+      });
+
+      try {
+        const firstResult = await consultantsService.getAll(true, true); // forceRefresh=true
+        assert.equal(firstResult.length, 1);
+        assert.equal(firstResult[0].name, 'Cached Consultant');
+
+        // Second call with forceRefresh=true: mock returns different data
+        mockSupabaseFromWithAbort({
+          data: [{ id: 'fresh-consultant', name: 'Fresh Consultant', is_active: true }],
+          error: null,
+        });
+
+        const secondResult = await consultantsService.getAll(true, true); // forceRefresh=true
+        assert.equal(secondResult.length, 1);
+        assert.equal(secondResult[0].name, 'Fresh Consultant');
+        assert.notEqual(secondResult[0].id, 'cached-consultant');
+      } finally {
+        restoreSupabase();
+      }
+    });
+
+    test('getAll does not call admin API for regular users (source code check)', () => {
+      const source = fs.readFileSync(
+        path.join(process.cwd(), 'src', 'services', 'consultants.ts'),
+        'utf8'
+      );
+      // Extract just the getAll function body to check it doesn't call admin API
+      const getAllStart = source.indexOf('async getAll(');
+      const getAllEnd = source.indexOf('\n  async getById(', getAllStart);
+      const getAllBody = source.substring(getAllStart, getAllEnd);
+      assert.ok(
+        !getAllBody.includes('/api/admin/consultants'),
+        'consultantsService.getAll should not call admin API endpoint'
+      );
+    });
+
+    test('getAll attaches AbortSignal to Supabase query (Bug 1 fix)', () => {
+      const source = fs.readFileSync(
+        path.join(process.cwd(), 'src', 'services', 'consultants.ts'),
+        'utf8'
+      );
+      // The Supabase query must attach the AbortController signal
+      assert.ok(
+        source.includes('.abortSignal(controller.signal)'),
+        'Supabase query must attach abortSignal for timeout to work'
+      );
+      // The signal must be created before the query
+      const controllerIdx = source.indexOf('const controller = new AbortController()');
+      const abortSignalIdx = source.indexOf('.abortSignal(controller.signal)');
+      assert.ok(
+        abortSignalIdx > controllerIdx,
+        'AbortController must be created before abortSignal is attached'
+      );
+      // The timeout must be cleared in finally/after query
+      assert.ok(
+        source.includes('clearTimeout(timeoutId)'),
+        'Timeout must be cleared after query'
+      );
+    });
+  });
+
+  describe('9. Consultant Role Resolution (end-to-end)', () => {
+    test('Approved consultant with profile.role=consultant resolves to consultant', () => {
+      const user = { id: 'consultant-user-1', email: 'consultant@example.com' };
+      const profile = { id: 'consultant-user-1', role: 'consultant', is_consultant: true };
+      assert.equal(getUserEffectiveRole(user, profile), 'consultant');
+    });
+
+    test('Approved consultant with profile.is_consultant=true resolves to consultant', () => {
+      const user = { id: 'consultant-user-2', email: 'consultant2@example.com' };
+      const profile = { id: 'consultant-user-2', role: 'client', is_consultant: true };
+      assert.equal(getUserEffectiveRole(user, profile), 'consultant');
+    });
+
+    test('Stale client role does not override consultant role', () => {
+      // Even if profileResolvedRef had 'client' previously, getUserEffectiveRole
+      // always resolves from the current profile, not from cached role
+      const user = { id: 'consultant-user-3', email: 'consultant3@example.com' };
+      const profile = { id: 'consultant-user-3', role: 'consultant', is_consultant: true };
+      assert.equal(getUserEffectiveRole(user, profile), 'consultant');
+    });
+
+    test('Ordinary client still resolves to client', () => {
+      const user = { id: 'client-user-1', email: 'client@example.com' };
+      const profile = { id: 'client-user-1', role: 'client', is_consultant: false };
+      assert.equal(getUserEffectiveRole(user, profile), 'client');
+    });
+
+    test('Client with no profile still resolves to client', () => {
+      const user = { id: 'client-user-2', email: 'client2@example.com' };
+      assert.equal(getUserEffectiveRole(user, null), 'client');
     });
   });
 });

@@ -33,7 +33,17 @@ export const consultantsService = {
           query = query.eq('is_active', true);
         }
 
-        const { data, error } = await query.abortSignal(controller.signal);
+        // HARD SETTLE GUARANTEE: abortSignal alone cannot reject a request that
+        // never dispatches (e.g. supabase-js waiting on a wedged auth lock
+        // before fetch). Race the query against a rejecting timeout so getAll
+        // ALWAYS settles and the Booking page reaches its error + retry state
+        // instead of an indefinite "Loading consultants...".
+        const { data, error } = await Promise.race([
+          query.abortSignal(controller.signal),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Consultant list request timed out')), 8000)
+          ),
+        ]) as { data: Consultant[] | null; error: { message?: string } | null };
         clearTimeout(timeoutId);
 
         if (error) {

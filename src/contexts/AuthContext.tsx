@@ -370,10 +370,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }, 12000);
 
+    // Terminal watchdog: if resolution STILL has not authoritatively produced a
+    // profile after 30s (e.g. supabase-js auth lock wedged by a hung startup
+    // token refresh — the production incident), surface the EXPLICIT
+    // verification-failed state instead of an indefinite "Verifying your
+    // account...". Background resolution continues; a later success clears the
+    // flag and the UI recovers automatically.
+    const terminalWatchdogTimer = setTimeout(() => {
+      const currentUser = activeUserRef.current;
+      if (
+        isMountedRef.current &&
+        currentUser &&
+        profileResolvedRef.current?.userId !== currentUser.id
+      ) {
+        secureLog.warn('[AuthContext] Profile resolution exceeded terminal watchdog; surfacing verification failure');
+        setRoleResolutionFailed(true);
+        setLoading(false);
+      }
+    }, 30000);
+
     return () => {
       isMountedRef.current = false;
       clearTimeout(safetyTimer);
       clearTimeout(hardCapTimer);
+      clearTimeout(terminalWatchdogTimer);
       subscription.unsubscribe();
     };
   }, []);
@@ -421,8 +441,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setTimeout(() => resolve({ data: null, error: new Error('Profile fetch timeout') }), 6000)
         );
 
-        const { data } = await Promise.race([dbQueryPromise, timeoutPromise]);
+        const { data, error: profileFetchError } = await Promise.race([dbQueryPromise, timeoutPromise]);
         const profileData = (data as Profile) || null;
+        // A TIMED-OUT or errored profile lookup is a TRANSIENT failure, not
+        // proof that the user has no profile. Treating it as "no profile"
+        // misclassifies consultants as clients (the original redirect bug).
+        const profilesLookupFailed = Boolean(profileFetchError);
 
         // 2. Existing database super_admin
         if (profileData && profileData.role === 'super_admin') {
@@ -530,7 +554,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Try server-side authoritative check first (only if not yet confirmed as consultant)
         try {
-          const session = (await supabase.auth.getSession()).data.session;
+          // auth.getSession() waits on supabase-js client initialization and the
+          // global auth lock. A hung startup token refresh (network black-hole
+          // to Supabase) holds that lock indefinitely BEFORE dispatching any
+          // fetch — the production wedge. Race it so profile resolution ALWAYS
+          // settles and can degrade gracefully instead of wedging forever.
+          const sessionResult = await withDbTimeout(
+            supabase.auth.getSession(),
+            'auth session lookup',
+            3000
+          ).catch(() => null);
+          const session = sessionResult?.data?.session ?? null;
           if (session?.access_token) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 3500);
@@ -668,6 +702,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           full_name: profileData?.full_name || fallbackName,
           is_consultant: false,
         };
+
+        // TRANSIENT FAILURE GUARD: if the profiles lookup timed out or errored,
+        // the consultant checks above also ran against the same degraded
+        // backend and their results are unreliable. Resolving to 'client' here
+        // would misclassify an approved consultant (the original redirect bug)
+        // and silently grant client-only routing. Return null instead so the
+        // caller retries and — if it keeps failing — surfaces the explicit
+        // verification-failed state.
+        if (profilesLookupFailed && !isConsultantUser) {
+          secureLog.warn('[AuthContext] fetchProfile: profile lookup failed; refusing client fallback', {
+            userId,
+            profileError: profileFetchError?.message || String(profileFetchError),
+          });
+          return null;
+        }
 
         if (!profileData) {
           try {

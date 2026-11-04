@@ -93,11 +93,43 @@ const getCachedProfile = (userId: string): Profile | null => {
   return null;
 };
 
+// DEGRADED-MODE ROLE CACHE: when the authoritative profiles lookup hangs or
+// fails (server-side RLS/policy evaluation incident), the last
+// authoritatively-resolved role for THIS authenticated user is reused so the
+// session keeps working. Security: the cache is keyed by the authenticated
+// userId and was ONLY ever written by a prior successful authoritative
+// resolution in this browser — it can never grant a role the user did not
+// legitimately hold. Stale beyond ROLE_CACHE_TTL_MS → discarded (the user
+// gets the explicit verification-failed state, never a guessed role).
+const ROLE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+const getCachedRoleProfile = (userId: string): Profile | null => {
+  const cached = getCachedProfile(userId);
+  if (!cached) return null;
+  const cachedAt = (cached as { cachedAt?: number }).cachedAt;
+  if (typeof cachedAt === 'number' && Date.now() - cachedAt > ROLE_CACHE_TTL_MS) {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem(`foundarly_profile_${userId}`);
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+  return cached;
+};
+
 const setCachedProfile = (userId: string, p: Profile | null) => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       if (p) {
-        window.localStorage.setItem(`foundarly_profile_${userId}`, JSON.stringify(p));
+        // cachedAt: written ONLY on authoritative resolution — the degraded
+        // fallback never refreshes it, so prolonged outages still expire.
+        window.localStorage.setItem(
+          `foundarly_profile_${userId}`,
+          JSON.stringify({ ...p, cachedAt: Date.now() })
+        );
       } else {
         window.localStorage.removeItem(`foundarly_profile_${userId}`);
       }
@@ -604,40 +636,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return consultantProfile;
         }
 
-        // Try server-side authoritative check first (only if not yet confirmed as consultant)
-        try {
-          // auth.getSession() waits on supabase-js client initialization and the
-          // global auth lock. A hung startup token refresh (network black-hole
-          // to Supabase) holds that lock indefinitely BEFORE dispatching any
-          // fetch — the production wedge. Race it so profile resolution ALWAYS
-          // settles and can degrade gracefully instead of wedging forever.
-          const sessionResult = await withDbTimeout(
-            supabase.auth.getSession(),
-            'auth session lookup',
-            3000
-          ).catch(() => null);
-          const session = sessionResult?.data?.session ?? null;
-          if (session?.access_token) {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3500);
-            const meRes = await fetch('/api/consultant/me', {
-              headers: { Authorization: `Bearer ${session.access_token}` },
-              signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
-            if (meRes.ok) {
-              const meJson = await Promise.race([
-                meRes.json().catch(() => null),
-                new Promise((r) => setTimeout(() => r(null), 2500)),
-              ]);
-              if (meJson?.success && meJson?.isConsultant) {
-                isConsultantUser = true;
-                consultantName = consultantName || meJson.consultant?.name;
+        // Try server-side authoritative check first (only if not yet confirmed as
+        // consultant). SKIPPED when the profiles read already hung: me.ts reads
+        // profiles server-side and would be a guaranteed 3.5s dead wait against
+        // the same degraded backend — the direct consultants/applications checks
+        // below cover the same ground faster.
+        if (!profilesLookupFailed) {
+          try {
+            // auth.getSession() waits on supabase-js client initialization and the
+            // global auth lock. A hung startup token refresh (network black-hole
+            // to Supabase) holds that lock indefinitely BEFORE dispatching any
+            // fetch — the production wedge. Race it so profile resolution ALWAYS
+            // settles and can degrade gracefully instead of wedging forever.
+            const sessionResult = await withDbTimeout(
+              supabase.auth.getSession(),
+              'auth session lookup',
+              3000
+            ).catch(() => null);
+            const session = sessionResult?.data?.session ?? null;
+            if (session?.access_token) {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 3500);
+              const meRes = await fetch('/api/consultant/me', {
+                headers: { Authorization: `Bearer ${session.access_token}` },
+                signal: controller.signal,
+              });
+              clearTimeout(timeoutId);
+              if (meRes.ok) {
+                const meJson = await Promise.race([
+                  meRes.json().catch(() => null),
+                  new Promise((r) => setTimeout(() => r(null), 2500)),
+                ]);
+                if (meJson?.success && meJson?.isConsultant) {
+                  isConsultantUser = true;
+                  consultantName = consultantName || meJson.consultant?.name;
+                }
               }
             }
+          } catch (apiErr) {
+            console.warn('[AuthContext] /api/consultant/me notice:', apiErr);
           }
-        } catch (apiErr) {
-          console.warn('[AuthContext] /api/consultant/me notice:', apiErr);
         }
 
         secureLog.info('[AuthContext] fetchProfile: after /api/consultant/me', {
@@ -700,7 +738,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 .ilike('email', userEmail)
                 .eq('status', 'approved')
                 .limit(1),
-              'approved application check'
+              'approved application check',
+              4000
             );
 
             if (approvedApps && approvedApps.length > 0) {
@@ -783,6 +822,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // caller retries and — if it keeps failing — surfaces the explicit
         // verification-failed state.
         if (profilesLookupFailed && !isConsultantUser) {
+          // DEGRADED-MODE FALLBACK: the authoritative profiles read hung or
+          // failed. Never classify as client — but if THIS authenticated user
+          // has a previously authoritatively-resolved role in the role cache,
+          // keep the session working in degraded mode (background retries and
+          // the Retry button recover the authoritative state later).
+          const cachedRoleProfile = getCachedRoleProfile(userId);
+          if (cachedRoleProfile) {
+            setProfile(cachedRoleProfile);
+            profileResolvedRef.current = {
+              userId,
+              role: cachedRoleProfile.role ?? 'null',
+              resolvedAt: Date.now(),
+            };
+            secureLog.warn(
+              '[AuthContext] fetchProfile: profile lookup failed; serving DEGRADED cached role for this authenticated user',
+              { correlationId, userId, role: cachedRoleProfile.role ?? 'null' }
+            );
+            return cachedRoleProfile;
+          }
           secureLog.warn('[AuthContext] fetchProfile: profile lookup failed; refusing client fallback', {
             correlationId,
             userId,

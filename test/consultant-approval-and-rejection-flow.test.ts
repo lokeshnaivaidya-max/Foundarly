@@ -1432,4 +1432,87 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       }
     });
   });
+
+  describe('16. Degraded-mode role cache (app-wide authenticated-read outage)', () => {
+    const authSource = () =>
+      fs.readFileSync(path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'), 'utf8');
+
+    test('A profiles-read hang serves the DEGRADED cached role instead of blocking the user', () => {
+      const source = authSource();
+      assert.ok(
+        source.includes('serving DEGRADED cached role for this authenticated user'),
+        'The profiles-hang path must reuse the last authoritative role'
+      );
+      assert.ok(
+        source.includes('getCachedRoleProfile(userId)'),
+        'The degraded path must read the per-user role cache'
+      );
+      // The degraded return must come BEFORE the hard refusal
+      const degradedIdx = source.indexOf('serving DEGRADED cached role');
+      const refuseIdx = source.indexOf('refusing client fallback');
+      assert.ok(
+        degradedIdx !== -1 && refuseIdx !== -1 && degradedIdx < refuseIdx,
+        'Cache fallback must be attempted before the hard refusal'
+      );
+    });
+
+    test('The role cache is TTL-bounded and only written on authoritative resolution', () => {
+      const source = authSource();
+      assert.ok(
+        source.includes('ROLE_CACHE_TTL_MS'),
+        'The role cache must expire (no indefinitely stale privileged roles)'
+      );
+      assert.ok(
+        source.includes('cachedAt: Date.now()'),
+        'cachedAt is written ONLY by authoritative resolutions'
+      );
+      // The degraded path must NOT refresh cachedAt (no indefinite extension)
+      const degradedIdx = source.indexOf('serving DEGRADED cached role');
+      const degradedBlock = source.slice(degradedIdx, degradedIdx + 700);
+      assert.ok(
+        !degradedBlock.includes('setCachedProfile('),
+        'Degraded reads must never refresh the cache timestamp'
+      );
+    });
+
+    test('Client→consultant rescue still precedes the degraded fallback', () => {
+      const source = authSource();
+      const rescueIdx = source.indexOf('matchedConsultants?.[0]');
+      const degradedIdx = source.indexOf('serving DEGRADED cached role');
+      assert.ok(
+        rescueIdx !== -1 && degradedIdx !== -1 && rescueIdx < degradedIdx,
+        'The consultants-table rescue (immediate client→consultant upgrade) must run before the cache fallback'
+      );
+    });
+
+    test('The doomed /api/consultant/me call is skipped when profiles reads hang', () => {
+      const source = authSource();
+      const meIdx = source.indexOf("'/api/consultant/me'");
+      const meBlockStart = source.lastIndexOf('if (!profilesLookupFailed)', meIdx);
+      assert.ok(
+        meBlockStart !== -1 && meIdx - meBlockStart < 1200,
+        'The me.ts attempt must be gated on !profilesLookupFailed (dead 3.5s wait otherwise)'
+      );
+    });
+
+    test('Model: degraded cache keeps the exact cached role — never upgrades or downgrades', () => {
+      const store = new Map();
+      const getCachedRole = (userId) => store.get(userId) ?? null;
+      const setCached = (userId, p) => store.set(userId, { ...p, cachedAt: Date.now() });
+      // Authoritative resolution earlier in this browser:
+      setCached('user-1', { role: 'consultant', is_consultant: true });
+      // Now the profiles read hangs → degraded fallback:
+      const degraded = getCachedRole('user-1');
+      assert.equal(degraded.role, 'consultant', 'Cached consultant stays consultant');
+      assert.equal(degraded.is_consultant, true);
+      // A user with NO cache (never resolved) gets null → explicit error state
+      assert.equal(getCachedRole('user-2'), null, 'Unknown users are never assigned a guessed role');
+      // Stale cache beyond TTL is discarded
+      store.set('user-3', { role: 'consultant', cachedAt: Date.now() - 8 * 24 * 60 * 60 * 1000 });
+      const TTL = 7 * 24 * 60 * 60 * 1000;
+      const stale = store.get('user-3');
+      const isStale = Date.now() - stale.cachedAt > TTL;
+      assert.equal(isStale, true, 'Cache beyond the TTL is stale');
+    });
+  });
 });

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Shield, CheckCircle, CreditCard, Lock, Clock, Calendar, Tag, Check } from "lucide-react";
+import { Shield, CheckCircle, CreditCard, Lock, Clock, Calendar, Tag, Check, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -103,9 +103,12 @@ export default function BookingPage() {
     }
   }, [user, profile, authLoading, navigate]);
 
-  const { data: consultants, isLoading } = useQuery({
+  const { data: consultants, isLoading, error: consultantsError, refetch: refetchConsultants } = useQuery({
     queryKey: ["consultants", "active"],
-    queryFn: () => consultantsService.getAll(true),
+    queryFn: () => consultantsService.getAll(true, true), // forceRefresh=true on every refetch
+    retry: 2,
+    retryDelay: 1000,
+    staleTime: 0, // Always refetch to avoid stale consultant data
   });
 
   useEffect(() => {
@@ -484,15 +487,33 @@ export default function BookingPage() {
                 {/* Consultant */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground block">Select Consultant</label>
-                  {isLoading ? (
+                  {consultantsError ? (
+                    <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 text-sm text-destructive flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4" />
+                      <div>
+                        <div className="font-semibold">Failed to load consultants</div>
+                        <div className="text-[11px]">Please try again or contact support.</div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => refetchConsultants()}
+                        className="text-xs bg-destructive text-destructive hover:bg-destructive/20 px-2 py-1"
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  ) : isLoading ? (
                     <div className="bg-secondary border border-border rounded-lg p-3 text-sm text-muted-foreground">Loading consultants...</div>
+                  ) : consultants && consultants.length === 0 ? (
+                    <div className="bg-secondary border border-border rounded-lg p-3 text-sm text-muted-foreground">No consultants available</div>
                   ) : (
                     <Select value={formData.consultant_id} onValueChange={(v) => handleChange("consultant_id", v)}>
                       <SelectTrigger className="bg-secondary border-border focus:border-primary/50">
                         <SelectValue placeholder="Choose an expert" />
                       </SelectTrigger>
                       <SelectContent>
-                        {consultants?.map((c) => (
+                        {consultants.map((c) => (
                           <SelectItem key={c.id} value={c.id}>{c.name} — {c.title}</SelectItem>
                         ))}
                       </SelectContent>

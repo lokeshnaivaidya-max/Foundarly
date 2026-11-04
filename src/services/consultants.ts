@@ -21,60 +21,43 @@ export const consultantsService = {
       return activeOnly ? consultantsCache.data.filter(c => c.is_active) : consultantsCache.data;
     }
 
-    // 1. Try server admin API first if session available
-    try {
-      const session = (await supabase.auth.getSession()).data.session;
-      if (session?.access_token) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
-        const res = await fetch('/api/admin/consultants', {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          const json = await res.json().catch(() => null);
-          if (json?.success && Array.isArray(json?.consultants)) {
-            consultantsCache = { data: json.consultants, timestamp: Date.now() };
-            return activeOnly ? json.consultants.filter((c: any) => c.is_active) : json.consultants;
-          }
-        }
-      }
-    } catch {
-      // Fall through to direct query
-    }
-
-    // 2. Direct Supabase query
+    // Direct Supabase query with timeout - no unnecessary admin API call for regular users
     for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
       try {
         let query = supabase.from('consultants').select('*').order('created_at', { ascending: false });
-        
+
         if (activeOnly) {
           query = query.eq('is_active', true);
         }
-        
-        const { data, error } = await query;
+
+        const { data, error } = await query.abortSignal(controller.signal);
+        clearTimeout(timeoutId);
+
         if (error) {
           if (attempt === 0) {
             await new Promise(r => setTimeout(r, 200));
             continue;
           }
-          console.warn('Unable to fetch consultants:', error.message || error);
-          return consultantsCache?.data || [];
+          throw new Error(error.message || 'Failed to fetch consultants');
         }
+
         const result = (data || []) as Consultant[];
         consultantsCache = { data: result, timestamp: Date.now() };
         return result;
       } catch (err: any) {
+        clearTimeout(timeoutId);
         if (attempt === 0) {
           await new Promise(r => setTimeout(r, 200));
           continue;
         }
-        console.warn('Error fetching consultants:', err?.message || err);
-        return consultantsCache?.data || [];
+        throw new Error(err?.message || 'Failed to fetch consultants');
       }
     }
-    return consultantsCache?.data || [];
+
+    throw new Error('Failed to fetch consultants after retries');
   },
 
   async getById(id: string) {

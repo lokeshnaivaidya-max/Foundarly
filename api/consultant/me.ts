@@ -60,6 +60,15 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
     const userId = user.id;
     const userEmail = (user.email || '').toLowerCase().trim();
+    // Email-based identity matching is only trusted when Supabase has confirmed
+    // the address (email_confirmed_at; confirmed_at covers legacy accounts and
+    // OAuth identities confirmed at first sign-in). An unverified email must
+    // never grant consultant access on its own — the authenticated UUID is the
+    // preferred identity.
+    const emailVerified = Boolean(
+      (user as { email_confirmed_at?: string }).email_confirmed_at ||
+        (user as { confirmed_at?: string }).confirmed_at
+    );
 
     secureLog.info('[Consultant Me] Request received', {
       userId,
@@ -93,12 +102,13 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     const isSuper = (userProfile?.role === 'super_admin' || userProfile?.role === 'admin') && isAllowedAdminEmail(userEmail);
     const isDev = userProfile?.role === 'developer_admin';
 
-    // 1. Search existing consultant record
+    // 1. Search existing consultant record. Prefer the authenticated UUID;
+    // email matching only when the authenticated email is verified.
     let consultantQuery = activeDbClient
       .from('consultants')
       .select('*');
 
-    if (userEmail) {
+    if (userEmail && emailVerified) {
       consultantQuery = consultantQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
     } else {
       consultantQuery = consultantQuery.eq('user_id', userId);
@@ -107,8 +117,9 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     const { data: consultants } = await consultantQuery.limit(1);
     let consultant = consultants?.[0] || null;
 
-    // 2. If not found in consultants, check if user has an APPROVED application in consultant_applications
-    if (!consultant && userEmail) {
+    // 2. If not found in consultants, check if user has an APPROVED application
+    // in consultant_applications (email-based match requires a verified email)
+    if (!consultant && userEmail && emailVerified) {
       const { data: applications } = await activeDbClient
         .from('consultant_applications')
         .select('*')
@@ -162,16 +173,27 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       hasMatchedUserId: consultant.user_id === userId,
     });
 
-    // 3. Reconcile user_id link on consultant record (best-effort; requires admin RLS)
-    if (consultant.user_id !== userId) {
+    // 3. Reconcile user_id link on consultant record (best-effort; requires admin RLS).
+    // Track linkage explicitly so the response never represents the account as
+    // securely linked when the link is missing or could not be established.
+    let linked = consultant.user_id === userId;
+    if (!linked && consultant.user_id) {
+      // Already linked to a different authenticated account — never overwrite
+      // another account's claim on this consultant record.
+      secureLog.warn(
+        '[Consultant Me] Consultant record is linked to a different authenticated user; not overwriting',
+        { userId, consultantId: consultant.id, existingUserId: consultant.user_id }
+      );
+    } else if (!linked) {
       const { error: linkErr } = await activeDbClient
         .from('consultants')
         .update({ user_id: userId, is_active: true })
         .eq('id', consultant.id);
       if (linkErr) {
         // Non-admin users cannot update consultants.user_id due to RLS.
-        // The consultant record is still valid; frontend direct-query fallback
-        // handles role resolution. Linking will be retried by admin-side sync.
+        // The consultant record is still valid (matched by UUID or verified
+        // email); `linked` stays false so callers know the DB link is not
+        // established. Linking will be retried by admin-side sync.
         secureLog.warn(
           '[Consultant Me] Could not link consultant user_id (RLS or write error):',
           { userId, consultantId: consultant.id, error: linkErr?.message || String(linkErr) }
@@ -179,11 +201,13 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       } else {
         consultant.user_id = userId;
         consultant.is_active = true;
+        linked = true;
       }
     }
 
-    // 4. Reconcile email if missing (best-effort; requires admin RLS)
-    if (!consultant.email && userEmail) {
+    // 4. Reconcile email if missing (best-effort; requires admin RLS). Only a
+    // verified email may be written onto the consultant record.
+    if (!consultant.email && userEmail && emailVerified) {
       const { error: emailErr } = await activeDbClient
         .from('consultants')
         .update({ email: userEmail })
@@ -219,11 +243,13 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     secureLog.info('[Consultant Me] Returning isConsultant=true', {
       userId,
       consultantId: consultant.id,
+      linked,
     });
 
     return res.status(200).json({
       success: true,
       isConsultant: true,
+      linked,
       consultant,
     });
   } catch (err: any) {

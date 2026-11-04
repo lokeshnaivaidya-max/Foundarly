@@ -17,6 +17,14 @@ export interface Profile {
   is_consultant?: boolean;
 }
 
+// How often an ordinary client's resolved role is re-checked. A client role can
+// transition to 'consultant' when an application is approved mid-session; the
+// transition is picked up on the next auth event (e.g. TOKEN_REFRESHED, which
+// also fires on tab focus) once this window has elapsed. This bounds refetch
+// frequency for ordinary clients instead of re-resolving on every event, while
+// still detecting same-session Client → Consultant approvals.
+const CLIENT_ROLE_RECHECK_MS = 5 * 60 * 1000;
+
 interface AuthContextType {
   user: User | null;
   profile: Profile | null;
@@ -121,7 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const initialAuthProcessedRef = useRef(false);
   // Tracks whether the profile has been authoritatively resolved, so TOKEN_REFRESHED
   // events don't unnecessarily reset loading and re-fetch the same role.
-  const profileResolvedRef = useRef<{ userId: string; role: string } | null>(null);
+  const profileResolvedRef = useRef<{ userId: string; role: string; resolvedAt: number } | null>(null);
 
   const applyAuth = (newSession: Session | null, newUser: User | null) => {
     activeSessionRef.current = newSession;
@@ -146,21 +154,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // fails — it is never applied before the fresh fetch completes. This prevents an
     // approved Consultant from being routed to /my-bookings based on a stale cached
     // Client profile while the Consultant role is still being resolved.
-    const resolveProfile = async (userId: string, currentUser: User | null) => {
+    const resolveProfile = async (
+      userId: string,
+      currentUser: User | null,
+      retryCount = 0
+    ) => {
       try {
-        // Skip re-resolution if profile already resolved for this user/role
+        // Controlled role re-check:
+        // - Privileged roles (super_admin/admin/developer_admin/consultant) are
+        //   stable within a session — never re-fetch on TOKEN_REFRESHED.
+        // - 'client' roles are re-checked at most once per CLIENT_ROLE_RECHECK_MS
+        //   so an ordinary client is NOT refetched on every token refresh, while a
+        //   same-session client → consultant approval is still detected on the
+        //   next auth event after the window elapses.
+        // - 'null' (unknown/transient) roles always re-resolve, preserving the
+        //   original retry behaviour for unresolved profiles.
         const existing = profileResolvedRef.current;
         if (existing && existing.userId === userId) {
-          // Role already resolved; no need to re-fetch on TOKEN_REFRESHED
-          return;
+          if (existing.role !== 'client' && existing.role !== 'null') {
+            return;
+          }
+          if (existing.role === 'client' && Date.now() - existing.resolvedAt < CLIENT_ROLE_RECHECK_MS) {
+            return;
+          }
         }
         secureLog.info('[AuthContext] resolveProfile: starting authoritative role resolution');
         const resolved = await fetchProfile(userId, currentUser);
-        profileResolvedRef.current = { userId, role: resolved?.role ?? 'null' };
-        secureLog.info(
-          '[AuthContext] resolveProfile: role resolution complete',
-          { role: resolved?.role ?? 'null', isConsultant: resolved?.is_consultant ?? false }
-        );
+        if (resolved) {
+          profileResolvedRef.current = { userId, role: resolved.role ?? 'null', resolvedAt: Date.now() };
+          secureLog.info(
+            '[AuthContext] resolveProfile: role resolution complete',
+            { role: resolved.role ?? 'null', isConsultant: resolved.is_consultant ?? false }
+          );
+        } else if (retryCount < 2) {
+          // Retry once after a short delay to handle transient network/RLS errors
+          // that could cause a consultant to be misclassified as a client
+          await new Promise((r) => setTimeout(r, 500));
+          return resolveProfile(userId, currentUser, retryCount + 1);
+        } else {
+          secureLog.warn('[AuthContext] resolveProfile: profile resolution failed after retries', {
+            userId,
+          });
+        }
       } catch (err) {
         console.warn('[AuthContext] Authoritative profile resolution failed:', err);
         const cached = getCachedProfile(userId);
@@ -273,11 +308,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Safety timeout: loading will never block the UI past 2000ms, even if an
-    // authoritative profile fetch is still in flight. The profile will continue
-    // resolving in the background and update state when complete.
+    // Safety timeout: loading will never block the UI past 2000ms, but only when no
+    // authoritative profile fetch is in flight so we never render with a stale /
+    // unresolved role. ProtectedRoute must not make authorization decisions before
+    // the user's role is resolved.
     const safetyTimer = setTimeout(() => {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && inFlightFetchRef.current.size === 0) {
         setLoading(false);
       }
     }, 2000);
@@ -298,6 +334,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const targetUser = currentUser || user;
         const userEmail = (targetUser?.email || '').toLowerCase().trim();
+        // Email-based consultant identity matching must only trust a VERIFIED
+        // email (Supabase sets email_confirmed_at once the address is confirmed;
+        // OAuth providers confirm on first sign-in). Unverified emails are never
+        // used to grant consultant access.
+        const emailVerified = Boolean(targetUser?.email_confirmed_at || targetUser?.confirmed_at);
         const isAllowlistedAdmin = isAllowedAdminEmail(userEmail);
 
         // 1. Allowlisted Super Admin check — return immediately without waiting
@@ -311,7 +352,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
           setCachedProfile(userId, superProfile);
           setProfile(superProfile);
-          profileResolvedRef.current = { userId, role: 'super_admin' };
+          profileResolvedRef.current = { userId, role: 'super_admin', resolvedAt: Date.now() };
           secureLog.info('[AuthContext] fetchProfile: resolved role=super_admin (allowlisted)');
           return superProfile;
         }
@@ -340,7 +381,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
           setCachedProfile(userId, superProfile);
           setProfile(superProfile);
-          profileResolvedRef.current = { userId, role: 'super_admin' };
+          profileResolvedRef.current = { userId, role: 'super_admin', resolvedAt: Date.now() };
           secureLog.info('[AuthContext] fetchProfile: resolved role=super_admin');
           return superProfile;
         }
@@ -355,7 +396,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
           setCachedProfile(userId, adminProfile);
           setProfile(adminProfile);
-          profileResolvedRef.current = { userId, role: 'admin' };
+          profileResolvedRef.current = { userId, role: 'admin', resolvedAt: Date.now() };
           secureLog.info('[AuthContext] fetchProfile: resolved role=admin');
           return adminProfile;
         }
@@ -369,15 +410,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             is_consultant: false,
           };
           if (!data || data.role !== 'developer_admin') {
-            supabase.from('profiles').upsert({
+            const { error: upsertErr } = await supabase.from('profiles').upsert({
               id: userId,
               role: 'developer_admin',
               full_name: resolvedDevProfile.full_name,
-            }).then();
+            });
+            if (upsertErr) {
+              secureLog.warn('[AuthContext] Failed to upsert developer_admin profile:', {
+                userId,
+                error: upsertErr?.message || String(upsertErr),
+              });
+            }
           }
           setCachedProfile(userId, resolvedDevProfile);
           setProfile(resolvedDevProfile);
-          profileResolvedRef.current = { userId, role: 'developer_admin' };
+          profileResolvedRef.current = { userId, role: 'developer_admin', resolvedAt: Date.now() };
           secureLog.info('[AuthContext] fetchProfile: resolved role=developer_admin');
           return resolvedDevProfile;
         }
@@ -397,7 +444,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           isConsultantUser: isConsultantUser,
         });
 
-        // Try server-side authoritative check first
+        // IMMEDIATE consultant resolution: if profiles DB already confirms consultant role,
+        // set profile immediately without waiting for /api/consultant/me or other lookups.
+        // This prevents an approved Consultant from being treated as a Client due to
+        // delayed or failed API calls.
+        if (isConsultantUser) {
+          const consultantProfile: Profile = {
+            id: userId,
+            role: 'consultant',
+            full_name: consultantName || targetUser?.user_metadata?.full_name || 'Consultant',
+            is_consultant: true,
+          };
+
+          if (!profileData || profileData.role !== 'consultant') {
+            supabase.from('profiles').upsert({
+              id: userId,
+              full_name: consultantProfile.full_name,
+              role: 'consultant',
+              is_consultant: true,
+            }).then();
+          }
+
+          setCachedProfile(userId, consultantProfile);
+          setProfile(consultantProfile);
+          profileResolvedRef.current = { userId, role: 'consultant', resolvedAt: Date.now() };
+          secureLog.info('[AuthContext] fetchProfile: resolved role=consultant (from profiles DB)');
+          return consultantProfile;
+        }
+
+        // Try server-side authoritative check first (only if not yet confirmed as consultant)
         try {
           const session = (await supabase.auth.getSession()).data.session;
           if (session?.access_token) {
@@ -432,7 +507,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               .from('consultants')
               .select('id, name, email, user_id, is_active');
 
-            if (userEmail) {
+            if (userEmail && emailVerified) {
               consultantQuery = consultantQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
             } else {
               consultantQuery = consultantQuery.eq('user_id', userId);
@@ -469,7 +544,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Check approved application in consultant_applications if not yet confirmed
-        if (!isConsultantUser && userEmail) {
+        // (email-based match requires a verified email)
+        if (!isConsultantUser && userEmail && emailVerified) {
           try {
             const { data: approvedApps } = await supabase
               .from('consultant_applications')
@@ -496,28 +572,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
 
           if (!profileData || profileData.role !== 'consultant') {
-            supabase.from('profiles').upsert({
+            const { error: upsertErr } = await supabase.from('profiles').upsert({
               id: userId,
               full_name: consultantProfile.full_name,
               role: 'consultant',
               is_consultant: true,
-            }).then();
+            });
+            if (upsertErr) {
+              secureLog.warn('[AuthContext] Failed to upsert consultant profile:', {
+                userId,
+                error: upsertErr?.message || String(upsertErr),
+              });
+            }
           }
 
           setCachedProfile(userId, consultantProfile);
           setProfile(consultantProfile);
-          profileResolvedRef.current = { userId, role: 'consultant' };
+          profileResolvedRef.current = { userId, role: 'consultant', resolvedAt: Date.now() };
           secureLog.info('[AuthContext] fetchProfile: resolved role=consultant');
           return consultantProfile;
         }
 
-        // 6. Regular Client
+        // 6. Regular Client — only reached if ALL consultant resolution paths failed.
+        // Do NOT silently default to client if the profile fetch errored; instead,
+        // return null so the caller can decide (keep loading=true, show error, etc.).
         const fallbackName = targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'User';
-        secureLog.warn('[AuthContext] fetchProfile: falling through to role=client', {
-          userId,
-          profileRole: profileData?.role ?? 'null',
-          isConsultantUser: isConsultantUser,
-        });
         const clientProfile: Profile = {
           id: userId,
           role: 'client',
@@ -539,30 +618,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setCachedProfile(userId, clientProfile);
         setProfile(clientProfile);
-        profileResolvedRef.current = { userId, role: 'client' };
+        profileResolvedRef.current = { userId, role: 'client', resolvedAt: Date.now() };
         secureLog.info('[AuthContext] fetchProfile: resolved role=client');
         return clientProfile;
       } catch (error) {
         secureLog.error('Error in fetchProfile:', error);
-        // Resilient fallback: Check cached profile or user metadata
-        const cached = getCachedProfile(userId);
-        if (cached) {
-          secureLog.warn('[AuthContext] fetchProfile: error fallback to cached profile', {
-            userId,
-            cachedRole: cached.role ?? 'null',
-          });
-          setProfile(cached);
-          return cached;
-        }
-
-        const fallbackProfile: Profile = {
-          id: userId,
-          role: 'client',
-          full_name: currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || user?.email?.split('@')[0] || 'User',
-          is_consultant: false,
-        };
-        setProfile(fallbackProfile);
-        return fallbackProfile;
+        // On error, do NOT fall through to 'client'. Return null so the caller
+        // can keep loading=true and retry, preventing a consultant from being
+        // misclassified as a client due to a transient network/RLS error.
+        return null;
       } finally {
         inFlightFetchRef.current.delete(userId);
       }

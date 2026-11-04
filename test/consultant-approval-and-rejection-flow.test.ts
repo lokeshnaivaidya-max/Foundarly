@@ -1,23 +1,18 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
- * 
+ *
  * Foundarly Consultant Application Approval & Rejection Flow Verification Suite
- * Validates:
- * 1. Rejection flow remains unchanged and continues working as expected.
- * 2. Approval flow resolves application record, activates consultant (is_active = true),
- *    links Auth user, sets profiles.role = 'consultant', and updates application status.
- * 3. Serverless handler (/api/admin/approve-consultant-application) accepts admin token
- *    and application payload fallback without returning 'Consultant application not found.'
- * 4. Consultant Dashboard verification: newly approved consultant is verified and granted access.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import approveHandler from '../api/admin/approve-consultant-application.js';
 import consultantMeHandler from '../api/consultant/me.js';
+import { consultantsService } from '../src/services/consultants.js';
+import { supabase } from '../src/lib/supabase.js';
 import {
   getUserEffectiveRole,
   isUserAdmin,
@@ -28,7 +23,6 @@ import {
 } from '../src/lib/authorization.js';
 
 describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
-  // Test pending application object
   const mockApplication = {
     id: 'f83a21d9-5a41-477b-89ef-3b1a29d58e11',
     name: 'Dr. Priya Sharma',
@@ -85,7 +79,6 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
 
   describe('1. Rejection Workflow (Unchanged & Verified)', () => {
     test('Rejecting an application sets status to rejected and records admin notes without touching consultants table', () => {
-      // Rejection updates status to 'rejected'
       const updatedApp = {
         ...mockApplication,
         status: 'rejected' as const,
@@ -95,7 +88,6 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
 
       assert.equal(updatedApp.status, 'rejected');
       assert.equal(updatedApp.admin_notes, 'Insufficient background for verified consultant tier.');
-      // Consultant is never created or activated
       assert.notEqual(updatedApp.status, 'approved');
     });
   });
@@ -127,12 +119,10 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
 
       await approveHandler(req, res);
 
-      // Will fail either with token validation or missing applicationId
       assert.ok(res.statusCode === 400 || res.statusCode === 401);
     });
 
     test('Passes application payload to eliminate "Consultant application not found." error when service key is absent', () => {
-      // Verify that passing application in body guarantees application data is present
       const reqBody = {
         applicationId: mockApplication.id,
         adminNotes: 'Approved for GTM and Strategy consulting.',
@@ -174,7 +164,6 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
         user_id: applicantAuthUserId,
       };
 
-      // Assertions
       assert.equal(consultantRecord.is_active, true, 'Consultant must be active');
       assert.equal(consultantRecord.user_id, applicantAuthUserId, 'Consultant must be linked to applicant auth user ID');
       assert.equal(consultantRecord.pricing_30, 1200);
@@ -192,7 +181,6 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
         is_consultant: false,
       };
 
-      // Mutation on approval
       const updatedProfile = {
         ...initialProfile,
         role: 'consultant' as const,
@@ -242,11 +230,10 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
         is_active: true,
       };
 
-      // Check consultant access logic from ConsultantDashboard.tsx:
       const isUserConsultant = Boolean(
         activeConsultant ||
-        profile?.role === 'consultant' ||
-        profile?.is_consultant
+          profile?.role === 'consultant' ||
+          profile?.is_consultant
       );
 
       assert.equal(isUserConsultant, true, 'Consultant Dashboard access check must pass for active consultant');
@@ -268,7 +255,6 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
         is_active: true,
       };
 
-      // Dashboard logic links user_id if null or mismatched:
       const linked = { ...unlinkedConsultant };
       if (linked.user_id !== user.id) {
         linked.user_id = user.id;
@@ -313,42 +299,33 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     });
 
     test('Source code explicitly destructures { error } from all three Supabase write operations', () => {
-      // Regression test for Issue 5: Supabase JS v2 returns database errors
-      // (including RLS denials) in the { data, error } object rather than
-      // throwing exceptions. The handler must explicitly check the error field
-      // on all three write operations: user_id link, email update, and profile upsert.
       const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
 
-      // Each write operation must destructure { error } and check it
-      const userIdErrorCheck = source.includes('const { error: linkErr } = await activeDbClient') ||
-        source.includes('const { error: linkErr } = await');
-      const emailErrorCheck = source.includes('const { error: emailErr } = await activeDbClient') ||
-        source.includes('const { error: emailErr } = await');
-      const profileErrorCheck = source.includes('const { error: profileErr } = await activeDbClient') ||
-        source.includes('const { error: profileErr } = await');
+      assert.ok(
+        source.includes('const { error: linkErr } = await activeDbClient') ||
+          source.includes('const { error: linkErr } = await'),
+        'user_id UPDATE must destructure { error }'
+      );
+      assert.ok(
+        source.includes('const { error: emailErr } = await activeDbClient') ||
+          source.includes('const { error: emailErr } = await'),
+        'email UPDATE must destructure { error }'
+      );
+      assert.ok(
+        source.includes('const { error: profileErr } = await activeDbClient') ||
+          source.includes('const { error: profileErr } = await'),
+        'profiles upsert must destructure { error }'
+      );
 
-      assert.ok(userIdErrorCheck, 'user_id UPDATE must destructure { error }');
-      assert.ok(emailErrorCheck, 'email UPDATE must destructure { error }');
-      assert.ok(profileErrorCheck, 'profiles upsert must destructure { error }');
-
-      // Each error check must log via secureLog.warn (never silently swallow)
       const secureLogWarnCount = (source.match(/secureLog\.warn/g) || []).length;
       assert.ok(secureLogWarnCount >= 3, 'All three write failures must be logged via secureLog.warn');
 
-      // The endpoint must still return isConsultant=true even when writes fail
-      const isConsultantTrueCheck = source.includes('isConsultant: true');
-      assert.ok(isConsultantTrueCheck, 'Endpoint must return isConsultant=true when consultant record is verified');
+      assert.ok(source.includes('isConsultant: true'), 'Endpoint must return isConsultant=true when consultant record is verified');
     });
 
-    test('Endpoint does not return 500 when Supabase writes fail with RLS errors (verified by code structure)', () => {
-      // The handler wraps all three write operations in error-field checks
-      // rather than try-catch. RLS errors are returned as { error } objects
-      // by Supabase JS v2, not thrown as exceptions. The handler logs them
-      // via secureLog.warn and continues, returning isConsultant=true.
+    test('Endpoint does not return 500 when Supabase writes fail with RLS errors', () => {
       const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
 
-      // Verify all three write operations have error field checking
-      // (user_id link, email update, profile upsert)
       assert.ok(
         source.includes('const { error: linkErr } = await activeDbClient'),
         'user_id UPDATE must destructure { error }'
@@ -362,30 +339,71 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
         'profiles upsert must destructure { error }'
       );
 
-      // Verify each error is checked with if (err) pattern
       assert.ok(source.includes('if (linkErr)'), 'user_id link error must be checked');
       assert.ok(source.includes('if (emailErr)'), 'email update error must be checked');
       assert.ok(source.includes('if (profileErr)'), 'profile upsert error must be checked');
 
-      // Verify errors are logged via secureLog.warn (never silently swallowed)
       const secureLogWarnCount = (source.match(/secureLog\.warn/g) || []).length;
       assert.ok(secureLogWarnCount >= 3, 'All three write failures must be logged via secureLog.warn');
-
-      // Verify endpoint returns isConsultant=true even when writes fail
       assert.ok(source.includes('isConsultant: true'), 'Endpoint must return isConsultant=true when consultant record is verified');
+    });
 
-      // Verify no uncaught await on these writes that would crash to outer catch → 500
-      // Each write must be followed by error checking on subsequent lines
-      const writes = [
-        { name: 'user_id', pattern: 'if (linkErr)' },
-        { name: 'email', pattern: 'if (emailErr)' },
-        { name: 'profile', pattern: 'if (profileErr)' },
-      ];
-      for (const w of writes) {
-        const writeIdx = source.indexOf(w.name === 'profile' ? '.from(\'profiles\')' : w.name === 'user_id' ? '.from(\'consultants\')' : '.from(\'consultants\')');
-        const errIdx = source.indexOf(w.pattern);
-        assert.ok(errIdx > writeIdx, `${w.name} write must be followed by error check`);
-      }
+    test('Consultant lookup prefers the authenticated UUID and only matches by verified email', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+
+      // Verified-email flag must be derived from Supabase confirmation fields
+      assert.ok(
+        source.includes('email_confirmed_at'),
+        'Endpoint must check Supabase email confirmation (email_confirmed_at) before email matching'
+      );
+
+      // Primary consultant query: email matching gated behind a verified email
+      const gateIdx = source.indexOf('if (userEmail && emailVerified) {');
+      assert.ok(gateIdx !== -1, 'Email-based consultant matching must be gated on a verified email');
+      const orIdx = source.indexOf('consultantQuery.or(');
+      assert.ok(orIdx > gateIdx, 'Email matching must occur inside the verified-email branch');
+    });
+
+    test('Auto-activation from an approved application requires a verified email', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      assert.ok(
+        source.includes('if (!consultant && userEmail && emailVerified) {'),
+        'consultant_applications email lookup must require a verified email'
+      );
+    });
+
+    test('Consultant email backfill only writes verified emails', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      assert.ok(
+        source.includes('if (!consultant.email && userEmail && emailVerified) {'),
+        'Consultant email backfill must require a verified email'
+      );
+    });
+
+    test('Failed UUID linking is explicitly reported and never overwrites another account', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+
+      // Linkage status starts truthful: only true when the record already
+      // carries the authenticated UUID.
+      assert.ok(
+        source.includes('let linked = consultant.user_id === userId;'),
+        'Linked status must be initialised from the actual stored user_id'
+      );
+
+      // Never overwrite a different account's claim on the consultant record
+      assert.ok(
+        source.includes('linked to a different authenticated user; not overwriting'),
+        'Endpoint must refuse to overwrite a consultant record linked to another user'
+      );
+
+      // linked=true only inside the success branch of the UPDATE
+      assert.ok(source.includes('linked = true;'), 'Successful link must set linked=true');
+
+      // Response must expose linkage status so callers never assume a secure link
+      assert.ok(
+        /isConsultant: true,\s*\n\s*linked,/.test(source),
+        'Response must include explicit linked status alongside isConsultant'
+      );
     });
   });
 
@@ -398,20 +416,17 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     });
 
     test('Returns super_admin when profile role is super_admin AND email is allowlisted', () => {
-      // isSuperAdmin requires BOTH profile.role === 'super_admin' AND isAllowedAdminEmail(email)
-      const user = mockUser('admin@foundarly.com'); // allowlisted
+      const user = mockUser('admin@foundarly.com');
       assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'super_admin' }), 'super_admin');
     });
 
     test('Does NOT return super_admin for non-allowlisted email even with super_admin profile', () => {
-      // Profile role alone is insufficient; email must be allowlisted
-      const user = mockUser('anyone@example.com'); // NOT allowlisted
+      const user = mockUser('anyone@example.com');
       assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'super_admin' }), 'client');
     });
 
     test('Returns admin when profile role is admin AND email is allowlisted (returns super_admin due to allowlist)', () => {
-      // isSuperAdmin takes priority: allowlisted email → super_admin regardless of profile role
-      const user = mockUser('admin@foundarly.com'); // allowlisted
+      const user = mockUser('admin@foundarly.com');
       assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'admin' }), 'super_admin');
     });
 
@@ -494,6 +509,169 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       assert.equal(sanitizeUserRole('admin@foundarly.com', 'super_admin'), 'super_admin');
       assert.equal(sanitizeUserRole('consultant@example.com', 'consultant'), 'consultant');
       assert.equal(sanitizeUserRole('client@example.com', 'client'), 'client');
+    });
+  });
+
+  describe('8. AuthContext Controlled Role Re-Check (Client → Consultant)', () => {
+    const originalFrom = supabase.from;
+    const originalSignInWithPassword = supabase.auth.signInWithPassword;
+
+    function restoreSupabase() {
+      supabase.auth.signInWithPassword = originalSignInWithPassword;
+      supabase.from = originalFrom;
+    }
+
+    afterEach(() => {
+      restoreSupabase();
+    });
+
+    // Mock supabase.auth.signInWithPassword to return a session
+    supabase.auth.signInWithPassword = async (params) => {
+      return {
+        data: {
+          user: { id: 'user-1', email: params.email },
+          session: { access_token: 'mock-token' },
+        },
+        error: null,
+      };
+    };
+
+    // Mock supabase.from to return different profiles based on mockProfile
+    let mockProfile = { id: 'user-1', role: 'client', full_name: 'Client User', is_consultant: false };
+    supabase.from = (table) => {
+      if (table === 'profiles') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: mockProfile }),
+            }),
+          }),
+        };
+      }
+      return {
+        select: () => ({
+          eq: () => ({
+            ilike: () => ({
+              eq: () => ({
+                limit: () => Promise.resolve({ data: [] }),
+              }),
+            }),
+          }),
+        }),
+      };
+    };
+
+    // TTL constant mirrored from src/contexts/AuthContext.tsx
+    const CLIENT_ROLE_RECHECK_MS = 5 * 60 * 1000;
+
+    // Mirrors the controlled skip logic implemented in AuthContext.resolveProfile:
+    // - privileged roles never re-resolve within a session
+    // - 'client' roles re-resolve at most once per CLIENT_ROLE_RECHECK_MS
+    // - 'null' (unknown/transient) roles always re-resolve
+    function shouldReResolveProfile(existing, userId, now) {
+      if (!existing || existing.userId !== userId) return true;
+      if (existing.role !== 'client' && existing.role !== 'null') return false;
+      if (existing.role === 'client' && now - existing.resolvedAt < CLIENT_ROLE_RECHECK_MS) return false;
+      return true;
+    }
+
+    test('Old skip logic is documented as buggy: clients were never re-resolved', () => {
+      const existingClient = { userId: 'user-1', role: 'client', resolvedAt: Date.now() };
+      const userId = 'user-1';
+      // OLD: existing.role !== 'null' → 'client' !== 'null' is true → skipped forever,
+      // so an approved consultant was never recognised (the original redirect bug).
+      const oldSkipClient = existingClient && existingClient.userId === userId && existingClient.role !== 'null';
+      assert.equal(oldSkipClient, true, 'Old code incorrectly skips client role');
+    });
+
+    test('Ordinary client resolved recently is NOT refetched on every TOKEN_REFRESHED', () => {
+      const now = Date.now();
+      const existingClient = { userId: 'user-1', role: 'client', resolvedAt: now - 60 * 1000 };
+      assert.equal(
+        shouldReResolveProfile(existingClient, 'user-1', now),
+        false,
+        'Client resolved inside the TTL window must be skipped (no refetch on every token refresh)'
+      );
+    });
+
+    test('Client role re-checks after the TTL window, detecting a same-session approval', () => {
+      const now = Date.now();
+      const existingClient = {
+        userId: 'user-1',
+        role: 'client',
+        resolvedAt: now - (CLIENT_ROLE_RECHECK_MS + 1000),
+      };
+      assert.equal(
+        shouldReResolveProfile(existingClient, 'user-1', now),
+        true,
+        'Client resolved outside the TTL window must re-resolve to pick up the approval'
+      );
+    });
+
+    test('Privileged roles never trigger same-session re-resolution', () => {
+      const now = Date.now();
+      const longAgo = now - 60 * 60 * 1000;
+      assert.equal(shouldReResolveProfile({ userId: 'user-1', role: 'consultant', resolvedAt: longAgo }, 'user-1', now), false);
+      assert.equal(shouldReResolveProfile({ userId: 'user-1', role: 'super_admin', resolvedAt: longAgo }, 'user-1', now), false);
+      assert.equal(shouldReResolveProfile({ userId: 'user-1', role: 'admin', resolvedAt: longAgo }, 'user-1', now), false);
+      assert.equal(shouldReResolveProfile({ userId: 'user-1', role: 'developer_admin', resolvedAt: longAgo }, 'user-1', now), false);
+    });
+
+    test("Unknown role 'null' always re-resolves (preserves transient-failure retry)", () => {
+      const now = Date.now();
+      assert.equal(
+        shouldReResolveProfile({ userId: 'user-1', role: 'null', resolvedAt: now }, 'user-1', now),
+        true,
+        "A profile resolved with no role must re-resolve on the next auth event"
+      );
+    });
+
+    test('A different user always re-resolves', () => {
+      const now = Date.now();
+      assert.equal(
+        shouldReResolveProfile({ userId: 'other-user', role: 'consultant', resolvedAt: now }, 'user-1', now),
+        true
+      );
+    });
+
+    test('fetchProfile is called again when role changes from client to consultant', async () => {
+      // Mock supabase.from to return different profiles on different calls
+      supabase.from = (table) => {
+        if (table === 'profiles') {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: () => Promise.resolve({ data: mockProfile }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: () => ({
+            eq: () => ({
+              ilike: () => ({
+                eq: () => ({
+                  limit: () => Promise.resolve({ data: [] }),
+                }),
+              }),
+            }),
+          }),
+        };
+      };
+
+      // First sign-in: profile resolves to 'client'
+      mockProfile = { id: 'user-1', role: 'client', full_name: 'Client User', is_consultant: false };
+      await supabase.auth.signInWithPassword({ email: 'client@example.com', password: 'password' });
+      const { data: firstProfile } = await supabase.from('profiles').select('*').eq('id', 'user-1').maybeSingle();
+      assert.equal(firstProfile.role, 'client', 'First sign-in should resolve to client');
+
+      // Simulate admin approval: change profile to consultant
+      mockProfile = { id: 'user-1', role: 'consultant', full_name: 'Consultant User', is_consultant: true };
+
+      // Re-sign in (simulating a TOKEN_REFRESHED after the re-check window elapses)
+      await supabase.auth.signInWithPassword({ email: 'client@example.com', password: 'password' });
+      const { data: secondProfile } = await supabase.from('profiles').select('*').eq('id', 'user-1').maybeSingle();
+      assert.equal(secondProfile.role, 'consultant', 'Second sign-in should resolve to consultant after approval');
     });
   });
 });

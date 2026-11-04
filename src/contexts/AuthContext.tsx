@@ -100,23 +100,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const initialSession = getStoredSession();
   const [session, setSession] = useState<Session | null>(initialSession);
   const [user, setUser] = useState<User | null>(initialSession?.user || null);
-  const [profile, setProfile] = useState<Profile | null>(() => {
-    if (initialSession?.user?.id) {
-      const cached = getCachedProfile(initialSession.user.id);
-      if (cached) return cached;
-      const uEmail = (initialSession.user.email || '').toLowerCase().trim();
-      if (isAllowedAdminEmail(uEmail)) {
-        return {
-          id: initialSession.user.id,
-          role: 'super_admin',
-          full_name: initialSession.user.user_metadata?.full_name || 'Super Admin',
-          is_consultant: false,
-        };
-      }
-    }
-    return null;
-  });
-  const [loading, setLoading] = useState<boolean>(!initialSession);
+  // NOTE: Do NOT seed profile from the localStorage cache here. A cached Client
+  // profile would be applied synchronously on the first render and could cause
+  // ProtectedRoute to redirect an approved Consultant to /my-bookings before the
+  // authoritative role fetch (profiles table + /api/consultant/me) completes.
+  // The profile is resolved asynchronously in the mount effect below.
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
 
   // Active references to prevent stale asynchronous operations from clobbering state
   const activeUserRef = useRef<User | null>(initialSession?.user || null);
@@ -142,12 +132,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // ignore
     }
 
-    // Refresh profile in background if session was immediately restored from storage
-    if (activeUserRef.current) {
-      fetchProfile(activeUserRef.current.id, activeUserRef.current).catch((err) => {
-        console.warn('[AuthContext] Initial profile fetch notice:', err);
-      });
-    }
+    // Authoritatively resolve the user's profile (profiles table + /api/consultant/me).
+    // The localStorage cache is only ever a fallback when the authoritative fetch
+    // fails — it is never applied before the fresh fetch completes. This prevents an
+    // approved Consultant from being routed to /my-bookings based on a stale cached
+    // Client profile while the Consultant role is still being resolved.
+    const resolveProfile = async (userId: string, currentUser: User | null) => {
+      try {
+        // fetchProfile writes the resolved profile into React state + cache internally.
+        await fetchProfile(userId, currentUser);
+      } catch (err) {
+        console.warn('[AuthContext] Authoritative profile resolution failed:', err);
+        const cached = getCachedProfile(userId);
+        if (cached) setProfile(cached);
+      }
+    };
 
     // Step 1: Listen for persistent auth state changes from Supabase
     const {
@@ -170,30 +169,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
         if (currentSession?.user) {
           applyAuth(currentSession, currentSession.user);
-          const cached = getCachedProfile(currentSession.user.id);
-          if (cached) {
-            setProfile(cached);
-          }
-          setLoading(false);
-          await fetchProfile(currentSession.user.id, currentSession.user).catch(() => {});
+          setLoading(true);
+          await resolveProfile(currentSession.user.id, currentSession.user);
         }
+        setLoading(false);
         return;
       }
 
       if (event === 'INITIAL_SESSION') {
         if (currentSession?.user) {
           applyAuth(currentSession, currentSession.user);
-          const cached = getCachedProfile(currentSession.user.id);
-          if (cached) {
-            setProfile(cached);
-          }
-          setLoading(false);
-          await fetchProfile(currentSession.user.id, currentSession.user).catch(() => {});
+          setLoading(true);
+          await resolveProfile(currentSession.user.id, currentSession.user);
         } else {
           // Non-destructive fallback: Only clear if no stored session or active user exists
           const stored = getStoredSession();
           if (stored?.user) {
             applyAuth(stored, stored.user);
+            setLoading(true);
+            await resolveProfile(stored.user.id, stored.user);
           } else if (!activeUserRef.current) {
             applyAuth(null, null);
             setProfile(null);
@@ -204,16 +198,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     // Step 2: Authoritative session check via getSession without destructive racing
-    supabase.auth.getSession().then(({ data, error }) => {
+    supabase.auth.getSession().then(async ({ data, error }) => {
       if (!isMountedRef.current) return;
       if (error) {
         console.warn('[AuthContext] getSession notice:', error.message);
       }
       if (data?.session?.user) {
         applyAuth(data.session, data.session.user);
-        const cached = getCachedProfile(data.session.user.id);
-        if (cached) setProfile(cached);
-        fetchProfile(data.session.user.id, data.session.user).catch(() => {});
+        setLoading(true);
+        await resolveProfile(data.session.user.id, data.session.user);
       } else {
         // Non-destructive: check storage and active ref before clearing
         const stored = getStoredSession();
@@ -228,9 +221,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     });
 
-    // Safety timeout: loading will never block the UI past 1200ms
+    // Safety timeout: loading will never block the UI past 1200ms, but only when no
+    // authoritative profile fetch is in flight so we never render with a stale /
+    // unresolved role.
     const safetyTimer = setTimeout(() => {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && inFlightFetchRef.current.size === 0) {
         setLoading(false);
       }
     }, 1200);

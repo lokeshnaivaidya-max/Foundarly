@@ -27,6 +27,8 @@ export default function ProtectedRoute({
     return <PageLoader text="Authenticating..." />;
   }
 
+  const userRole = getUserEffectiveRole(user, profile);
+
   // Not authenticated at all
   if (!user) {
     if (requireAdmin || requireSuperAdmin) {
@@ -82,7 +84,11 @@ export default function ProtectedRoute({
         );
       }
 
-      // Non-admin user attempting access
+      // Non-admin user attempting access: route Consultants to their dashboard,
+      // not to the Client /my-bookings page.
+      if (userRole === 'consultant') {
+        return <Navigate to="/consultant/dashboard" replace />;
+      }
       return <Navigate to="/my-bookings" replace state={{ accessDenied: true, from: location }} />;
     }
     return <>{children}</>;
@@ -91,6 +97,10 @@ export default function ProtectedRoute({
   // 2. General Admin requirement (Super Admin or Developer Admin)
   if (requireAdmin) {
     if (!effectiveIsAdmin) {
+      // Route Consultants to their dashboard instead of the Client /my-bookings page
+      if (userRole === 'consultant') {
+        return <Navigate to="/consultant/dashboard" replace />;
+      }
       return <Navigate to="/my-bookings" replace state={{ accessDenied: true, from: location }} />;
     }
     return <>{children}</>;

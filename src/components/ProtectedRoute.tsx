@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { isUserAdmin, isSuperAdmin, UserRole, getUserEffectiveRole } from '@/lib/authorization';
@@ -22,8 +23,16 @@ export default function ProtectedRoute({
   const { user, profile, isAdmin, isSuperAdmin: authIsSuperAdmin, loading } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const [authTimedOut, setAuthTimedOut] = useState(false);
 
-  if (loading) {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAuthTimedOut(true);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading && !authTimedOut) {
     return <PageLoader text="Authenticating..." />;
   }
 

@@ -1,11 +1,28 @@
-<svg xmlns='http://www.w3.org/2000/svg' width='600' height='150' viewBox='0 0 600 150'>
+<svg xmlns="http://www.w3.org/2000/svg" width="340" height="72" viewBox="0 0 340 72" fill="none">
   <defs>
-    <linearGradient id='gold' x1='0%' y1='0%' x2='100%' y2='100%'>
-      <stop offset='0%' stop-color='#F5A623'/>
-      <stop offset='60%' stop-color='#D48812'/>
-      <stop offset='100%' stop-color='#B45309'/>
+    <linearGradient id="foundarly_gold_emblem" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F5A623"/>
+      <stop offset="100%" stop-color="#D48812"/>
+    </linearGradient>
+    <linearGradient id="foundarly_gold_text" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F5A623"/>
+      <stop offset="60%" stop-color="#D48812"/>
+      <stop offset="100%" stop-color="#B45309"/>
     </linearGradient>
   </defs>
-  <text x='50%' y='95' font-family='serif' font-size='74' font-weight='800' fill='url(#gold)' text-anchor='middle' letter-spacing='-1'>Foundarly</text>
-  <text x='50%' y='130' font-family='sans-serif' font-size='15' font-weight='700' fill='#94A3B8' text-anchor='middle' letter-spacing='5'>BUSINESS WORLD</text>
+
+  <!-- Official Foundarly Stylized F Emblem (56x56) -->
+  <g transform="translate(6, 8)">
+    <rect width="56" height="56" rx="14" fill="#0C0C0E"/>
+    <rect x="2.5" y="2.5" width="51" height="51" rx="11.5" fill="none" stroke="#F5A623" stroke-width="1.2" stroke-opacity="0.35"/>
+    <g transform="translate(0, 0) scale(0.109375)">
+      <!-- Stylized "F" -->
+      <path d="M 160 120 L 350 120 C 365 120 375 132 375 146 C 375 160 365 172 350 172 L 230 172 L 230 230 L 320 230 C 335 230 345 242 345 256 C 345 270 335 282 320 282 L 230 282 L 230 392 C 230 406 218 418 204 418 C 190 418 178 406 178 392 L 178 138 C 178 128 168 120 160 120 Z" fill="url(#foundarly_gold_emblem)"/>
+      <circle cx="360" cy="370" r="24" fill="#F5A623"/>
+    </g>
+  </g>
+
+  <!-- Official Foundarly Wordmark & Subtitle -->
+  <text x="76" y="42" font-family="'Playfair Display', Georgia, serif" font-size="31" font-weight="700" fill="url(#foundarly_gold_text)" letter-spacing="-0.3">Foundarly</text>
+  <text x="78" y="58" font-family="'Inter', -apple-system, sans-serif" font-size="8.5" font-weight="700" fill="#94A3B8" letter-spacing="3.2">BUSINESS WORLD</text>
 </svg>

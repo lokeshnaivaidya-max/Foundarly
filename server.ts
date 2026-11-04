@@ -163,6 +163,18 @@ async function requireAdminAuth(req: express.Request, res: express.Response, nex
       .maybeSingle();
 
     if (!profile) {
+      if (isAllowedAdminEmail(userEmail)) {
+        const autoProfile = {
+          id: user.id,
+          role: "super_admin",
+          full_name: user.user_metadata?.full_name || "Super Admin",
+        };
+        supabaseAdminClient.from("profiles").upsert(autoProfile).then();
+        (req as any).adminUser = user;
+        (req as any).adminProfile = autoProfile;
+        (req as any).isSuperAdmin = true;
+        return next();
+      }
       return res.status(403).json({
         success: false,
         error: "Forbidden: User profile not found.",
@@ -172,6 +184,8 @@ async function requireAdminAuth(req: express.Request, res: express.Response, nex
     const isSuper = profile.role === "super_admin" || isAllowedAdminEmail(userEmail);
     const isDev = profile.role === "developer_admin" || userEmail === "foundarly@developer.in";
     const isAdmin = profile.role === "admin" || isSuper || isDev;
+
+    (req as any).isSuperAdmin = isSuper;
 
     if (!isAdmin) {
       console.warn(`[Security Alert] Non-admin user (${userEmail}) attempted to access protected endpoint: ${req.originalUrl}`);
@@ -2389,6 +2403,90 @@ async function startServer() {
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message, consultants: [] });
+    }
+  });
+
+  // Consultant Application Submission Endpoint (Authoritative Server API)
+  app.post("/api/consultant-applications", async (req, res) => {
+    try {
+      const {
+        name,
+        email,
+        phone,
+        whatsapp,
+        age,
+        gender,
+        qualification,
+        current_job,
+        location,
+        experience,
+        preferred_session_timing,
+        linkedin_url,
+      } = req.body || {};
+
+      if (!name || !email || !phone) {
+        return res.status(400).json({
+          success: false,
+          error: "Full name, email address, and phone number are required.",
+        });
+      }
+
+      if (!preferred_session_timing) {
+        return res.status(400).json({
+          success: false,
+          error: "Preferred session timing is required.",
+        });
+      }
+
+      const parsedAge = parseInt(String(age || "25"), 10) || 25;
+      const normalizedEmail = String(email).trim().toLowerCase();
+
+      const applicationPayload = {
+        name: String(name).trim(),
+        email: normalizedEmail,
+        phone: String(phone).trim(),
+        whatsapp: whatsapp ? String(whatsapp).trim() : String(phone).trim(),
+        age: parsedAge,
+        gender: gender === "female" ? "female" : "male",
+        qualification: qualification ? String(qualification).trim() : "",
+        current_job: current_job ? String(current_job).trim() : "",
+        location: location ? String(location).trim() : "",
+        experience: experience ? String(experience).trim() : "",
+        preferred_session_timing: String(preferred_session_timing).trim(),
+        linkedin_url: linkedin_url ? String(linkedin_url).trim() : null,
+        status: "pending",
+        created_at: new Date().toISOString(),
+      };
+
+      const insertPromise = supabaseAdminClient
+        .from("consultant_applications")
+        .insert(applicationPayload);
+
+      const timeoutPromise = new Promise<{ error: Error }>((resolve) =>
+        setTimeout(() => resolve({ error: new Error("Database operation timed out") }), 5000)
+      );
+
+      const { error } = (await Promise.race([insertPromise, timeoutPromise])) as any;
+
+      if (error) {
+        console.error("[Consultant Application] DB insertion error:", error.message || error);
+        return res.status(500).json({
+          success: false,
+          error: error.message || "Failed to submit consultant application.",
+        });
+      }
+
+      console.log(`[Consultant Application] Successfully submitted application for ${normalizedEmail}`);
+      return res.status(201).json({
+        success: true,
+        message: "Application submitted successfully.",
+      });
+    } catch (err: any) {
+      console.error("[Consultant Application] Unexpected error:", err);
+      return res.status(500).json({
+        success: false,
+        error: err.message || "An unexpected error occurred while submitting your application.",
+      });
     }
   });
 

@@ -27,10 +27,7 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import type { Database } from "@/lib/database.types";
 
 type Consultant = Database['public']['Tables']['consultants']['Row'];
-
-const getDefaultAvatar = (gender?: string) => {
-  return gender === 'female' ? '/female-default.jpg' : '/male-default.png';
-};
+import { getConsultantAvatar, handleImageFallback } from "@/utils/avatar";
 
 export default function AdminConsultants() {
   const { toast } = useToast();
@@ -374,16 +371,10 @@ export default function AdminConsultants() {
                     <TableCell className="font-medium text-sm px-4 py-3 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <img
-                          src={c.image_url || getDefaultAvatar(c.gender)}
+                          src={getConsultantAvatar(c.image_url, c.gender)}
                           alt={c.name}
                           className="w-8 h-8 rounded-full object-cover border border-border shrink-0"
-                          onError={(e) => {
-                            const target = e.currentTarget as HTMLImageElement;
-                            const fallback = getDefaultAvatar(c.gender);
-                            if (!target.src.endsWith(fallback)) {
-                              target.src = fallback;
-                            }
-                          }}
+                          onError={(e) => handleImageFallback(e, c.gender)}
                         />
                         {c.name}
                       </div>
@@ -449,19 +440,12 @@ export default function AdminConsultants() {
           {filtered.map((c) => (
             <div key={c.id} className="bg-card border border-border rounded-lg p-5 hover:shadow-lg transition-all duration-200 hover:-translate-y-0.5">
               <div className="flex items-start justify-between mb-3">
-                {c.image_url ? (
-                  <img
-                    src={c.image_url}
-                    alt={c.name}
-                    className="w-10 h-10 rounded-full object-cover border border-border"
-                  />
-                ) : (
-                  <img
-                    src={getDefaultAvatar(c.gender)}
-                    alt={c.name}
-                    className="w-10 h-10 rounded-full object-cover border border-border"
-                  />
-                )}
+                <img
+                  src={getConsultantAvatar(c.image_url, c.gender)}
+                  alt={c.name}
+                  className="w-10 h-10 rounded-full object-cover border border-border"
+                  onError={(e) => handleImageFallback(e, c.gender)}
+                />
                 <button
                   type="button"
                   onClick={() => toggleActiveStatus(c)}
@@ -683,6 +667,7 @@ export default function AdminConsultants() {
                     src={imagePreview} 
                     alt="Preview" 
                     className="h-24 w-24 object-cover rounded-lg border border-border"
+                    onError={(e) => handleImageFallback(e, form.gender)}
                   />
                   <button
                     onClick={handleRemoveImage}

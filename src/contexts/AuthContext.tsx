@@ -28,7 +28,12 @@ interface AuthContextType {
     session?: Session | null;
     emailConfirmationRequired?: boolean;
   }>;
-  signIn: (email: string, password: string) => Promise<{ error: AuthError | null; profile: Profile | null }>;
+  signIn: (email: string, password: string) => Promise<{
+    error: AuthError | null;
+    user?: User | null;
+    session?: Session | null;
+    profile: Profile | null;
+  }>;
   signInWithGoogle: () => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
@@ -91,12 +96,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // ignore
     }
 
-    // Step 1: Authoritative initial session retrieval with token refresh support
+    // Hard safety timeout: Auth loading can never block the app for more than 1800ms
+    const safetyTimer = setTimeout(() => {
+      if (isMountedRef.current && !initialResolvedRef.current) {
+        initialResolvedRef.current = true;
+        setLoading(false);
+      }
+    }, 1800);
+
+    // Step 1: Authoritative initial session retrieval with fast timeout protection
     const initializeAuth = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise<{ data: { session: null }; error: null }>((resolve) =>
+          setTimeout(() => resolve({ data: { session: null }, error: null }), 1400)
+        );
+
+        const { data, error } = await Promise.race([sessionPromise, timeoutPromise]);
         if (error) {
-          console.warn('[AuthContext] getSession notice:', error.message);
+          console.warn('[AuthContext] getSession notice:', (error as any)?.message);
         }
 
         if (!isMountedRef.current) return;
@@ -110,10 +128,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const cached = getCachedProfile(initialSession.user.id);
           if (cached) {
             setProfile(cached);
+          } else {
+            // Immediate allowlist grant for admins
+            const uEmail = (initialSession.user.email || '').toLowerCase().trim();
+            if (isAllowedAdminEmail(uEmail)) {
+              const instantAdminProfile: Profile = {
+                id: initialSession.user.id,
+                role: 'super_admin',
+                full_name: initialSession.user.user_metadata?.full_name || 'Super Admin',
+                is_consultant: false,
+              };
+              setProfile(instantAdminProfile);
+            }
           }
 
-          // Authoritatively fetch fresh profile from DB
-          await fetchProfile(initialSession.user.id, initialSession.user);
+          // Unblock loading state IMMEDIATELY so /admin and routes render instantly without waiting on network queries
+          initialResolvedRef.current = true;
+          setLoading(false);
+
+          // Authoritatively refresh fresh profile in background
+          fetchProfile(initialSession.user.id, initialSession.user).then();
+          return;
         } else {
           setSession(null);
           setUser(null);
@@ -183,6 +218,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       isMountedRef.current = false;
+      clearTimeout(safetyTimer);
       subscription.unsubscribe();
     };
   }, []);
@@ -453,17 +489,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (error) {
-      return { error, profile: null };
+      return { error, user: null, session: null, profile: null };
     }
 
     if (data?.user) {
       if (data.session) setSession(data.session);
       setUser(data.user);
       const userProfile = await fetchProfile(data.user.id, data.user);
-      return { error: null, profile: userProfile };
+      return { error: null, user: data.user, session: data.session || null, profile: userProfile };
     }
 
-    return { error, profile: null };
+    return { error, user: null, session: null, profile: null };
   };
 
   const signInWithGoogle = async () => {

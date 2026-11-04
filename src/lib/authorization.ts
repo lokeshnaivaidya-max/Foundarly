@@ -81,14 +81,12 @@ export function isSuperAdmin(
   profile?: Profile | null
 ): boolean {
   if (profile?.role === 'developer_admin') return false;
-  if (!user || !user.email) {
-    return profile?.role === 'super_admin';
+  if (user?.email) {
+    const email = user.email.toLowerCase().trim();
+    if (email === 'foundarly@developer.in') return false;
+    if (isAllowedAdminEmail(email)) return true;
   }
-  const email = user.email.toLowerCase().trim();
-  if (email === 'foundarly@developer.in') return false;
-  const hasAllowlistedEmail = isAllowedAdminEmail(user.email);
-  const hasSuperRole = profile?.role === 'super_admin' || profile?.role === 'admin' || !profile?.role;
-  return hasAllowlistedEmail && hasSuperRole;
+  return profile?.role === 'super_admin';
 }
 
 /**

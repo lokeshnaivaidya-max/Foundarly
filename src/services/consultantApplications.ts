@@ -49,9 +49,46 @@ export const consultantApplicationsService = {
   },
 
   async create(application: ConsultantApplicationInsert) {
-    const { error } = await supabase
+    // 1. Try authoritative server API first
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch('/api/consultant-applications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(application),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const json = await res.json().catch(() => null);
+        if (json?.success) {
+          return json;
+        }
+      } else {
+        const errJson = await res.json().catch(() => null);
+        if (errJson?.error) {
+          throw new Error(errJson.error);
+        }
+      }
+    } catch (apiErr: any) {
+      if (apiErr?.message && !apiErr.message.includes('fetch') && !apiErr.message.includes('abort')) {
+        throw apiErr;
+      }
+      console.warn('[consultantApplicationsService] Server API notice, falling back to direct DB insert:', apiErr?.message);
+    }
+
+    // 2. Fallback to direct Supabase client insert with a strict timeout race
+    const dbPromise = supabase
       .from('consultant_applications')
       .insert(application);
+
+    const timeoutPromise = new Promise<{ error: Error }>((resolve) =>
+      setTimeout(() => resolve({ error: new Error('Submission timed out. Please check your network and try again.') }), 6000)
+    );
+
+    const { error } = (await Promise.race([dbPromise, timeoutPromise])) as any;
 
     if (error) {
       console.error('Supabase error creating consultant_application:', {

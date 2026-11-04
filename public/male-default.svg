@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="maleBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E293B"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+    <linearGradient id="goldAccent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE68A"/>
+      <stop offset="50%" stop-color="#F5A623"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+    <linearGradient id="suitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#334155"/>
+      <stop offset="100%" stop-color="#1E293B"/>
+    </linearGradient>
+  </defs>
+  <!-- Background Circle -->
+  <circle cx="100" cy="100" r="98" fill="url(#maleBg)" stroke="url(#goldAccent)" stroke-width="3"/>
+  <circle cx="100" cy="100" r="92" fill="none" stroke="#F5A623" stroke-width="1" stroke-opacity="0.3"/>
+  
+  <!-- Male Consultant Silhouette -->
+  <!-- Suit / Body -->
+  <path d="M 40 185 C 40 145 65 130 85 125 L 85 140 L 100 152 L 115 140 L 115 125 C 135 130 160 145 160 185 Z" fill="url(#suitGrad)"/>
+  <!-- Shirt V-neck -->
+  <polygon points="88,125 100,146 112,125" fill="#F8FAFC"/>
+  <!-- Gold Tie -->
+  <polygon points="97,132 103,132 105,165 100,172 95,165" fill="url(#goldAccent)"/>
+  <!-- Neck -->
+  <rect x="91" y="105" width="18" height="22" rx="4" fill="#E2E8F0"/>
+  <!-- Head -->
+  <ellipse cx="100" cy="80" rx="26" ry="30" fill="#E2E8F0"/>
+  <!-- Hair -->
+  <path d="M 72 75 C 72 52 82 46 100 46 C 118 46 128 52 128 75 C 124 64 114 58 100 58 C 86 58 76 64 72 75 Z" fill="#1E293B"/>
+</svg>

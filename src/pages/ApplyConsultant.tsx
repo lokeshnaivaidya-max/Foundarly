@@ -38,10 +38,19 @@ export default function ApplyConsultant() {
     e.preventDefault();
 
     // Validation
-    if (!formData.name || !formData.email || !formData.phone) {
+    if (!formData.name?.trim() || !formData.email?.trim() || !formData.phone?.trim()) {
       toast({
         title: 'Validation Error',
-        description: 'Please fill in all required fields',
+        description: 'Please fill in all required fields (Name, Email, Phone)',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    if (!formData.age || isNaN(parseInt(formData.age, 10)) || parseInt(formData.age, 10) < 18) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please enter a valid age (18 or older)',
         variant: 'destructive'
       });
       return;
@@ -58,9 +67,20 @@ export default function ApplyConsultant() {
 
     setLoading(true);
     try {
+      const parsedAge = parseInt(String(formData.age).trim(), 10) || 25;
       await consultantApplicationsService.create({
-        ...formData,
-        age: parseInt(formData.age)
+        name: formData.name.trim(),
+        email: formData.email.trim().toLowerCase(),
+        phone: formData.phone.trim(),
+        whatsapp: (formData.whatsapp || formData.phone).trim(),
+        age: parsedAge,
+        gender: formData.gender,
+        qualification: (formData.qualification || '').trim(),
+        current_job: (formData.current_job || '').trim(),
+        location: (formData.location || '').trim(),
+        experience: (formData.experience || '').trim(),
+        preferred_session_timing: formData.preferred_session_timing.trim(),
+        linkedin_url: formData.linkedin_url ? formData.linkedin_url.trim() : null,
       });
 
       setSubmitted(true);
@@ -71,8 +91,8 @@ export default function ApplyConsultant() {
     } catch (error: any) {
       console.error('Error submitting application:', error?.message || error?.code || JSON.stringify(error));
       toast({
-        title: 'Error',
-        description: error?.message || 'Failed to submit application. Please try again.',
+        title: 'Submission Error',
+        description: error?.message || 'Failed to submit application. Please check your details and try again.',
         variant: 'destructive'
       });
     } finally {

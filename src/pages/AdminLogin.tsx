@@ -47,20 +47,21 @@ export default function AdminLoginPage() {
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
-      const { error: signInError, profile: userProfile } = await signIn(normalizedEmail, password);
+      const { error: signInError, user: signedInUser, profile: userProfile } = await signIn(normalizedEmail, password);
 
       if (signInError) {
         setError(signInError.message || "Invalid email or password.");
         return;
       }
 
+      const effectiveUser = signedInUser || user;
       const activeProfile = userProfile || profile;
-      if (!isUserAdmin(user, activeProfile)) {
+      if (!isUserAdmin(effectiveUser, activeProfile)) {
         setError("Access denied: You do not possess verified administrator privileges.");
         return;
       }
 
-      if (isDeveloperAdmin(user, activeProfile)) {
+      if (isDeveloperAdmin(effectiveUser, activeProfile)) {
         toast.success("Successfully authenticated as Developer Admin");
         const fromPath = (location.state as any)?.from?.pathname;
         const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';

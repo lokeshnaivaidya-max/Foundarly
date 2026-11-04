@@ -77,7 +77,7 @@ describe('Foundarly Email Notification System & Link Verification Suite', () => 
   test('1. Website Branding, Palette & Logo Consistency Across Templates', () => {
     assert.equal(FOUNDARLY_BRAND.name, 'Foundarly');
     assert.equal(FOUNDARLY_BRAND.domain, 'https://www.foundarlybusinessworld.in');
-    assert.equal(FOUNDARLY_BRAND.logoUrl, 'https://www.foundarlybusinessworld.in/logo.png');
+    assert.equal(FOUNDARLY_BRAND.logoUrl, 'https://www.foundarlybusinessworld.in/brand/foundarly-official-logo-4a1d5c88.jpg');
     assert.equal(FOUNDARLY_BRAND.supportEmail, 'hello@foundarlybusinessworld.in');
 
     const clientHtml = generateUserEmailHTML(baseBookingData);

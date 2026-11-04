@@ -6,6 +6,7 @@ import { bookingsService } from "@/services/bookings";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SEO } from "@/components/SEO";
+import { OFFICIAL_LOGO_URL, OFFICIAL_LOGO_ALT } from "@/lib/brand";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Video, VideoOff, Mic, MicOff, PhoneOff, Monitor, MonitorOff, User, Clock, ArrowLeft, AlertCircle, Copy, Check, Link2, Maximize, Minimize, Settings, Users, X, Calendar, RotateCcw, ShieldAlert, AlertTriangle, Bell, CheckCircle, MessageSquare, Disc, CircleDot, StopCircle, Pause, Play, Download } from "lucide-react";
@@ -1096,7 +1097,13 @@ export default function MeetingPage() {
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
           <div className="h-5 w-px bg-border hidden sm:block" />
-          <span className="font-display font-bold text-gradient-gold text-lg hidden sm:inline">Foundarly</span>
+          <img
+            src={OFFICIAL_LOGO_URL}
+            alt={OFFICIAL_LOGO_ALT}
+            className="h-9 w-auto max-w-[170px] object-contain rounded-sm hidden sm:block"
+            loading="eager"
+            decoding="async"
+          />
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2 text-sm">

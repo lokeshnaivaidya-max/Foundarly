@@ -1,4 +1,5 @@
 import { Helmet } from 'react-helmet-async';
+import { OFFICIAL_LOGO_URL } from '@/lib/brand';
 
 interface SEOProps {
   title?: string;
@@ -95,7 +96,7 @@ export const HomeSEO = () => (
       "@type": "Organization",
       "name": "foundarly",
       "url": "https://www.foundarlybusinessworld.in",
-      "logo": "https://www.foundarlybusinessworld.in/logo.png",
+      "logo": `https://www.foundarlybusinessworld.in${OFFICIAL_LOGO_URL}`,
       "description": "Expert business consultation and professional consulting services",
       "sameAs": [
         "https://twitter.com/foundarly",

@@ -14,14 +14,11 @@ describe('Production Bug Fixes Validation Suite', () => {
     );
   });
 
-  it('2. Default site_logo_url points to crisp official vector logo', async () => {
+  it('2. Default site_logo_url points to the official content-hashed logo', async () => {
     const { settingsService } = await import('../src/services/settings.js');
     const logoSetting = await settingsService.getBySetting('site_logo_url');
     assert.ok(logoSetting);
-    assert.ok(
-      logoSetting.setting_value?.includes('/logo.svg') ||
-      logoSetting.setting_value?.includes('/foundarly-logo.png')
-    );
+    assert.equal(logoSetting.setting_value, '/brand/foundarly-official-logo-4a1d5c88.jpg');
   });
 
   it('3. Consultant role detection preserves consultant status and does not demote to client', async () => {

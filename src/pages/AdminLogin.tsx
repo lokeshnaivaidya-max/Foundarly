@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { isUserAdmin, isSuperAdmin, isDeveloperAdmin } from "@/lib/authorization";
 import { toast } from "sonner";
 import { ArrowLeft, Eye, EyeOff, Lock, Mail, ShieldCheck } from "lucide-react";
+import { OFFICIAL_LOGO_URL, OFFICIAL_LOGO_ALT } from "@/lib/brand";
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -104,6 +105,13 @@ export default function AdminLoginPage() {
           </div>
 
           <div>
+            <img
+              src={OFFICIAL_LOGO_URL}
+              alt={OFFICIAL_LOGO_ALT}
+              className="h-16 w-auto object-contain rounded-md mb-3"
+              loading="eager"
+              decoding="async"
+            />
             <CardTitle className="font-display text-2xl tracking-tight">Admin Sign In</CardTitle>
             <CardDescription className="text-sm mt-1">
               Sign in with your Super Admin or Developer Admin credentials.

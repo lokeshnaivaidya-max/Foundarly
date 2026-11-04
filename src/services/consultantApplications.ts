@@ -5,18 +5,167 @@ type ConsultantApplication = Database['public']['Tables']['consultant_applicatio
 type ConsultantApplicationInsert = Database['public']['Tables']['consultant_applications']['Insert'];
 type ConsultantApplicationUpdate = Database['public']['Tables']['consultant_applications']['Update'];
 
+type ApplicationStatus = 'pending' | 'approved' | 'rejected';
+
+export class ConsultantApplicationError extends Error {
+  code: string;
+  status?: number;
+  requestId?: string;
+  issues?: Array<{ field: string; message: string }>;
+  retryable: boolean;
+
+  constructor(
+    message: string,
+    options: {
+      code: string;
+      status?: number;
+      requestId?: string;
+      issues?: Array<{ field: string; message: string }>;
+      retryable?: boolean;
+    },
+  ) {
+    super(message);
+    this.name = 'ConsultantApplicationError';
+    this.code = options.code;
+    this.status = options.status;
+    this.requestId = options.requestId;
+    this.issues = options.issues;
+    this.retryable = Boolean(options.retryable);
+  }
+}
+
+const SUBMIT_TIMEOUT_MS = 15_000;
+const ADMIN_TIMEOUT_MS = 20_000;
+
+function newRequestId(): string {
+  const maybeCrypto = globalThis.crypto as Crypto | undefined;
+  if (maybeCrypto && typeof maybeCrypto.randomUUID === 'function') {
+    return maybeCrypto.randomUUID();
+  }
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Stable fingerprint of the submitted payload. Used as the idempotency key so a
+ * retry after a network timeout (or an accidental double click) cannot create a
+ * second application record within the server's five-minute window.
+ */
+function applicationFingerprint(value: unknown): string {
+  const text = JSON.stringify(value);
+  let hash = 5381;
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) + hash) ^ text.charCodeAt(i);
+  }
+  return `application-${(hash >>> 0).toString(36)}`;
+}
+
+interface ApiErrorBody {
+  success?: boolean;
+  code?: string;
+  error?: string;
+  message?: string;
+  requestId?: string;
+  issues?: Array<{ field: string; message: string }>;
+  retryAfter?: number;
+}
+
+async function readResponseBody(res: Response): Promise<any> {
+  const text = await res.text().catch(() => '');
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text.slice(0, 500) };
+  }
+}
+
+function errorFromResponse(res: Response, body: ApiErrorBody | null, fallback: string): ConsultantApplicationError {
+  const requestId = body?.requestId;
+  const baseMessage = body?.error || body?.message || fallback;
+  const message =
+    requestId && !baseMessage.includes(requestId) ? `${baseMessage} (Reference: ${requestId})` : baseMessage;
+  return new ConsultantApplicationError(message, {
+    code: body?.code || `HTTP_${res.status}`,
+    status: res.status,
+    requestId,
+    issues: body?.issues,
+    retryable: res.status >= 500 || res.status === 429,
+  });
+}
+
+async function getAccessToken(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Admin endpoints are authoritative when deployed. The direct Supabase
+ * fallback exists only for environments where the serverless admin route is
+ * genuinely unavailable (404/405) or the deployment is missing server storage
+ * credentials (503). An authorization failure is never silently downgraded.
+ */
+function shouldFallBackToSupabase(error: ConsultantApplicationError): boolean {
+  return error.status === 404 || error.status === 405 || error.status === 503;
+}
+
 export const consultantApplicationsService = {
-  async getAll(status?: 'pending' | 'approved' | 'rejected') {
-    let query = supabase
+  async getAll(status?: ApplicationStatus) {
+    const token = await getAccessToken();
+    if (token) {
+      const requestId = newRequestId();
+      const query = status ? `?status=${encodeURIComponent(status)}` : '';
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), ADMIN_TIMEOUT_MS);
+        let res: Response;
+        try {
+          res = await fetch(`/api/admin/consultant-applications${query}`, {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              Authorization: `Bearer ${token}`,
+              'X-Request-Id': requestId,
+            },
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+
+        const body = await readResponseBody(res);
+        if (!res.ok) {
+          const error = errorFromResponse(res, body, 'Could not load consultant applications.');
+          if (!shouldFallBackToSupabase(error)) throw error;
+          console.warn('[consultantApplicationsService] Admin API unavailable, using Supabase fallback:', error.code);
+        } else {
+          return (body?.applications || []) as ConsultantApplication[];
+        }
+      } catch (error: any) {
+        if (error instanceof ConsultantApplicationError) {
+          if (!shouldFallBackToSupabase(error)) throw error;
+        } else if (error?.name !== 'AbortError') {
+          console.warn('[consultantApplicationsService] Admin API request failed, using Supabase fallback:', error?.message);
+        } else {
+          console.warn('[consultantApplicationsService] Admin API timed out, using Supabase fallback');
+        }
+      }
+    }
+
+    let dbQuery = supabase
       .from('consultant_applications')
       .select('*')
       .order('created_at', { ascending: false });
 
     if (status) {
-      query = query.eq('status', status);
+      dbQuery = dbQuery.eq('status', status);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await dbQuery;
     if (error) {
       console.error('Supabase error fetching consultant_applications:', {
         message: error.message,
@@ -24,12 +173,51 @@ export const consultantApplicationsService = {
         details: error.details,
         hint: error.hint,
       });
-      throw error;
+      throw new ConsultantApplicationError(error.message, {
+        code: error.code || 'SUPABASE_READ_ERROR',
+        retryable: true,
+      });
     }
     return data as ConsultantApplication[];
   },
 
   async getById(id: string) {
+    const token = await getAccessToken();
+    if (token) {
+      const requestId = newRequestId();
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), ADMIN_TIMEOUT_MS);
+        let res: Response;
+        try {
+          res = await fetch(`/api/admin/consultant-applications?id=${encodeURIComponent(id)}`, {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              Authorization: `Bearer ${token}`,
+              'X-Request-Id': requestId,
+            },
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+
+        const body = await readResponseBody(res);
+        if (!res.ok) {
+          const error = errorFromResponse(res, body, 'Could not load the consultant application.');
+          if (!shouldFallBackToSupabase(error)) throw error;
+        } else {
+          return (body?.application || null) as ConsultantApplication | null;
+        }
+      } catch (error: any) {
+        if (error instanceof ConsultantApplicationError && !shouldFallBackToSupabase(error)) throw error;
+        if (!(error instanceof ConsultantApplicationError)) {
+          console.warn('[consultantApplicationsService] Admin API getById failed, using Supabase fallback:', error?.message);
+        }
+      }
+    }
+
     const { data, error } = await supabase
       .from('consultant_applications')
       .select('*')
@@ -43,82 +231,106 @@ export const consultantApplicationsService = {
         details: error.details,
         hint: error.hint,
       });
-      throw error;
+      throw new ConsultantApplicationError(error.message, {
+        code: error.code || 'SUPABASE_READ_ERROR',
+        retryable: true,
+      });
     }
     return data as ConsultantApplication | null;
   },
 
   async create(application: ConsultantApplicationInsert) {
-    const cleanPhone = String(application.phone || '').trim();
-    const cleanWhatsapp = (application.whatsapp ? String(application.whatsapp).trim() : cleanPhone) || cleanPhone;
-    const sanitizedApp = {
-      ...application,
-      name: String(application.name || '').trim(),
-      email: String(application.email || '').trim().toLowerCase(),
-      phone: cleanPhone,
-      whatsapp: cleanWhatsapp,
-    };
+    const requestId = newRequestId();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), SUBMIT_TIMEOUT_MS);
 
-    // 1. Try authoritative server API first (Vercel serverless / Express endpoint)
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-      const res = await fetch('/api/consultant-applications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sanitizedApp),
-        signal: controller.signal,
-      });
+      let res: Response;
+      try {
+        res = await fetch('/api/consultant-applications', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-Request-Id': requestId,
+            'Idempotency-Key': applicationFingerprint(application),
+          },
+          body: JSON.stringify(application),
+          signal: controller.signal,
+        });
+      } catch (networkError: any) {
+        const aborted =
+          networkError?.name === 'AbortError' ||
+          /abort|timed out|timeout/i.test(String(networkError?.message || ''));
+        throw new ConsultantApplicationError(
+          aborted
+            ? `The submission is taking longer than expected. Please check your connection and try again. (Reference: ${requestId})`
+            : `We could not reach the application service. Please check your connection and try again. (Reference: ${requestId})`,
+          {
+            code: aborted ? 'SUBMISSION_TIMEOUT' : 'NETWORK_ERROR',
+            requestId,
+            retryable: true,
+          },
+        );
+      }
+
+      const body = await readResponseBody(res);
+
+      if (!res.ok || body?.success !== true) {
+        throw errorFromResponse(res, body, 'We could not submit your application. Please try again.');
+      }
+
+      return {
+        ...body,
+        requestId: body?.requestId || requestId,
+        applicationId: body?.applicationId,
+        duplicate: Boolean(body?.duplicate),
+      };
+    } finally {
       clearTimeout(timeoutId);
-
-      if (res.ok) {
-        const json = await res.json().catch(() => null);
-        if (json?.success) {
-          return json;
-        }
-      } else {
-        const errJson = await res.json().catch(() => null);
-        if (errJson?.error) {
-          throw new Error(errJson.error);
-        }
-      }
-    } catch (apiErr: any) {
-      // If server returned a business validation or rate limit error, throw it directly
-      if (apiErr?.message && !apiErr.message.includes('fetch') && !apiErr.message.includes('abort') && !apiErr.message.includes('Failed to fetch')) {
-        throw apiErr;
-      }
-      console.warn('[consultantApplicationsService] Server API notice, falling back to direct DB insert:', apiErr?.message);
     }
-
-    // 2. Fallback to direct Supabase client insert with a resilient 15s timeout race
-    const dbPromise = supabase
-      .from('consultant_applications')
-      .insert(sanitizedApp);
-
-    const timeoutPromise = new Promise<{ error: Error }>((resolve) =>
-      setTimeout(
-        () => resolve({ error: new Error('Submission timed out after 15 seconds. Please check your network connection and try again.') }),
-        15000
-      )
-    );
-
-    const { error } = (await Promise.race([dbPromise, timeoutPromise])) as any;
-
-    if (error) {
-      console.error('Supabase error creating consultant_application:', {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint,
-      });
-      throw new Error(error.message || 'Failed to submit application. Please check your details and try again.');
-    }
-
-    return { success: true };
   },
 
   async update(id: string, updates: ConsultantApplicationUpdate) {
     const payload = { ...updates, updated_at: new Date().toISOString() };
+    const token = await getAccessToken();
+
+    if (token) {
+      const requestId = newRequestId();
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), ADMIN_TIMEOUT_MS);
+        let res: Response;
+        try {
+          res = await fetch(`/api/admin/consultant-applications?id=${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+              'X-Request-Id': requestId,
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+
+        const body = await readResponseBody(res);
+        if (!res.ok) {
+          const error = errorFromResponse(res, body, 'Could not update the consultant application.');
+          if (!shouldFallBackToSupabase(error)) throw error;
+        } else {
+          return (body?.application || null) as ConsultantApplication | null;
+        }
+      } catch (error: any) {
+        if (error instanceof ConsultantApplicationError && !shouldFallBackToSupabase(error)) throw error;
+        if (!(error instanceof ConsultantApplicationError)) {
+          console.warn('[consultantApplicationsService] Admin API update failed, using Supabase fallback:', error?.message);
+        }
+      }
+    }
 
     const { data, error } = await (supabase as any)
       .from('consultant_applications')
@@ -128,25 +340,63 @@ export const consultantApplicationsService = {
       .maybeSingle();
 
     if (error) {
-      const logData = {
+      console.error('[Supabase Consultant Application Update Failure Log]:', {
         tableName: 'consultant_applications',
         applicationId: id,
-        payload,
         supabaseErrorObject: {
           message: error.message,
           code: error.code,
           details: error.details,
-          hint: error.hint
-        }
-      };
-      console.error('[Supabase Consultant Application Update Failure Log]: Complete Supabase Error Object:', JSON.stringify(logData, null, 2));
-      throw error;
+          hint: error.hint,
+        },
+      });
+      throw new ConsultantApplicationError(error.message, {
+        code: error.code || 'SUPABASE_UPDATE_ERROR',
+        retryable: true,
+      });
     }
 
     return data as ConsultantApplication;
   },
 
   async delete(id: string) {
+    const token = await getAccessToken();
+
+    if (token) {
+      const requestId = newRequestId();
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), ADMIN_TIMEOUT_MS);
+        let res: Response;
+        try {
+          res = await fetch(`/api/admin/consultant-applications?id=${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+            headers: {
+              Accept: 'application/json',
+              Authorization: `Bearer ${token}`,
+              'X-Request-Id': requestId,
+            },
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+
+        const body = await readResponseBody(res);
+        if (!res.ok) {
+          const error = errorFromResponse(res, body, 'Could not delete the consultant application.');
+          if (!shouldFallBackToSupabase(error)) throw error;
+        } else {
+          return;
+        }
+      } catch (error: any) {
+        if (error instanceof ConsultantApplicationError && !shouldFallBackToSupabase(error)) throw error;
+        if (!(error instanceof ConsultantApplicationError)) {
+          console.warn('[consultantApplicationsService] Admin API delete failed, using Supabase fallback:', error?.message);
+        }
+      }
+    }
+
     const { error } = await supabase
       .from('consultant_applications')
       .delete()
@@ -159,8 +409,10 @@ export const consultantApplicationsService = {
         details: error.details,
         hint: error.hint,
       });
-      throw error;
+      throw new ConsultantApplicationError(error.message, {
+        code: error.code || 'SUPABASE_DELETE_ERROR',
+        retryable: true,
+      });
     }
   }
 };
-

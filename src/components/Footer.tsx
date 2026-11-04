@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Youtube, Instagram, PlayCircle, Sparkles } from "lucide-react";
+import { OFFICIAL_LOGO_URL, OFFICIAL_LOGO_ALT } from "@/lib/brand";
 
 export default function Footer() {
   const { profile, isAdmin } = useAuth();
@@ -15,9 +16,11 @@ export default function Footer() {
           <div className="md:col-span-2 space-y-4">
             <div className="flex items-center gap-2">
               <img
-                src="/foundarly-logo.png?v=20261104"
-                alt="Foundarly"
-                className="h-8 sm:h-9 w-auto object-contain rounded-md"
+                src={OFFICIAL_LOGO_URL}
+                alt={OFFICIAL_LOGO_ALT}
+                className="h-14 w-auto max-w-[220px] object-contain rounded-sm"
+                loading="lazy"
+                decoding="async"
                 onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
               />
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold tracking-wider uppercase">

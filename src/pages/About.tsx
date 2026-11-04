@@ -3,6 +3,7 @@ import { motion, useMotionValue, useTransform, useInView, useScroll, useSpring }
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { AboutSEO } from "@/components/SEO";
+import { OFFICIAL_LOGO_URL, OFFICIAL_LOGO_ALT } from "@/lib/brand";
 import { Search, UserCheck, CalendarCheck, Video, FileText, Star, ArrowRight, Zap, Shield, Users, TrendingUp } from "lucide-react";
 
 // ── Floating particle ─────────────────────────────────────────────────────────
@@ -350,19 +351,15 @@ function StorySection() {
               <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-primary/12 blur-3xl pointer-events-none" />
               <div className="absolute -bottom-8 -left-8 w-36 h-36 rounded-full bg-amber-400/8 blur-2xl pointer-events-none" />
 
-              {/* Official Foundarly Logo */}
-              <motion.div
-                className="w-16 h-16 rounded-2xl overflow-hidden mb-8 shadow-xl border border-primary/20 bg-background flex items-center justify-center p-1"
-                style={{ boxShadow: "0 16px 40px -8px hsl(45 100% 50% / 0.35)" }}
+              {/* Official logo */}
+              <motion.img
+                src={OFFICIAL_LOGO_URL}
+                alt={OFFICIAL_LOGO_ALT}
+                className="w-20 h-20 rounded-2xl object-contain mb-8 shadow-xl"
+                style={{ boxShadow: "0 16px 40px -8px hsl(45 100% 50% / 0.45), inset 0 1px 0 hsl(0 0% 100% / 0.3)" }}
                 animate={{ rotate: [0, 2, -2, 0] }}
                 transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-              >
-                <img
-                  src="/foundarly-logo.png?v=20261104"
-                  alt="Foundarly"
-                  className="w-full h-full object-contain rounded-xl"
-                />
-              </motion.div>
+              />
 
               <h3 className="font-display text-2xl font-bold mb-3">
                 Premium by <span className="text-gradient-gold">Design</span>

@@ -3,6 +3,7 @@ import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/s
 import AdminSidebar from "./AdminSidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { Shield, Terminal } from "lucide-react";
+import { OFFICIAL_LOGO_URL, OFFICIAL_LOGO_ALT } from "@/lib/brand";
 
 export default function AdminLayout() {
   const { isSuperAdmin, isDeveloperAdmin } = useAuth();
@@ -17,9 +18,11 @@ export default function AdminLayout() {
               <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
               <Link to="/" className="flex items-center gap-2 group">
                 <img
-                  src="/foundarly-logo.png?v=20261104"
-                  alt="Foundarly"
-                  className="h-8 w-auto object-contain rounded-md"
+                  src={OFFICIAL_LOGO_URL}
+                  alt={OFFICIAL_LOGO_ALT}
+                  className="h-9 w-auto max-w-[170px] object-contain rounded-sm"
+                  loading="eager"
+                  decoding="async"
                   onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
                 />
               </Link>

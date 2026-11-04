@@ -48,18 +48,25 @@ describe('Four Core Production Problems Validation', () => {
     assert.notEqual(femaleBuf[0], 0xef, 'Must not be corrupted with UTF-8 replacement byte 0xEF');
   });
 
-  it('3. Official Foundarly logo: vector SVG contains authentic stylized F emblem and typography', () => {
-    assert.ok(fs.existsSync('public/logo.svg'));
-    assert.ok(fs.existsSync('public/logo-mark.svg'));
+  it('3. Official Foundarly logo: exact uploaded image is served from a content-hashed asset', () => {
+    assert.ok(fs.existsSync('public/brand/foundarly-official-logo-4a1d5c88.jpg'));
+    assert.ok(fs.existsSync('public/logo.png'));
+    assert.ok(!fs.existsSync('public/logo.svg'), 'legacy black monogram SVG must be removed');
+    assert.ok(!fs.existsSync('public/logo-mark.svg'), 'legacy logo mark must be removed');
 
-    const svgContent = fs.readFileSync('public/logo.svg', 'utf-8');
-    // Must contain the stylized F path from the official branding
-    assert.ok(svgContent.includes('160 120 L 350 120'));
-    assert.ok(svgContent.includes('Foundarly'));
-    assert.ok(svgContent.includes('BUSINESS WORLD'));
+    const logo = fs.readFileSync('public/brand/foundarly-official-logo-4a1d5c88.jpg');
+    // JPEG SOI marker and a real photographic-size payload.
+    assert.equal(logo[0], 0xff);
+    assert.equal(logo[1], 0xd8);
+    assert.ok(logo.length > 10_000);
   });
 
-  it('4. /apply-consultant: backend endpoint and application creation handles submissions reliably', async () => {
+  it('4. /apply-consultant: authoritative API + shared core submit normalized applications', async () => {
+    const { submitConsultantApplication, resetConsultantApplicationIdempotencyStore } = await import(
+      '../src/server/consultantApplicationCore.js'
+    );
+    resetConsultantApplicationIdempotencyStore();
+
     const payload = {
       name: 'Automated Test Applicant',
       email: 'automated.test@example.com',
@@ -70,20 +77,49 @@ describe('Four Core Production Problems Validation', () => {
       qualification: 'Chartered Accountant (CA)',
       current_job: 'Senior Financial Advisor',
       location: 'New Delhi',
-      experience: '8 years',
+      experience: 'Eight years advising founders on financial planning and compliance.',
       preferred_session_timing: 'Morning (8 AM – 12 PM)',
       linkedin_url: 'https://linkedin.com/in/automated-test',
     };
 
-    // Test the live API endpoint on port 3000
-    const res = await fetch('http://localhost:3000/api/consultant-applications', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+    let inserted: any = null;
+    const fakeClient: any = {
+      from() {
+        return {
+          insert(record: any) {
+            inserted = record;
+            const query: any = {
+              abortSignal() {
+                return query;
+              },
+              then(resolve: any) {
+                return Promise.resolve({ error: null }).then(resolve);
+              },
+            };
+            return query;
+          },
+        };
+      },
+    };
+
+    const result = await submitConsultantApplication({
+      client: fakeClient,
+      raw: payload,
+      requestId: 'four-fixes-test-0001',
+      timeoutMs: 500,
     });
 
-    assert.ok(res.ok || res.status === 201, `Expected 200 or 201, got ${res.status}`);
-    const json = await res.json();
-    assert.equal(json.success, true);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.status, 201);
+    assert.equal(inserted.status, 'pending');
+    assert.equal(inserted.email, 'automated.test@example.com');
+
+    // The deployed production path must be the serverless function, not the
+    // old 404-ing request or the browser's direct database fallback.
+    assert.ok(fs.existsSync('api/consultant-applications.ts'));
+    const service = fs.readFileSync('src/services/consultantApplications.ts', 'utf8');
+    assert.ok(service.includes("fetch('/api/consultant-applications'"));
+    assert.ok(!service.includes('falling back to direct DB insert'));
   });
 });

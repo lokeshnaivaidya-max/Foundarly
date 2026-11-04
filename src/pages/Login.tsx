@@ -8,6 +8,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { isUserAdmin } from "@/lib/authorization";
+import { OFFICIAL_LOGO_URL, OFFICIAL_LOGO_ALT } from "@/lib/brand";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Eye, EyeOff, Mail, CheckCircle2, AlertCircle } from "lucide-react";
 import { validateEmail } from "@/utils/security";
@@ -207,7 +208,13 @@ export default function LoginPage() {
           <AnimatedSection>
             <div className="bg-gradient-card border border-border rounded-lg p-8">
               <div className="text-center mb-8">
-                <span className="font-display text-2xl font-bold text-gradient-gold">Foundarly</span>
+                <img
+                  src={OFFICIAL_LOGO_URL}
+                  alt={OFFICIAL_LOGO_ALT}
+                  className="h-20 w-auto mx-auto object-contain rounded-md"
+                  loading="eager"
+                  decoding="async"
+                />
               </div>
 
               {signupConfirmationRequired ? (

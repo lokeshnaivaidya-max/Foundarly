@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { consultantApplicationsService } from '@/services/consultantApplications';
+import { normalizeConsultantApplication } from '@/lib/consultantApplicationValidation';
 import { Briefcase, CheckCircle } from 'lucide-react';
 
 export default function ApplyConsultant() {
@@ -18,6 +19,10 @@ export default function ApplyConsultant() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  // Synchronous guard: React state updates are async, so a very fast double
+  // click could otherwise fire two submissions before `loading` renders.
+  const submittingRef = useRef(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -37,51 +42,49 @@ export default function ApplyConsultant() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validation
-    if (!formData.name?.trim() || !formData.email?.trim() || !formData.phone?.trim()) {
+    if (submittingRef.current) {
+      return;
+    }
+
+    const payload = {
+      name: formData.name.trim(),
+      email: formData.email.trim().toLowerCase(),
+      phone: formData.phone.trim(),
+      whatsapp: (formData.whatsapp || formData.phone).trim(),
+      age: parseInt(String(formData.age).trim(), 10),
+      gender: formData.gender,
+      qualification: (formData.qualification || '').trim(),
+      current_job: (formData.current_job || '').trim(),
+      location: (formData.location || '').trim(),
+      experience: (formData.experience || '').trim(),
+      preferred_session_timing: formData.preferred_session_timing.trim(),
+      linkedin_url: formData.linkedin_url ? formData.linkedin_url.trim() : null,
+    };
+
+    // Validate with the same rules the server enforces, so users get a clear
+    // field-level message instead of a generic server rejection.
+    const normalized = normalizeConsultantApplication(payload);
+    if (!normalized.valid) {
+      const issues = (normalized as { issues: Array<{ field: string; message: string }> }).issues || [];
+      const description = issues
+        .slice(0, 3)
+        .map((issue) => issue.message)
+        .join(' ');
+      setSubmitError(description);
       toast({
         title: 'Validation Error',
-        description: 'Please fill in all required fields (Name, Email, Phone)',
+        description,
         variant: 'destructive'
       });
       return;
     }
 
-    if (!formData.age || isNaN(parseInt(formData.age, 10)) || parseInt(formData.age, 10) < 18) {
-      toast({
-        title: 'Validation Error',
-        description: 'Please enter a valid age (18 or older)',
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    if (!formData.preferred_session_timing) {
-      toast({
-        title: 'Validation Error',
-        description: 'Please select your preferred session timing',
-        variant: 'destructive'
-      });
-      return;
-    }
-
+    submittingRef.current = true;
     setLoading(true);
+    setSubmitError(null);
+
     try {
-      const parsedAge = parseInt(String(formData.age).trim(), 10) || 25;
-      await consultantApplicationsService.create({
-        name: formData.name.trim(),
-        email: formData.email.trim().toLowerCase(),
-        phone: formData.phone.trim(),
-        whatsapp: (formData.whatsapp || formData.phone).trim(),
-        age: parsedAge,
-        gender: formData.gender,
-        qualification: (formData.qualification || '').trim(),
-        current_job: (formData.current_job || '').trim(),
-        location: (formData.location || '').trim(),
-        experience: (formData.experience || '').trim(),
-        preferred_session_timing: formData.preferred_session_timing.trim(),
-        linkedin_url: formData.linkedin_url ? formData.linkedin_url.trim() : null,
-      });
+      await consultantApplicationsService.create(normalized.value);
 
       setSubmitted(true);
       toast({
@@ -89,13 +92,26 @@ export default function ApplyConsultant() {
         description: 'We will review your application and get back to you soon.'
       });
     } catch (error: any) {
-      console.error('Error submitting application:', error?.message || error?.code || JSON.stringify(error));
+      console.error('Error submitting application:', {
+        code: error?.code,
+        status: error?.status,
+        requestId: error?.requestId,
+        message: error?.message,
+      });
+
+      const message =
+        error?.message ||
+        'Failed to submit application. Please check your details and try again.';
+      setSubmitError(message);
+
       toast({
         title: 'Submission Error',
-        description: error?.message || 'Failed to submit application. Please check your details and try again.',
+        description: message,
         variant: 'destructive'
       });
     } finally {
+      // Always clear both guards, even when the request throws.
+      submittingRef.current = false;
       setLoading(false);
     }
   };
@@ -354,6 +370,14 @@ export default function ApplyConsultant() {
               </div>
 
               <div className="pt-4">
+                {submitError && (
+                  <div
+                    role="alert"
+                    className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                  >
+                    {submitError}
+                  </div>
+                )}
                 <Button
                   type="submit"
                   disabled={loading}

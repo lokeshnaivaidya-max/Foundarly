@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { OFFICIAL_LOGO_URL, OFFICIAL_LOGO_ALT } from "@/lib/brand";
 
 // ── Full-page loader (for auth-gated pages and screen reloads) ───────────────
 export function PageLoader({ text = "Loading..." }: { text?: string }) {
@@ -10,17 +11,33 @@ export function PageLoader({ text = "Loading..." }: { text?: string }) {
       </div>
 
       <div className="relative flex flex-col items-center justify-center">
-        <motion.div
-          className="relative flex items-center justify-center"
-          animate={{ scale: [0.96, 1.04, 0.96] }}
-          transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
-        >
-          <img
-            src="/foundarly-logo.png?v=20261104"
-            alt="Foundarly"
-            className="h-14 w-auto object-contain rounded-xl shadow-lg border border-primary/20"
+        <div className="relative w-20 h-20 flex items-center justify-center">
+          {/* Outer spinner */}
+          <motion.svg
+            className="absolute inset-0 w-full h-full"
+            viewBox="0 0 80 80"
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1.6, repeat: Infinity, ease: "linear" }}
+          >
+            <circle cx="40" cy="40" r="35" fill="none" stroke="hsl(45 100% 50% / 0.15)" strokeWidth="3" />
+            <circle
+              cx="40" cy="40" r="35"
+              fill="none"
+              stroke="#F5A623"
+              strokeWidth="3.5"
+              strokeLinecap="round"
+              strokeDasharray="55 165"
+            />
+          </motion.svg>
+          {/* Official uploaded logo */}
+          <motion.img
+            src={OFFICIAL_LOGO_URL}
+            alt={OFFICIAL_LOGO_ALT}
+            className="w-12 h-12 object-contain rounded-md shadow-lg shadow-black/20"
+            animate={{ scale: [0.96, 1.04, 0.96] }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
           />
-        </motion.div>
+        </div>
       </div>
 
       {text && (

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SEO } from "@/components/SEO";
+import { OFFICIAL_LOGO_URL, OFFICIAL_LOGO_ALT } from "@/lib/brand";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -408,11 +409,20 @@ export default function ConsultantDashboard() {
       <div className="border-b border-border bg-card">
         <div className="container mx-auto px-4 py-6">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-display font-bold">Consultant Dashboard</h1>
-              <p className="text-muted-foreground mt-1">
-                Welcome back, {profile?.full_name || "Consultant"}
-              </p>
+            <div className="flex items-center gap-4">
+              <img
+                src={OFFICIAL_LOGO_URL}
+                alt={OFFICIAL_LOGO_ALT}
+                className="h-12 w-auto max-w-[190px] object-contain rounded-sm"
+                loading="eager"
+                decoding="async"
+              />
+              <div>
+                <h1 className="text-3xl font-display font-bold">Consultant Dashboard</h1>
+                <p className="text-muted-foreground mt-1">
+                  Welcome back, {profile?.full_name || "Consultant"}
+                </p>
+              </div>
             </div>
             <Button onClick={() => navigate("/")} variant="outline">
               Back to Home

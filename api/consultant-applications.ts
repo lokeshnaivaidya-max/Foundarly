@@ -1,192 +1,142 @@
-import dotenv from 'dotenv';
-import { createClient } from '@supabase/supabase-js';
-import { checkDistributedRateLimit, extractClientIp } from '../src/server/rateLimiter.js';
-
-dotenv.config();
+import {
+  submitConsultantApplication,
+  logConsultantApplicationResult,
+} from '../src/server/consultantApplicationCore.js';
+import { createServerSupabaseClient, getSupabaseServiceKey } from '../src/server/adminApiAuth.js';
+import { checkServerlessRateLimit, extractClientIp } from '../src/server/rateLimiter.js';
 
 interface RequestLike {
   method?: string;
-  body?: any;
+  body?: unknown;
   headers?: Record<string, string | string[] | undefined>;
   socket?: { remoteAddress?: string };
 }
 
 interface ResponseLike {
   status: (code: number) => ResponseLike;
-  json: (data: any) => ResponseLike;
+  json: (data: unknown) => ResponseLike;
   end: () => void;
   setHeader: (name: string, value: string) => void;
 }
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://rfyxnshvtfswvaogjzwq.supabase.co';
-const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.VITE_SUPABASE_ANON_KEY ||
-  'sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd';
+export const config = { maxDuration: 30 };
 
-const supabaseAdminClient = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+function requestIdFrom(headers?: RequestLike['headers']): string {
+  const raw = headers?.['x-request-id'];
+  const candidate = Array.isArray(raw) ? raw[0] : raw;
+  if (candidate && /^[A-Za-z0-9._:-]{8,80}$/.test(candidate)) return candidate;
+  const maybeCrypto = globalThis.crypto as Crypto | undefined;
+  if (maybeCrypto && typeof maybeCrypto.randomUUID === 'function') return maybeCrypto.randomUUID();
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
 
-function maskIdentifier(val: string): string {
-  if (!val) return '***';
-  if (val.includes('@')) {
-    const [user, domain] = val.split('@');
-    return `${user.slice(0, 2)}***@${domain || '***'}`;
+function idempotencyKeyFrom(headers?: RequestLike['headers']): string | null {
+  const raw = headers?.['idempotency-key'] || headers?.['x-idempotency-key'];
+  const candidate = Array.isArray(raw) ? raw[0] : raw;
+  return candidate && typeof candidate === 'string' ? candidate : null;
+}
+
+function parseBody(body: unknown): unknown {
+  if (typeof body !== 'string') return body;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
   }
-  return `${val.slice(0, 3)}****${val.slice(-2)}`;
 }
 
 export default async function handler(req: RequestLike, res: ResponseLike) {
-  const startTime = Date.now();
-  const requestId = `app_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const requestId = requestIdFrom(req.headers);
+  const startedAt = Date.now();
 
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Request-Id, Idempotency-Key');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Request-Id', requestId);
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return res.status(204).end();
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, error: 'Method not allowed', requestId });
+    res.setHeader('Allow', 'POST, OPTIONS');
+    return res.status(405).json({
+      success: false,
+      code: 'METHOD_NOT_ALLOWED',
+      error: 'Only POST is supported for consultant applications.',
+      requestId,
+    });
   }
 
-  // Rate Limiting by IP (15 submissions per 10 minutes to prevent abuse)
   const clientIp = extractClientIp(req);
-  const rateLimit = await checkDistributedRateLimit(`apply_${clientIp}`, 15, 600000);
+  const rateLimit = checkServerlessRateLimit(`consultant_application_${clientIp}`, 8, 60_000);
   if (!rateLimit.allowed) {
-    if (rateLimit.retryAfter) {
-      res.setHeader('Retry-After', String(rateLimit.retryAfter));
-    }
-    console.warn(`[Consultant Application] [${requestId}] Rate limited IP: ${clientIp}`);
+    res.setHeader('Retry-After', String(rateLimit.retryAfter));
+    console.warn(
+      '[consultant-applications]',
+      JSON.stringify({
+        requestId,
+        event: 'consultant_application_rate_limited',
+        retryAfter: rateLimit.retryAfter,
+        elapsedMs: Date.now() - startedAt,
+      }),
+    );
     return res.status(429).json({
       success: false,
-      error: `Too many submissions. Please wait ${rateLimit.retryAfter || 60} seconds before trying again.`,
       code: 'RATE_LIMITED',
+      error: `Too many application attempts. Please wait ${rateLimit.retryAfter} seconds and try again.`,
+      retryAfter: rateLimit.retryAfter,
       requestId,
     });
   }
 
-  try {
-    const rawBody = req.body;
-    let body = rawBody;
-    if (typeof rawBody === 'string') {
-      try {
-        body = JSON.parse(rawBody);
-      } catch {
-        body = {};
-      }
-    }
-
-    const {
-      name,
-      email,
-      phone,
-      whatsapp,
-      age,
-      gender,
-      qualification,
-      current_job,
-      location,
-      experience,
-      preferred_session_timing,
-      linkedin_url,
-    } = body || {};
-
-    // 1. Validation
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({ success: false, error: 'Full name is required.', requestId });
-    }
-    if (!email || !String(email).trim() || !String(email).includes('@')) {
-      return res.status(400).json({ success: false, error: 'A valid email address is required.', requestId });
-    }
-    if (!phone || !String(phone).trim()) {
-      return res.status(400).json({ success: false, error: 'Phone number is required.', requestId });
-    }
-    if (!preferred_session_timing || !String(preferred_session_timing).trim()) {
-      return res.status(400).json({ success: false, error: 'Preferred session timing is required.', requestId });
-    }
-
-    const parsedAge = parseInt(String(age || '25'), 10) || 25;
-    if (parsedAge < 18) {
-      return res.status(400).json({ success: false, error: 'Age must be 18 or older.', requestId });
-    }
-
-    const normalizedEmail = String(email).trim().toLowerCase();
-    const cleanPhone = String(phone).trim();
-    // Guarantee whatsapp is NEVER null (violates PostgreSQL NOT NULL constraint)
-    const cleanWhatsapp = (whatsapp ? String(whatsapp).trim() : cleanPhone) || cleanPhone;
-
-    const payload = {
-      name: String(name).trim(),
-      email: normalizedEmail,
-      phone: cleanPhone,
-      whatsapp: cleanWhatsapp,
-      age: parsedAge,
-      gender: gender === 'female' ? 'female' : 'male',
-      qualification: qualification ? String(qualification).trim() : '',
-      current_job: current_job ? String(current_job).trim() : '',
-      location: location ? String(location).trim() : '',
-      experience: experience ? String(experience).trim() : '',
-      preferred_session_timing: String(preferred_session_timing).trim(),
-      linkedin_url: linkedin_url && String(linkedin_url).trim().length > 0 ? String(linkedin_url).trim() : null,
-      status: 'pending',
-      created_at: new Date().toISOString(),
-    };
-
-    console.log(
-      `[Consultant Application] [${requestId}] Processing submission for ${maskIdentifier(normalizedEmail)} (${maskIdentifier(cleanPhone)})`
-    );
-
-    // 2. Perform DB insert with 15s timeout
-    const insertPromise = supabaseAdminClient
-      .from('consultant_applications')
-      .insert(payload);
-
-    const timeoutPromise = new Promise<{ error: Error }>((resolve) =>
-      setTimeout(
-        () => resolve({ error: new Error('Database operation timed out after 15 seconds. Please try again.') }),
-        15000
-      )
-    );
-
-    const { error } = (await Promise.race([insertPromise, timeoutPromise])) as any;
-
-    const elapsed = Date.now() - startTime;
-
-    if (error) {
-      console.error(`[Consultant Application] [${requestId}] DB insert error (${elapsed}ms):`, {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-      });
-      return res.status(500).json({
-        success: false,
-        error: error.message || 'Failed to submit application. Please check your details and try again.',
-        code: error.code || 'DB_ERROR',
-        requestId,
-      });
-    }
-
-    console.log(
-      `[Consultant Application] [${requestId}] Successfully inserted application in ${elapsed}ms for ${maskIdentifier(normalizedEmail)}`
-    );
-
-    return res.status(201).json({
-      success: true,
-      message: 'Application submitted successfully. We will review your application soon.',
-      requestId,
-    });
-  } catch (err: any) {
-    const elapsed = Date.now() - startTime;
-    console.error(`[Consultant Application] [${requestId}] Unexpected exception (${elapsed}ms):`, err?.message || err);
-    return res.status(500).json({
+  const body = parseBody(req.body);
+  if (!body || typeof body !== 'object') {
+    return res.status(400).json({
       success: false,
-      error: err?.message || 'An unexpected error occurred while processing your application.',
+      code: 'INVALID_JSON',
+      error: 'The application request body must be valid JSON.',
       requestId,
     });
   }
+
+  const result = await submitConsultantApplication({
+    client: createServerSupabaseClient(),
+    raw: body,
+    requestId,
+    idempotencyKey: idempotencyKeyFrom(req.headers),
+    timeoutMs: 12_000,
+  });
+
+  logConsultantApplicationResult(requestId, result, {
+    route: 'POST /api/consultant-applications',
+    ip: clientIp,
+  });
+
+  if (!result.ok) {
+    if (result.status === 429 && result.retryAfter) {
+      res.setHeader('Retry-After', String(result.retryAfter));
+    }
+    return res.status(result.status).json({
+      success: false,
+      code: result.code,
+      error: result.error,
+      issues: result.issues,
+      requestId,
+      elapsedMs: result.elapsedMs,
+    });
+  }
+
+  return res.status(result.status).json({
+    success: true,
+    applicationId: result.applicationId,
+    duplicate: result.duplicate,
+    message: result.duplicate
+      ? 'This application was already received.'
+      : 'Application submitted successfully.',
+    requestId,
+    elapsedMs: result.elapsedMs,
+    storage: getSupabaseServiceKey() ? 'service-role' : 'anon-rls',
+  });
 }

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { OFFICIAL_LOGO_URL } from '@/lib/brand';
 
 interface SiteSetting {
   id: string;
@@ -9,7 +10,7 @@ interface SiteSetting {
 
 const FALLBACK_SETTINGS: SiteSetting[] = [
   { id: '1', setting_key: 'site_logo_text', setting_value: 'Foundarly', updated_at: new Date().toISOString() },
-  { id: '1b', setting_key: 'site_logo_url', setting_value: '/foundarly-logo.png?v=20261104', updated_at: new Date().toISOString() },
+  { id: '1b', setting_key: 'site_logo_url', setting_value: OFFICIAL_LOGO_URL, updated_at: new Date().toISOString() },
   { id: '2', setting_key: 'currency', setting_value: 'INR', updated_at: new Date().toISOString() },
   { id: '3', setting_key: 'site_theme', setting_value: 'light', updated_at: new Date().toISOString() },
   { id: '4', setting_key: 'platform_name', setting_value: 'Foundarly', updated_at: new Date().toISOString() },

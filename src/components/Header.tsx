@@ -30,6 +30,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { settingsService } from "@/services/settings";
+import { OFFICIAL_LOGO_URL, OFFICIAL_LOGO_ALT, resolveBrandLogoUrl } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import ProfileDropdown from "@/components/kokonutui/profile-dropdown";
 import SwitchButton from "@/components/kokonutui/switch-button";
@@ -48,7 +49,7 @@ export default function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [logoText, setLogoText] = useState("Foundarly");
-  const [logoUrl, setLogoUrl] = useState<string | null>("/foundarly-logo.png?v=20261104");
+  const [logoUrl, setLogoUrl] = useState<string | null>(OFFICIAL_LOGO_URL);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, profile, isAdmin, isSuperAdmin, isDeveloperAdmin, isConsultant, isClient, signOut } = useAuth();
@@ -72,11 +73,8 @@ export default function Header() {
       const logoUrlSetting = settings.find((s) => s.setting_key === "site_logo_url");
 
       if (logoTextSetting?.setting_value) setLogoText(logoTextSetting.setting_value);
-      if (logoUrlSetting?.setting_value) {
-        const val = logoUrlSetting.setting_value;
-        const buster = val.includes("?") ? val : `${val}?v=20261104`;
-        setLogoUrl(buster);
-      }
+      // Legacy `/logo.svg` values are normalized to the official uploaded image.
+      setLogoUrl(resolveBrandLogoUrl(logoUrlSetting?.setting_value));
     } catch (error) {
       console.error("Error loading logo:", error);
     }
@@ -140,8 +138,10 @@ export default function Header() {
           {logoUrl ? (
             <img
               src={logoUrl}
-              alt={logoText}
-              className="h-8 sm:h-9 w-auto object-contain transition-transform duration-200 group-hover:scale-105"
+              alt={logoText || OFFICIAL_LOGO_ALT}
+              className="h-9 sm:h-10 w-auto max-w-[190px] object-contain transition-transform duration-200 group-hover:scale-105"
+              loading="eager"
+              decoding="async"
               onError={() => setLogoUrl(null)}
             />
           ) : (

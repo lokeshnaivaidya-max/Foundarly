@@ -13,7 +13,7 @@ export const FOUNDARLY_BRAND = {
   name: 'Foundarly',
   tagline: 'Expert Business Consultation & Professional Consulting Services',
   domain: 'https://www.foundarlybusinessworld.in',
-  logoUrl: 'https://www.foundarlybusinessworld.in/logo.png',
+  logoUrl: 'https://www.foundarlybusinessworld.in/brand/foundarly-official-logo-4a1d5c88.jpg',
   supportEmail: 'hello@foundarlybusinessworld.in',
   colors: {
     primaryGold: '#d97706',

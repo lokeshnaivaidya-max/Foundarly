@@ -76,11 +76,42 @@ import {
 } from "./src/utils/timeSlots.js";
 import { completionEmailStorage } from "./src/server/completionEmailStorage.js";
 import { meetingParticipantStorage } from "./src/server/meetingParticipantStorage.js";
+import {
+  submitConsultantApplication,
+  logConsultantApplicationResult,
+} from "./src/server/consultantApplicationCore.js";
+import { authenticateAdminRequest } from "./src/server/adminApiAuth.js";
 import agoraAccessToken from "agora-access-token";
 
 const { RtcTokenBuilder, RtcRole } = agoraAccessToken;
 
 dotenv.config();
+
+function consultantApplicationAdminError(error: any): {
+  status: number;
+  code: string;
+  error: string;
+} {
+  const code = String(error?.code || "");
+  if (
+    code === "42501" ||
+    code === "42P01" ||
+    code.startsWith("PGRST") ||
+    /policy|permission/i.test(String(error?.message || ""))
+  ) {
+    return {
+      status: 503,
+      code: "ADMIN_APPLICATION_STORAGE_UNAVAILABLE",
+      error:
+        "Admin application storage is unavailable. Configure SUPABASE_SERVICE_ROLE_KEY or apply the consultant application RLS migration.",
+    };
+  }
+  return {
+    status: 500,
+    code: "ADMIN_APPLICATION_STORAGE_ERROR",
+    error: "The application record could not be read or updated.",
+  };
+}
 
 function getAdminAllowlist(): string[] {
   const envList =
@@ -2408,86 +2439,192 @@ async function startServer() {
 
   // Consultant Application Submission Endpoint (Authoritative Server API)
   app.post("/api/consultant-applications", async (req, res) => {
-    try {
-      const {
-        name,
-        email,
-        phone,
-        whatsapp,
-        age,
-        gender,
-        qualification,
-        current_job,
-        location,
-        experience,
-        preferred_session_timing,
-        linkedin_url,
-      } = req.body || {};
+    const headerId = req.headers["x-request-id"];
+    const requestId =
+      typeof headerId === "string" && /^[A-Za-z0-9._:-]{8,80}$/.test(headerId)
+        ? headerId
+        : `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-      if (!name || !email || !phone) {
-        return res.status(400).json({
-          success: false,
-          error: "Full name, email address, and phone number are required.",
-        });
-      }
+    const idempotencyHeader = req.headers["idempotency-key"] || req.headers["x-idempotency-key"];
+    const idempotencyKey = typeof idempotencyHeader === "string" ? idempotencyHeader : null;
 
-      if (!preferred_session_timing) {
-        return res.status(400).json({
-          success: false,
-          error: "Preferred session timing is required.",
-        });
-      }
+    res.setHeader("X-Request-Id", requestId);
+    res.setHeader("Cache-Control", "no-store");
 
-      const parsedAge = parseInt(String(age || "25"), 10) || 25;
-      const normalizedEmail = String(email).trim().toLowerCase();
+    const result = await submitConsultantApplication({
+      client: supabaseAdminClient,
+      raw: req.body,
+      requestId,
+      idempotencyKey,
+      timeoutMs: 12_000,
+    });
 
-      const applicationPayload = {
-        name: String(name).trim(),
-        email: normalizedEmail,
-        phone: String(phone).trim(),
-        whatsapp: whatsapp ? String(whatsapp).trim() : String(phone).trim(),
-        age: parsedAge,
-        gender: gender === "female" ? "female" : "male",
-        qualification: qualification ? String(qualification).trim() : "",
-        current_job: current_job ? String(current_job).trim() : "",
-        location: location ? String(location).trim() : "",
-        experience: experience ? String(experience).trim() : "",
-        preferred_session_timing: String(preferred_session_timing).trim(),
-        linkedin_url: linkedin_url ? String(linkedin_url).trim() : null,
-        status: "pending",
-        created_at: new Date().toISOString(),
-      };
+    logConsultantApplicationResult(requestId, result, {
+      route: "POST /api/consultant-applications",
+      ip: req.ip,
+    });
 
-      const insertPromise = supabaseAdminClient
-        .from("consultant_applications")
-        .insert(applicationPayload);
-
-      const timeoutPromise = new Promise<{ error: Error }>((resolve) =>
-        setTimeout(() => resolve({ error: new Error("Database operation timed out after 15 seconds") }), 15000)
-      );
-
-      const { error } = (await Promise.race([insertPromise, timeoutPromise])) as any;
-
-      if (error) {
-        console.error("[Consultant Application] DB insertion error:", error.message || error);
-        return res.status(500).json({
-          success: false,
-          error: error.message || "Failed to submit consultant application.",
-        });
-      }
-
-      console.log(`[Consultant Application] Successfully submitted application for ${normalizedEmail}`);
-      return res.status(201).json({
-        success: true,
-        message: "Application submitted successfully.",
-      });
-    } catch (err: any) {
-      console.error("[Consultant Application] Unexpected error:", err);
-      return res.status(500).json({
+    if (!result.ok) {
+      return res.status(result.status).json({
         success: false,
-        error: err.message || "An unexpected error occurred while submitting your application.",
+        code: result.code,
+        error: result.error,
+        issues: result.issues,
+        requestId,
+        elapsedMs: result.elapsedMs,
       });
     }
+
+    return res.status(result.status).json({
+      success: true,
+      applicationId: result.applicationId,
+      duplicate: result.duplicate,
+      message: result.duplicate
+        ? "This application was already received."
+        : "Application submitted successfully.",
+      requestId,
+      elapsedMs: result.elapsedMs,
+    });
+  });
+
+  // Admin consultant application management (parity with the Vercel function).
+  app.get("/api/admin/consultant-applications", async (req, res) => {
+    const headerId = req.headers["x-request-id"];
+    const requestId =
+      typeof headerId === "string" && /^[A-Za-z0-9._:-]{8,80}$/.test(headerId)
+        ? headerId
+        : `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+    const auth = await authenticateAdminRequest(req.headers.authorization);
+    if (!auth.ok || !auth.client) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        code: auth.status === 403 ? "FORBIDDEN" : "UNAUTHORIZED",
+        error: auth.error || "Administrator authentication required.",
+        requestId,
+      });
+    }
+
+    try {
+      let query = auth.client
+        .from("consultant_applications")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      const status = typeof req.query.status === "string" ? req.query.status : undefined;
+      if (status && ["pending", "approved", "rejected"].includes(status)) {
+        query = query.eq("status", status);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        const mapped = consultantApplicationAdminError(error);
+        return res.status(mapped.status).json({ success: false, ...mapped, requestId });
+      }
+
+      return res.json({ success: true, applications: data || [], count: data?.length || 0, requestId });
+    } catch (error: any) {
+      console.error("[admin-consultant-applications] list failed", { requestId, message: error?.message });
+      return res.status(500).json({
+        success: false,
+        code: "ADMIN_APPLICATION_INTERNAL_ERROR",
+        error: "An unexpected error occurred while accessing consultant applications.",
+        requestId,
+      });
+    }
+  });
+
+  app.patch("/api/admin/consultant-applications", async (req, res) => {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const auth = await authenticateAdminRequest(req.headers.authorization);
+    if (!auth.ok || !auth.client) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        code: auth.status === 403 ? "FORBIDDEN" : "UNAUTHORIZED",
+        error: auth.error || "Administrator authentication required.",
+        requestId,
+      });
+    }
+
+    const id = typeof req.query.id === "string" ? req.query.id : "";
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_REQUEST",
+        error: "An application id is required.",
+        requestId,
+      });
+    }
+
+    const updates: Record<string, unknown> = {};
+    if (typeof req.body?.status === "string") {
+      if (!["pending", "approved", "rejected"].includes(req.body.status)) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_STATUS",
+          error: "Status must be pending, approved or rejected.",
+          requestId,
+        });
+      }
+      updates.status = req.body.status;
+    }
+    if (typeof req.body?.admin_notes === "string") {
+      updates.admin_notes = req.body.admin_notes.slice(0, 5000);
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        code: "NOTHING_TO_UPDATE",
+        error: "No supported fields were supplied.",
+        requestId,
+      });
+    }
+    updates.updated_at = new Date().toISOString();
+
+    const { data, error } = await auth.client
+      .from("consultant_applications")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      const mapped = consultantApplicationAdminError(error);
+      return res.status(mapped.status).json({ success: false, ...mapped, requestId });
+    }
+
+    return res.json({ success: true, application: data, requestId });
+  });
+
+  app.delete("/api/admin/consultant-applications", async (req, res) => {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const auth = await authenticateAdminRequest(req.headers.authorization);
+    if (!auth.ok || !auth.client) {
+      return res.status(auth.status || 401).json({
+        success: false,
+        code: auth.status === 403 ? "FORBIDDEN" : "UNAUTHORIZED",
+        error: auth.error || "Administrator authentication required.",
+        requestId,
+      });
+    }
+
+    const id = typeof req.query.id === "string" ? req.query.id : "";
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_REQUEST",
+        error: "An application id is required.",
+        requestId,
+      });
+    }
+
+    const { error } = await auth.client.from("consultant_applications").delete().eq("id", id);
+    if (error) {
+      const mapped = consultantApplicationAdminError(error);
+      return res.status(mapped.status).json({ success: false, ...mapped, requestId });
+    }
+
+    return res.json({ success: true, deleted: true, requestId });
   });
 
   // 2. Explicitly link consultant record
@@ -4629,8 +4766,12 @@ async function startServer() {
     });
   });
 
-  // Vite middleware for development vs static build for production
-  const distPath = path.join(currentDir, "dist");
+  // Vite middleware for development vs static build for production.
+  // When this file is bundled into dist/server.cjs, __dirname already points at
+  // dist, so fall back to the project root for the static build.
+  const distPath = fs.existsSync(path.join(currentDir, "dist", "index.html"))
+    ? path.join(currentDir, "dist")
+    : path.join(process.cwd(), "dist");
   const distExists = fs.existsSync(path.join(distPath, "index.html"));
 
   if (process.env.NODE_ENV === "production" && distExists) {

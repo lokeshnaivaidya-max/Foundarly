@@ -8,6 +8,7 @@ import { ChevronDown, Save, Upload, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { settingsService } from "@/services/settings";
 import { storageService } from "@/services/storage";
+import { OFFICIAL_LOGO_URL, resolveBrandLogoUrl } from "@/lib/brand";
 
 interface ContentField {
   key: string;
@@ -26,7 +27,7 @@ export default function AdminContent() {
   const { toast } = useToast();
   const [openSections, setOpenSections] = useState<string[]>(["logo"]);
   const [logoText, setLogoText] = useState("Foundarly");
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(OFFICIAL_LOGO_URL);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -47,8 +48,12 @@ export default function AdminContent() {
       
       if (logoTextSetting) setLogoText(logoTextSetting.setting_value || 'Foundarly');
       if (logoUrlSetting) {
-        setLogoUrl(logoUrlSetting.setting_value);
-        setLogoPreview(logoUrlSetting.setting_value);
+        const resolvedLogoUrl = resolveBrandLogoUrl(logoUrlSetting.setting_value);
+        setLogoUrl(resolvedLogoUrl);
+        setLogoPreview(resolvedLogoUrl);
+      } else {
+        setLogoUrl(OFFICIAL_LOGO_URL);
+        setLogoPreview(OFFICIAL_LOGO_URL);
       }
 
       // Load content sections

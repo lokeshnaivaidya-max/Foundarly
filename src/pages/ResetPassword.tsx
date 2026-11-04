@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Eye, EyeOff, Lock, CheckCircle2, AlertCircle, ArrowLeft } from "lucide-react";
 import { SEO } from "@/components/SEO";
 import { supabase } from "@/lib/supabase";
+import { OFFICIAL_LOGO_URL, OFFICIAL_LOGO_ALT } from "@/lib/brand";
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
@@ -111,7 +112,13 @@ export default function ResetPasswordPage() {
                 <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4">
                   <Lock className="w-6 h-6" />
                 </div>
-                <span className="font-display text-2xl font-bold text-gradient-gold">Foundarly</span>
+                <img
+                  src={OFFICIAL_LOGO_URL}
+                  alt={OFFICIAL_LOGO_ALT}
+                  className="h-20 w-auto mx-auto object-contain rounded-md"
+                  loading="eager"
+                  decoding="async"
+                />
                 <h1 className="font-display text-2xl font-bold mt-2">
                   {success
                     ? "Password Updated"

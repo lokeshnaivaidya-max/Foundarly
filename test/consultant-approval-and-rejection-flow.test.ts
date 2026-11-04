@@ -302,19 +302,16 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
 
       assert.ok(
-        source.includes('const { error: linkErr } = await activeDbClient') ||
-          source.includes('const { error: linkErr } = await'),
-        'user_id UPDATE must destructure { error }'
+        source.includes('const { error: linkErr } = await bounded('),
+        'user_id UPDATE must destructure { error } (bounded)'
       );
       assert.ok(
-        source.includes('const { error: emailErr } = await activeDbClient') ||
-          source.includes('const { error: emailErr } = await'),
-        'email UPDATE must destructure { error }'
+        source.includes('const { error: emailErr } = await bounded('),
+        'email UPDATE must destructure { error } (bounded)'
       );
       assert.ok(
-        source.includes('const { error: profileErr } = await activeDbClient') ||
-          source.includes('const { error: profileErr } = await'),
-        'profiles upsert must destructure { error }'
+        source.includes('const { error: profileErr } = await bounded('),
+        'profiles upsert must destructure { error } (bounded)'
       );
 
       const secureLogWarnCount = (source.match(/secureLog\.warn/g) || []).length;
@@ -327,16 +324,16 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
 
       assert.ok(
-        source.includes('const { error: linkErr } = await activeDbClient'),
-        'user_id UPDATE must destructure { error }'
+        source.includes('const { error: linkErr } = await bounded('),
+        'user_id UPDATE must destructure { error } (bounded)'
       );
       assert.ok(
-        source.includes('const { error: emailErr } = await activeDbClient'),
-        'email UPDATE must destructure { error }'
+        source.includes('const { error: emailErr } = await bounded('),
+        'email UPDATE must destructure { error } (bounded)'
       );
       assert.ok(
-        source.includes('const { error: profileErr } = await activeDbClient'),
-        'profiles upsert must destructure { error }'
+        source.includes('const { error: profileErr } = await bounded('),
+        'profiles upsert must destructure { error } (bounded)'
       );
 
       assert.ok(source.includes('if (linkErr)'), 'user_id link error must be checked');
@@ -1045,6 +1042,147 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
         protectedSource.includes("Couldn't Verify Your Access"),
         'The terminal state must be the explicit verification-failed card with retry'
       );
+    });
+  });
+
+  describe('13. Bounded server endpoints and dashboard section independence', () => {
+    const readApi = (p: string[]) => fs.readFileSync(path.join(process.cwd(), ...p), 'utf8');
+
+    test('/api/consultant/me executes within a bounded deadline on every path', () => {
+      const source = readApi(['api', 'consultant', 'me.ts']);
+      assert.ok(
+        source.includes('const deadline = Date.now() + 8000'),
+        'me.ts must enforce a shared server deadline'
+      );
+      const boundedCount = (source.match(/await bounded\(/g) || []).length;
+      assert.ok(
+        boundedCount >= 8,
+        `Every Supabase await in me.ts must be bounded (found ${boundedCount}, need >= 8)`
+      );
+      assert.ok(
+        !source.includes('await activeDbClient'),
+        'No un-bounded activeDbClient awaits may remain in me.ts'
+      );
+      assert.ok(
+        !source.includes('await supabaseAdminClient.auth.getUser(token)'),
+        'auth.getUser must be bounded'
+      );
+    });
+
+    test('/api/consultant/bookings exists with real data access and auth (was 404)', () => {
+      const source = readApi(['api', 'consultant', 'bookings.ts']);
+      assert.ok(source.includes("from('bookings')"), 'Endpoint must read real bookings data');
+      assert.ok(
+        source.includes('Missing Bearer token'),
+        'Endpoint must require Bearer authentication'
+      );
+      assert.ok(source.includes('consultant_id'), 'Bookings must be keyed by consultant_id');
+      assert.ok(
+        source.includes('success: true,\n      bookings') || source.includes('bookings: bookings || []'),
+        'Response shape must match consultantDashboardService expectations'
+      );
+      assert.ok(
+        (source.match(/await bounded\(/g) || []).length >= 3,
+        'All Supabase awaits in the endpoint must be bounded'
+      );
+    });
+
+    test('/api/follow-ups/consultant exists with real data access and auth (was 404)', () => {
+      const source = readApi(['api', 'follow-ups', 'consultant.ts']);
+      assert.ok(source.includes("from('follow_up_requests')"), 'Endpoint must read real follow-up data');
+      assert.ok(
+        source.includes('Missing Bearer token'),
+        'Endpoint must require Bearer authentication'
+      );
+      assert.ok(
+        source.includes('followUps: followUps || []'),
+        'Response shape must match followUpService expectations'
+      );
+      assert.ok(
+        (source.match(/await bounded\(/g) || []).length >= 3,
+        'All Supabase awaits in the endpoint must be bounded'
+      );
+    });
+
+    test('Dashboard renders with zeroed stats and independent section errors (no crash)', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'ConsultantDashboard.tsx'), 'utf8');
+      assert.ok(
+        !source.includes('useState<DashboardStats | null>(null)'),
+        'stats must never be nullable — a null stats render crashed the dashboard'
+      );
+      assert.ok(
+        source.includes('total_earnings: 0'),
+        'stats default must be a zeroed object'
+      );
+      assert.ok(
+        source.includes('sectionErrors'),
+        'Per-section error flags must exist'
+      );
+      assert.ok(
+        source.includes('Dashboard statistics could not be loaded'),
+        'Stats section must render its own retry state'
+      );
+      assert.ok(
+        source.includes('sectionErrors.bookings && bookings.length === 0') &&
+        source.includes('sectionErrors.followUps && followUps.length === 0') &&
+        source.includes('sectionErrors.payouts && payoutRequests.length === 0'),
+        'Bookings, follow-ups and payouts sections must fail independently'
+      );
+    });
+
+    test('Dashboard service endpoints are client-side bounded', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultantDashboard.ts'), 'utf8');
+      const meIdx = source.indexOf('"/api/consultant/me"');
+      const meBlock = source.slice(Math.max(0, meIdx - 200), meIdx + 500);
+      assert.ok(
+        meBlock.includes('AbortController'),
+        '/api/consultant/me fetch must be bounded client-side'
+      );
+      const bookingsIdx = source.indexOf('"/api/consultant/bookings"');
+      const bookingsBlock = source.slice(Math.max(0, bookingsIdx - 200), bookingsIdx + 500);
+      assert.ok(
+        bookingsBlock.includes('AbortController'),
+        '/api/consultant/bookings fetch must be bounded client-side'
+      );
+      const fuSource = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'followUpService.ts'), 'utf8');
+      const fuIdx = fuSource.indexOf("'/api/follow-ups/consultant'");
+      const fuBlock = fuSource.slice(Math.max(0, fuIdx - 200), fuIdx + 500);
+      assert.ok(
+        fuBlock.includes('AbortController'),
+        '/api/follow-ups/consultant fetch must be bounded client-side'
+      );
+    });
+
+    test('Concurrent auth events cannot stack duplicate resolution loops', async () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'), 'utf8');
+      assert.ok(
+        source.includes('resolveInFlightRef'),
+        'A duplicate-resolution guard must exist'
+      );
+      assert.ok(
+        source.includes('resolveInFlightRef.current && retryCount === 0'),
+        'Concurrent event-driven resolutions must be skipped; sequential retries bypass the guard'
+      );
+      // Model the guard semantics under TRUE concurrency: a second auth event
+      // arriving while the first resolution chain is in flight must not start
+      // a new chain; sequential retries belong to the same chain.
+      let inFlight = false;
+      let chains = 0;
+      const resolveProfile = async (retryCount: number): Promise<void> => {
+        if (inFlight && retryCount === 0) return;
+        inFlight = true;
+        try {
+          if (retryCount === 0) chains++;
+          if (retryCount < 2) {
+            await new Promise<void>((r) => setTimeout(r, 5)); // fetch in flight
+            await resolveProfile(retryCount + 1);
+          }
+        } finally {
+          inFlight = false;
+        }
+      };
+      await Promise.allSettled([resolveProfile(0), resolveProfile(0)]);
+      assert.equal(chains, 1, 'Only ONE resolution chain may run for concurrent events');
     });
   });
 });

@@ -46,7 +46,27 @@ export default function ConsultantDashboard() {
     }, { replace: true });
   };
   
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [stats, setStats] = useState<DashboardStats>({
+    // Non-null zeroed default: a failed/unresolved stats fetch must NEVER crash
+    // the dashboard render with "Cannot read properties of null" (the production
+    // "Something went wrong" error). Sections surface their own error states.
+    total_bookings: 0,
+    completed_sessions: 0,
+    upcoming_sessions: 0,
+    total_earnings: 0,
+    pending_earnings: 0,
+    paid_earnings: 0,
+    average_rating: null,
+    total_reviews: 0,
+  });
+  // Per-section load errors: one failed optional request (bookings, follow-ups,
+  // payouts, stats) must never take down the whole dashboard.
+  const [sectionErrors, setSectionErrors] = useState({
+    stats: false,
+    bookings: false,
+    payouts: false,
+    followUps: false,
+  });
   const [bookings, setBookings] = useState<ConsultantBooking[]>([]);
   const [payoutRequests, setPayoutRequests] = useState<PayoutRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -153,6 +173,8 @@ export default function ConsultantDashboard() {
 
     if (!silent) setLoading(true);
     try {
+      setSectionErrors({ stats: false, bookings: false, payouts: false, followUps: false });
+
       const userParam = { id: user.id, email: user.email };
 
       const safeTimeout = <T,>(p: Promise<T>, fallback: T, ms = 7000): Promise<T> => {
@@ -168,6 +190,15 @@ export default function ConsultantDashboard() {
         safeTimeout(consultantDashboardService.getPayoutRequests(userParam), []),
         safeTimeout(followUpService.listConsultantFollowUps(), { success: false, followUps: [] }),
       ]);
+
+      // Independent per-section error flags: a failed optional request renders
+      // that section's retry state — it can never crash the other sections.
+      setSectionErrors({
+        stats: statsRes.status === 'rejected' || !statsRes.value,
+        bookings: bookingsRes.status === 'rejected',
+        payouts: payoutsRes.status === 'rejected',
+        followUps: followUpsRes.status === 'rejected' || followUpsRes.value?.success === false,
+      });
 
       if (statsRes.status === "fulfilled" && statsRes.value) {
         setStats(statsRes.value);
@@ -422,6 +453,19 @@ export default function ConsultantDashboard() {
       </div>
 
       <div className="container mx-auto px-4 py-8">
+        {/* Stats section error: independent retry, never a dashboard-wide crash */}
+        {sectionErrors.stats && (
+          <div className="mb-6 bg-destructive/10 border border-destructive/30 rounded-lg p-4 text-sm flex items-center justify-between gap-3">
+            <div>
+              <div className="font-semibold text-destructive">Dashboard statistics could not be loaded</div>
+              <div className="text-xs text-muted-foreground">Other sections remain available.</div>
+            </div>
+            <Button size="sm" onClick={() => loadDashboardData()} className="shrink-0">
+              <RefreshCw className="h-4 w-4 mr-1" />
+              Retry
+            </Button>
+          </div>
+        )}
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
@@ -618,7 +662,17 @@ export default function ConsultantDashboard() {
               <h2 className="text-2xl font-bold">My Sessions</h2>
             </div>
 
-            {bookings.length === 0 ? (
+            {sectionErrors.bookings && bookings.length === 0 ? (
+              <Card className="p-8 text-center">
+                <AlertCircle className="h-10 w-10 text-destructive mx-auto mb-3 opacity-70" />
+                <h3 className="font-bold text-lg mb-1">Bookings could not be loaded</h3>
+                <p className="text-sm text-muted-foreground mb-4">This is usually temporary.</p>
+                <Button size="sm" variant="outline" onClick={() => loadDashboardData(true)}>
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  Retry
+                </Button>
+              </Card>
+            ) : bookings.length === 0 ? (
               <Card className="p-12 text-center">
                 <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                 <h3 className="font-bold text-lg mb-2">No bookings yet</h3>
@@ -789,7 +843,17 @@ export default function ConsultantDashboard() {
               </div>
             </div>
 
-            {followUps.length === 0 ? (
+            {sectionErrors.followUps && followUps.length === 0 ? (
+              <Card className="p-8 text-center">
+                <AlertCircle className="h-10 w-10 text-destructive mx-auto mb-3 opacity-70" />
+                <h3 className="font-bold text-lg mb-1">Follow-up requests could not be loaded</h3>
+                <p className="text-sm text-muted-foreground mb-4">This is usually temporary.</p>
+                <Button size="sm" variant="outline" onClick={() => loadDashboardData(true)}>
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  Retry
+                </Button>
+              </Card>
+            ) : followUps.length === 0 ? (
               <Card className="p-12 text-center">
                 <RotateCcw className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                 <h3 className="font-bold text-lg mb-2">No follow-up requests</h3>
@@ -965,7 +1029,17 @@ export default function ConsultantDashboard() {
           <TabsContent value="payouts" className="space-y-4">
             <h2 className="text-2xl font-bold mb-4">Payout Requests</h2>
 
-            {payoutRequests.length === 0 ? (
+            {sectionErrors.payouts && payoutRequests.length === 0 ? (
+              <Card className="p-8 text-center">
+                <AlertCircle className="h-10 w-10 text-destructive mx-auto mb-3 opacity-70" />
+                <h3 className="font-bold text-lg mb-1">Payout requests could not be loaded</h3>
+                <p className="text-sm text-muted-foreground mb-4">This is usually temporary.</p>
+                <Button size="sm" variant="outline" onClick={() => loadDashboardData(true)}>
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  Retry
+                </Button>
+              </Card>
+            ) : payoutRequests.length === 0 ? (
               <Card className="p-12 text-center">
                 <CreditCard className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                 <h3 className="font-bold text-lg mb-2">No payout requests</h3>

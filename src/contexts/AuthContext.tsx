@@ -161,6 +161,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Component-scope handle to the effect-scoped resolveProfile so an explicit
   // retry can be offered when authoritative resolution definitively fails.
   const resolveProfileRef = useRef<((userId: string, currentUser: User | null, retryCount?: number) => Promise<void>) | null>(null);
+  // Duplicate-resolution guard: concurrent auth events must not stack parallel
+  // resolution loops (fetchProfile is de-duplicated; this guards the loop itself).
+  const resolveInFlightRef = useRef<boolean>(false);
 
   const applyAuth = (newSession: Session | null, newUser: User | null) => {
     activeSessionRef.current = newSession;
@@ -190,6 +193,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       currentUser: User | null,
       retryCount = 0
     ) => {
+      // Duplicate-resolution guard: concurrent auth events (SIGNED_IN +
+      // INITIAL_SESSION + TOKEN_REFRESHED arriving together) must not stack
+      // parallel resolution sequences for the same user. Retries (retryCount
+      // > 0) are part of the SAME sequential loop and bypass this guard.
+      if (resolveInFlightRef.current && retryCount === 0) {
+        return;
+      }
+      resolveInFlightRef.current = true;
       try {
         // Controlled role re-check:
         // - Privileged roles (super_admin/admin/developer_admin/consultant) are
@@ -237,6 +248,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setRoleResolutionFailed(true);
         const cached = getCachedProfile(userId);
         if (cached) setProfile(cached);
+      } finally {
+        resolveInFlightRef.current = false;
       }
     };
 

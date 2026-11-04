@@ -170,7 +170,10 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
         if (listUsersErr) {
           console.warn('[Approve Consultant] Auth admin user lookup failed:', listUsersErr.message);
         } else {
-          const matchedUser = usersData?.users?.find(
+          // Explicit shape: supabase-js listUsers types resolve differently
+          // under Vercel's node16 moduleResolution (users can infer as never[]).
+          const users = (usersData as { users?: Array<{ id: string; email?: string | null }> } | null | undefined)?.users;
+          const matchedUser = users?.find(
             (u) => (u.email || '').toLowerCase().trim() === cleanEmail
           );
           if (matchedUser?.id) {

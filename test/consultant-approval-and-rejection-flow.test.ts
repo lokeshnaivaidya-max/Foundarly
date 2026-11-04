@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import approveHandler from '../api/admin/approve-consultant-application.js';
-import consultantMeHandler from '../api/consultant/me.js';
+import consultantMeHandler from '../src/server/consultant/me.js';
 import { consultantsService } from '../src/services/consultants.js';
 import { supabase } from '../src/lib/supabase.js';
 import {
@@ -299,7 +299,7 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     });
 
     test('Source code explicitly destructures { error } from all three Supabase write operations', () => {
-      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'server', 'consultant', 'me.ts'), 'utf8');
 
       assert.ok(
         source.includes('const { error: linkErr } = await bounded('),
@@ -321,7 +321,7 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     });
 
     test('Endpoint does not return 500 when Supabase writes fail with RLS errors', () => {
-      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'server', 'consultant', 'me.ts'), 'utf8');
 
       assert.ok(
         source.includes('const { error: linkErr } = await bounded('),
@@ -346,7 +346,7 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     });
 
     test('Consultant lookup prefers the authenticated UUID and only matches by verified email', () => {
-      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'server', 'consultant', 'me.ts'), 'utf8');
 
       // Verified-email flag must be derived from Supabase confirmation fields
       assert.ok(
@@ -362,7 +362,7 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     });
 
     test('Auto-activation from an approved application requires a verified email', () => {
-      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'server', 'consultant', 'me.ts'), 'utf8');
       assert.ok(
         source.includes('if (!consultant && userEmail && emailVerified) {'),
         'consultant_applications email lookup must require a verified email'
@@ -370,7 +370,7 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     });
 
     test('Consultant email backfill only writes verified emails', () => {
-      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'server', 'consultant', 'me.ts'), 'utf8');
       assert.ok(
         source.includes('if (!consultant.email && userEmail && emailVerified) {'),
         'Consultant email backfill must require a verified email'
@@ -378,7 +378,7 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     });
 
     test('Failed UUID linking is explicitly reported and never overwrites another account', () => {
-      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'server', 'consultant', 'me.ts'), 'utf8');
 
       // Linkage status starts truthful: only true when the record already
       // carries the authenticated UUID.
@@ -748,7 +748,7 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     });
 
     test('consultant/me reclaims provably stale UUID links for verified email matches', () => {
-      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'server', 'consultant', 'me.ts'), 'utf8');
       assert.ok(
         source.includes('storedLinkProvablyStale'),
         'Stale-link verification must exist'
@@ -909,7 +909,7 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       fs.readFileSync(path.join(process.cwd(), 'api', 'admin', 'approve-consultant-application.ts'), 'utf8');
 
     test('consultant/me auto-activation creates a NON-PUBLIC identity-only draft', () => {
-      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'server', 'consultant', 'me.ts'), 'utf8');
       const draftIdx = source.indexOf('NON-PUBLIC draft consultant record');
       assert.ok(draftIdx !== -1, 'Draft creation path must exist for approved applications');
       const insertBlock = source.slice(draftIdx, draftIdx + 1100);
@@ -1048,8 +1048,10 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
   describe('13. Bounded server endpoints and dashboard section independence', () => {
     const readApi = (p: string[]) => fs.readFileSync(path.join(process.cwd(), ...p), 'utf8');
 
+    const readServerApi = (p: string[]) => fs.readFileSync(path.join(process.cwd(), 'src', 'server', ...p), 'utf8');
+
     test('/api/consultant/me executes within a bounded deadline on every path', () => {
-      const source = readApi(['api', 'consultant', 'me.ts']);
+      const source = readServerApi(['consultant', 'me.ts']);
       assert.ok(
         source.includes('const deadline = Date.now() + 8000'),
         'me.ts must enforce a shared server deadline'
@@ -1070,7 +1072,7 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     });
 
     test('/api/consultant/bookings exists with real data access and auth (was 404)', () => {
-      const source = readApi(['api', 'consultant', 'bookings.ts']);
+      const source = readServerApi(['consultant', 'bookings.ts']);
       assert.ok(source.includes("from('bookings')"), 'Endpoint must read real bookings data');
       assert.ok(
         source.includes('Missing Bearer token'),
@@ -1183,6 +1185,82 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       };
       await Promise.allSettled([resolveProfile(0), resolveProfile(0)]);
       assert.equal(chains, 1, 'Only ONE resolution chain may run for concurrent events');
+    });
+  });
+
+  describe('14. Vercel Hobby Serverless Function limit (max 12)', () => {
+    const API_DIR = path.join(process.cwd(), 'api');
+
+    function listFunctionFiles(dir: string): string[] {
+      const out: string[] = [];
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          out.push(...listFunctionFiles(full));
+        } else if (entry.name.endsWith('.ts') && !entry.name.startsWith('_')) {
+          out.push(full);
+        }
+      }
+      return out;
+    }
+
+    test('Total Serverless Functions must stay within the Vercel Hobby limit of 12', () => {
+      const files = listFunctionFiles(API_DIR);
+      assert.ok(
+        files.length <= 12,
+        `Vercel Hobby allows at most 12 Serverless Functions; found ${files.length}: ${files.map(f => path.relative(API_DIR, f)).join(', ')}`
+      );
+    });
+
+    test('Consultant and meeting URLs are served by consolidated dynamic routers', () => {
+      const consultantRouter = path.join(API_DIR, 'consultant', '[action].ts');
+      const meetingRouter = path.join(API_DIR, 'meeting', '[action].ts');
+      assert.ok(fs.existsSync(consultantRouter), 'api/consultant/[action].ts must exist');
+      assert.ok(fs.existsSync(meetingRouter), 'api/meeting/[action].ts must exist');
+
+      const consultantRouterSource = fs.readFileSync(consultantRouter, 'utf8');
+      // URL preservation: the router must dispatch the preserved public URLs
+      assert.ok(consultantRouterSource.includes("case 'me':"), 'URL /api/consultant/me must be preserved');
+      assert.ok(consultantRouterSource.includes("case 'bookings':"), 'URL /api/consultant/bookings must be preserved');
+      assert.ok(
+        consultantRouterSource.includes('src/server/consultant/me.js'),
+        'me action must delegate to the real bounded handler'
+      );
+      assert.ok(
+        consultantRouterSource.includes('src/server/consultant/bookings.js'),
+        'bookings action must delegate to the real bounded handler'
+      );
+
+      const meetingRouterSource = fs.readFileSync(meetingRouter, 'utf8');
+      assert.ok(meetingRouterSource.includes("case 'validate-access':"), 'URL /api/meeting/validate-access must be preserved');
+      assert.ok(meetingRouterSource.includes("case 'record-join':"), 'URL /api/meeting/record-join must be preserved');
+      assert.ok(meetingRouterSource.includes("case 'notify-waiting':"), 'URL /api/meeting/notify-waiting must be preserved');
+
+      // The old individual function files must be gone (otherwise the limit is exceeded)
+      assert.ok(!fs.existsSync(path.join(API_DIR, 'consultant', 'me.ts')), 'api/consultant/me.ts must be consolidated');
+      assert.ok(!fs.existsSync(path.join(API_DIR, 'consultant', 'bookings.ts')), 'api/consultant/bookings.ts must be consolidated');
+      assert.ok(!fs.existsSync(path.join(API_DIR, 'meeting', 'validate-access.ts')), 'api/meeting/validate-access.ts must be consolidated');
+      assert.ok(!fs.existsSync(path.join(API_DIR, 'meeting', 'record-join.ts')), 'api/meeting/record-join.ts must be consolidated');
+      assert.ok(!fs.existsSync(path.join(API_DIR, 'meeting', 'notify-waiting.ts')), 'api/meeting/notify-waiting.ts must be consolidated');
+    });
+
+    test('Unknown consultant/meeting actions receive an explicit 404 (no ambiguous public access)', () => {
+      const consultantRouterSource = fs.readFileSync(path.join(API_DIR, 'consultant', '[action].ts'), 'utf8');
+      const meetingRouterSource = fs.readFileSync(path.join(API_DIR, 'meeting', '[action].ts'), 'utf8');
+      assert.ok(
+        consultantRouterSource.includes('Unknown consultant API action'),
+        'Unknown consultant actions must 404 explicitly'
+      );
+      assert.ok(
+        meetingRouterSource.includes('Unknown meeting API action'),
+        'Unknown meeting actions must 404 explicitly'
+      );
+      // Handlers themselves still enforce authentication (no public access added)
+      const meSource = fs.readFileSync(path.join(process.cwd(), 'src', 'server', 'consultant', 'me.ts'), 'utf8');
+      assert.ok(
+        meSource.includes('Missing Bearer token'),
+        'Consultant me action still enforces authentication after consolidation'
+      );
     });
   });
 });

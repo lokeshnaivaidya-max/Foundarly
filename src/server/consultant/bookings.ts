@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import { secureLog } from '../../src/utils/security.js';
+import { secureLog } from '../../utils/security.js';
 
 dotenv.config();
 

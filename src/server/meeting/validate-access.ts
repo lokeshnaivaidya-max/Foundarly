@@ -4,9 +4,9 @@ import {
   calculateRejoinEligibility,
   validateParticipantAccess,
   parseSessionTimes,
-} from '../../src/utils/meetingRejoin.js';
-import { meetingParticipantStorage } from '../../src/server/meetingParticipantStorage.js';
-import { checkDistributedRateLimit, extractClientIp } from '../../src/server/rateLimiter.js';
+} from '../../utils/meetingRejoin.js';
+import { meetingParticipantStorage } from '../meetingParticipantStorage.js';
+import { checkDistributedRateLimit, extractClientIp } from '../rateLimiter.js';
 
 dotenv.config();
 
@@ -89,7 +89,10 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }
   }
 
-  let cleanRoomId = (body?.roomId || '').trim();
+  // Explicit shape: under Vercel's node16 moduleResolution the parsed body can
+  // infer as unknown.
+  const bodyRecord = (body || {}) as { roomId?: string };
+  let cleanRoomId = (bodyRecord.roomId || '').trim();
   if (cleanRoomId.includes('/meeting/')) {
     cleanRoomId = cleanRoomId.split('/meeting/').pop() || cleanRoomId;
   }

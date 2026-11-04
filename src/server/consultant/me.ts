@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import { extractClientIp } from '../../src/server/rateLimiter.js';
-import { isAllowedAdminEmail } from '../../src/lib/authorization.js';
-import { secureLog } from '../../src/utils/security.js';
+import { extractClientIp } from '../rateLimiter.js';
+import { isAllowedAdminEmail } from '../../lib/authorization.js';
+import { secureLog } from '../../utils/security.js';
 
 dotenv.config();
 
@@ -52,6 +52,10 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     return res.status(401).json({ success: false, error: 'Authentication required. Missing Bearer token.' });
   }
 
+  // Hoisted for the outer catch: an error may occur before the authenticated
+  // user is known; the failure log must never itself throw (TS18004 catch bug).
+  let userId = '';
+
   try {
     // BOUNDED EXECUTION: server-side RLS/policy evaluation on some tables
     // (profiles, consultant_applications) has been observed to hang for
@@ -81,7 +85,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       return res.status(401).json({ success: false, error: 'Invalid or expired session token.' });
     }
 
-    const userId = user.id;
+    userId = user.id;
     const userEmail = (user.email || '').toLowerCase().trim();
     // Email-based identity matching is only trusted when Supabase has confirmed
     // the address (email_confirmed_at; confirmed_at covers legacy accounts and
@@ -240,7 +244,10 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
             }),
             'auth admin user lookup'
           );
-          const storedUser = usersData?.users?.find((u) => u.id === consultant.user_id);
+          // Explicit shape: supabase-js listUsers types resolve differently
+          // under Vercel's node16 moduleResolution (users can infer as never[]).
+          const users = (usersData as { users?: Array<{ id: string; email?: string | null }> } | null | undefined)?.users;
+          const storedUser = users?.find((u) => u.id === consultant.user_id);
           storedUserEmail = (storedUser?.email || '').toLowerCase().trim() || null;
         } catch {
           storedUserEmail = null;

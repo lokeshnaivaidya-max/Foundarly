@@ -56,12 +56,15 @@ export default function LoginPage() {
       const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from || queryFrom;
 
       if (isAdmin || isUserAdmin(user, profile)) {
+        console.log("[Login] Redirecting to admin", { fromPath, isAdmin, isUserAdmin: isUserAdmin(user, profile) });
         const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
         navigate(validAdminFrom, { replace: true });
       } else if (isConsultant || profile?.role === 'consultant' || profile?.is_consultant) {
+        console.log("[Login] Redirecting to consultant dashboard", { fromPath, isConsultant, profileRole: profile?.role, profileIsConsultant: profile?.is_consultant });
         const validConsultantFrom = (typeof fromPath === 'string' && fromPath.startsWith('/consultant')) ? fromPath : '/consultant/dashboard';
         navigate(validConsultantFrom, { replace: true });
       } else {
+        console.log("[Login] Redirecting to client dashboard", { fromPath, isConsultant, profileRole: profile?.role });
         const validUserFrom = (typeof fromPath === 'string' && fromPath !== "/" && fromPath !== "/login" && fromPath !== "/admin/login" && !fromPath.startsWith('/admin')) ? fromPath : '/my-bookings';
         navigate(validUserFrom, { replace: true });
       }
@@ -114,6 +117,14 @@ export default function LoginPage() {
         if (error) throw error;
         toast.success("Welcome back!");
 
+        console.log("[Login] signIn returned profile", {
+          userId: user?.id,
+          userProfileRole: userProfile?.role ?? 'null',
+          userProfileIsConsultant: userProfile?.is_consultant ?? false,
+          contextProfileRole: profile?.role ?? 'null',
+          activeProfileRole: (userProfile || profile)?.role ?? 'null',
+        });
+
         // Priority 1: Check meeting redirect for both clients and consultants
         const meetingTarget = getMeetingRedirect(location.state, location.search);
         if (meetingTarget) {
@@ -129,12 +140,15 @@ export default function LoginPage() {
         const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from || queryFrom;
 
         if (isUserAdmin(user, activeProfile)) {
+          console.log("[Login] handleSubmit: redirecting to admin", { activeProfileRole: activeProfile?.role, fromPath });
           const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
           navigate(validAdminFrom, { replace: true });
         } else if (activeProfile?.role === 'consultant' || activeProfile?.is_consultant) {
+          console.log("[Login] handleSubmit: redirecting to consultant dashboard", { activeProfileRole: activeProfile?.role, activeProfileIsConsultant: activeProfile?.is_consultant, fromPath });
           const validConsultantFrom = (typeof fromPath === 'string' && fromPath.startsWith('/consultant')) ? fromPath : '/consultant/dashboard';
           navigate(validConsultantFrom, { replace: true });
         } else {
+          console.log("[Login] handleSubmit: redirecting to client dashboard", { activeProfileRole: activeProfile?.role, fromPath });
           const validUserFrom = (typeof fromPath === 'string' && fromPath !== "/" && fromPath !== "/login" && fromPath !== "/admin/login" && !fromPath.startsWith('/admin')) ? fromPath : '/my-bookings';
           navigate(validUserFrom, { replace: true });
         }

@@ -375,6 +375,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let isConsultantUser = Boolean(profileData?.role === 'consultant' || profileData?.is_consultant);
         let consultantName = profileData?.full_name;
 
+        secureLog.info('[AuthContext] fetchProfile: consultant check initial state', {
+          userId,
+          profileRole: profileData?.role ?? 'null',
+          profileIsConsultant: profileData?.is_consultant ?? false,
+          isConsultantUser: isConsultantUser,
+        });
+
         // Try server-side authoritative check first
         try {
           const session = (await supabase.auth.getSession()).data.session;
@@ -397,6 +404,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (apiErr) {
           console.warn('[AuthContext] /api/consultant/me notice:', apiErr);
         }
+
+        secureLog.info('[AuthContext] fetchProfile: after /api/consultant/me', {
+          userId,
+          isConsultantUser: isConsultantUser,
+        });
 
         // Direct query check if not yet confirmed
         if (!isConsultantUser) {
@@ -429,6 +441,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   .then();
               }
             }
+
+            secureLog.info('[AuthContext] fetchProfile: after direct consultant query', {
+              userId,
+              matchedConsultantId: matchedConsultant?.id ?? null,
+              matchedConsultantUserId: matchedConsultant?.user_id ?? null,
+              isConsultantUser: isConsultantUser,
+            });
           } catch (consErr) {
             console.warn('[AuthContext] Consultant check non-fatal warning:', consErr);
           }
@@ -478,6 +497,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // 6. Regular Client
         const fallbackName = targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'User';
+        secureLog.warn('[AuthContext] fetchProfile: falling through to role=client', {
+          userId,
+          profileRole: profileData?.role ?? 'null',
+          isConsultantUser: isConsultantUser,
+        });
         const clientProfile: Profile = {
           id: userId,
           role: 'client',
@@ -506,6 +530,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Resilient fallback: Check cached profile or user metadata
         const cached = getCachedProfile(userId);
         if (cached) {
+          secureLog.warn('[AuthContext] fetchProfile: error fallback to cached profile', {
+            userId,
+            cachedRole: cached.role ?? 'null',
+          });
           setProfile(cached);
           return cached;
         }

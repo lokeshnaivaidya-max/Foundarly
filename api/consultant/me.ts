@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { extractClientIp } from '../../src/server/rateLimiter.js';
 import { isAllowedAdminEmail } from '../../src/lib/authorization.js';
+import { secureLog } from '../../src/utils/security.js';
 
 dotenv.config();
 
@@ -59,6 +60,11 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
     const userId = user.id;
     const userEmail = (user.email || '').toLowerCase().trim();
+
+    secureLog.info('[Consultant Me] Request received', {
+      userId,
+      hasEmail: Boolean(userEmail),
+    });
 
     const hasServiceRoleKey = Boolean(
       process.env.SUPABASE_SERVICE_ROLE_KEY &&
@@ -140,6 +146,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }
 
     if (!consultant) {
+      secureLog.info('[Consultant Me] No consultant record found for user', { userId, hasEmail: Boolean(userEmail) });
       return res.status(200).json({
         success: true,
         isConsultant: false,
@@ -147,24 +154,48 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       });
     }
 
-    // 3. Reconcile user_id link on consultant record
+    secureLog.info('[Consultant Me] Consultant record found', {
+      userId,
+      consultantId: consultant.id,
+      consultantUserId: consultant.user_id ?? null,
+      isActive: consultant.is_active ?? null,
+      hasMatchedUserId: consultant.user_id === userId,
+    });
+
+    // 3. Reconcile user_id link on consultant record (best-effort; requires admin RLS)
     if (consultant.user_id !== userId) {
-      console.log(`[Consultant Me] Linking consultant ${consultant.id} to user_id ${userId}`);
-      await activeDbClient
-        .from('consultants')
-        .update({ user_id: userId, is_active: true })
-        .eq('id', consultant.id);
-      consultant.user_id = userId;
-      consultant.is_active = true;
+      try {
+        await activeDbClient
+          .from('consultants')
+          .update({ user_id: userId, is_active: true })
+          .eq('id', consultant.id);
+        consultant.user_id = userId;
+        consultant.is_active = true;
+      } catch (linkErr) {
+        // Non-admin users cannot update consultants.user_id due to RLS.
+        // The consultant record is still valid; frontend direct-query fallback
+        // handles role resolution. Linking will be retried by admin-side sync.
+        console.warn(
+          '[Consultant Me] Could not link consultant user_id (RLS or write error):',
+          linkErr?.message || linkErr
+        );
+      }
     }
 
-    // 4. Reconcile email if missing
+    // 4. Reconcile email if missing (best-effort; requires admin RLS)
     if (!consultant.email && userEmail) {
-      await activeDbClient
-        .from('consultants')
-        .update({ email: userEmail })
-        .eq('id', consultant.id);
-      consultant.email = userEmail;
+      try {
+        await activeDbClient
+          .from('consultants')
+          .update({ email: userEmail })
+          .eq('id', consultant.id);
+        consultant.email = userEmail;
+      } catch (emailErr) {
+        console.warn(
+          '[Consultant Me] Could not update consultant email (RLS or write error):',
+          emailErr?.message || emailErr
+        );
+      }
     }
 
     // 5. Authoritatively update user profile role in profiles table (unless admin)
@@ -179,6 +210,11 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
         });
     }
 
+    secureLog.info('[Consultant Me] Returning isConsultant=true', {
+      userId,
+      consultantId: consultant.id,
+    });
+
     return res.status(200).json({
       success: true,
       isConsultant: true,
@@ -186,6 +222,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     });
   } catch (err: any) {
     console.error('[Consultant Me Endpoint] Error:', err);
+    secureLog.error('[Consultant Me] Request failed', { userId, error: err?.message || String(err) });
     return res.status(500).json({
       success: false,
       error: 'Failed to verify consultant status.',

@@ -106,14 +106,19 @@ function CanonicalDomainEnforcer() {
       return;
     }
 
+    // Already on the official canonical production domain
+    if (hostname === 'www.foundarlybusinessworld.in') {
+      return;
+    }
+
     if (
+      hostname === 'foundarlybusinessworld.in' ||
       hostname === 'foundarly-delta.vercel.app' ||
       hostname.endsWith('.vercel.app') ||
-      hostname === 'www.foundarlybusinessworld.in' ||
       hostname === 'foundarly.com' ||
       hostname === 'www.foundarly.com'
     ) {
-      const canonicalOrigin = 'https://foundarlybusinessworld.in';
+      const canonicalOrigin = 'https://www.foundarlybusinessworld.in';
       const target = canonicalOrigin + window.location.pathname + window.location.search + window.location.hash;
       window.location.replace(target);
     }

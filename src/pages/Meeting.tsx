@@ -8,16 +8,19 @@ import { Badge } from "@/components/ui/badge";
 import { SEO } from "@/components/SEO";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Video, VideoOff, Mic, MicOff, PhoneOff, Monitor, MonitorOff, User, Clock, ArrowLeft, AlertCircle, Copy, Check, Link2, Maximize, Minimize, Settings, Users, X, Calendar, RotateCcw, ShieldAlert, AlertTriangle, Bell, CheckCircle } from "lucide-react";
+import { Video, VideoOff, Mic, MicOff, PhoneOff, Monitor, MonitorOff, User, Clock, ArrowLeft, AlertCircle, Copy, Check, Link2, Maximize, Minimize, Settings, Users, X, Calendar, RotateCcw, ShieldAlert, AlertTriangle, Bell, CheckCircle, MessageSquare, Disc, CircleDot, StopCircle, Pause, Play, Download } from "lucide-react";
 import { toast } from "sonner";
 import { PageLoader } from "@/components/PageLoader";
 import { motion, AnimatePresence } from "framer-motion";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { WebRTCService } from "@/services/webrtcService";
+import { WebRTCService, ChatMessage } from "@/services/webrtcService";
 import { meetingService, MeetingAccessResponse } from "@/services/meetingService";
 import { meetingTrackingService } from "@/services/meetingTracking";
 import { hasParticipantJoinedLocal, recordParticipantJoinLocal, getMeetingActionLabel } from "@/utils/meetingRejoin";
 import { getCountdownTargetMs, parseBookingDateTime } from "@/utils/timeSlots";
+import MeetingChatPanel from "@/components/meeting/MeetingChatPanel";
+import MeetingRecordingModal from "@/components/meeting/MeetingRecordingModal";
+import { MeetingRecorder, RecordingResult, RecordingStatus } from "@/utils/meetingRecorder";
 
 interface BookingWithConsultant {
   id: string;
@@ -358,6 +361,136 @@ export default function MeetingPage() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
 
+  // In-Meeting Real-time Chat States
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const canonical = effectiveRoomId ? `foundarly_chat_${effectiveRoomId.replace(/^foundarly-/, '')}` : 'foundarly_chat_default';
+      const cached = sessionStorage.getItem(canonical);
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  // In-Meeting Recording Engine States
+  const [recorder] = useState(() => new MeetingRecorder());
+  const [recordingStatus, setRecordingStatus] = useState<RecordingStatus>('idle');
+  const [recordingDurationFormatted, setRecordingDurationFormatted] = useState("00:00");
+  const [recordingResult, setRecordingResult] = useState<RecordingResult | null>(null);
+  const [showRecordingModal, setShowRecordingModal] = useState(false);
+
+  // Load cached messages when room changes
+  useEffect(() => {
+    const canonicalRoom = getCanonicalRoomId(effectiveRoomId, booking);
+    if (!canonicalRoom) return;
+    try {
+      const cached = sessionStorage.getItem(`foundarly_chat_${canonicalRoom}`);
+      if (cached) {
+        setChatMessages(JSON.parse(cached));
+      }
+    } catch {}
+  }, [effectiveRoomId, booking]);
+
+  // Hook recorder events
+  useEffect(() => {
+    recorder.onStatusChange = (newStatus) => {
+      setRecordingStatus(newStatus);
+      if (newStatus === 'recording') {
+        toast.success("Meeting recording started");
+      } else if (newStatus === 'paused') {
+        toast.info("Recording paused");
+      } else if (newStatus === 'stopped') {
+        toast.info("Recording stopped");
+      }
+    };
+
+    recorder.onTimeUpdate = (_sec, formatted) => {
+      setRecordingDurationFormatted(formatted);
+    };
+
+    recorder.onRecordingComplete = (res) => {
+      setRecordingResult(res);
+      setShowRecordingModal(true);
+      toast.success("Consultation recording ready! You can now preview and save.");
+    };
+
+    recorder.onError = (err) => {
+      console.error("[MeetingRecorder] Error:", err);
+      toast.error(err.message || "Recording error occurred");
+    };
+
+    return () => {
+      recorder.cleanup();
+    };
+  }, [recorder]);
+
+  // Recording controls
+  const handleToggleRecording = async () => {
+    if (recordingStatus === 'idle' || recordingStatus === 'stopped') {
+      try {
+        const sessionTitle = booking?.consultants?.name 
+          ? `Foundarly - Consultation with ${booking.consultants.name}` 
+          : "Foundarly Consultation Session";
+        await recorder.startRecording({
+          localMicStream: localStream,
+          sessionTitle,
+        });
+      } catch (err: any) {
+        console.error("Start recording failed:", err);
+        if (err.name !== 'NotAllowedError') {
+          toast.error("Could not start recording: " + (err.message || "Unknown error"));
+        }
+      }
+    } else if (recordingStatus === 'recording') {
+      recorder.pauseRecording();
+    } else if (recordingStatus === 'paused') {
+      recorder.resumeRecording();
+    }
+  };
+
+  const handleStopRecording = () => {
+    if (recorder.isRecording()) {
+      recorder.stopRecording();
+    }
+  };
+
+  const handleSendChatMessage = async (text: string) => {
+    const canonicalRoom = getCanonicalRoomId(effectiveRoomId, booking);
+    const senderName = profile?.full_name || 
+                       (userRole === 'consultant' ? booking?.consultants?.name : booking?.name) || 
+                       user?.email?.split('@')[0] || 
+                       'Participant';
+    const roleLabel = userRole === 'consultant' 
+      ? 'Consultant' 
+      : (userRole === 'admin' ? 'Admin' : 'Client');
+
+    const sent = await webrtcServiceRef.current?.sendChatMessage(text, roleLabel, senderName);
+    if (sent) {
+      setChatMessages((prev) => {
+        const updated = [...prev, sent];
+        try {
+          sessionStorage.setItem(`foundarly_chat_${canonicalRoom}`, JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+    } else {
+      toast.error("Could not deliver chat message");
+    }
+  };
+
+  const toggleChat = () => {
+    setIsChatOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setUnreadChatCount(0);
+        setShowParticipants(false);
+      }
+      return next;
+    });
+  };
+
   const [showRescheduleDialog, setShowRescheduleDialog] = useState(false);
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [rescheduleTime, setRescheduleTime] = useState("");
@@ -599,6 +732,24 @@ export default function MeetingPage() {
         setPresenceParticipants(participants);
       };
 
+      // In-Meeting Chat Message Listener
+      service.onChatMessage = (msg) => {
+        setChatMessages((prev) => {
+          const updated = [...prev, msg];
+          try {
+            sessionStorage.setItem(`foundarly_chat_${canonicalRoom}`, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+        setIsChatOpen((open) => {
+          if (!open) {
+            setUnreadChatCount((c) => c + 1);
+            toast.info(`New message from ${msg.senderName}: "${msg.text.slice(0, 30)}${msg.text.length > 30 ? '...' : ''}"`);
+          }
+          return open;
+        });
+      };
+
       // 1. Initialize local stream
       const stream = await service.initLocalStream(!videoOff, !muted);
       setLocalStream(stream);
@@ -653,6 +804,10 @@ export default function MeetingPage() {
         ? (new Date().getTime() - callStartTime.getTime()) / (1000 * 60)
         : 0;
       const effectiveParticipantCount = Math.max(presenceCount, remoteParticipants.size + 1);
+
+      if (recorder.isRecording()) {
+        recorder.stopRecording();
+      }
 
       if (webrtcServiceRef.current) {
         await webrtcServiceRef.current.leave();

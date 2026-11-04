@@ -6,7 +6,7 @@
  * (such as being logged into foundarly-delta.vercel.app while email opens a different domain).
  */
 
-const DEFAULT_PRODUCTION_DOMAIN = 'https://foundarly-delta.vercel.app';
+const DEFAULT_PRODUCTION_DOMAIN = 'https://www.foundarlybusinessworld.in';
 const BRAND_PRODUCTION_DOMAIN = 'https://www.foundarlybusinessworld.in';
 
 interface RequestWithHeaders {
@@ -16,6 +16,7 @@ interface RequestWithHeaders {
 
 /**
  * Extracts a normalized, clean base URL (no trailing slash) from an input string.
+ * Automatically normalizes any apex, legacy, or Vercel preview domain to the canonical production domain.
  */
 export function sanitizeOrigin(urlStr?: string | null): string | null {
   if (!urlStr || typeof urlStr !== 'string') return null;
@@ -24,6 +25,15 @@ export function sanitizeOrigin(urlStr?: string | null): string | null {
 
   try {
     const parsed = new URL(clean.startsWith('http') ? clean : `https://${clean}`);
+    if (
+      parsed.hostname === 'foundarlybusinessworld.in' ||
+      parsed.hostname === 'foundarly-delta.vercel.app' ||
+      parsed.hostname.endsWith('.vercel.app') ||
+      parsed.hostname === 'foundarly.com' ||
+      parsed.hostname === 'www.foundarly.com'
+    ) {
+      return BRAND_PRODUCTION_DOMAIN;
+    }
     return `${parsed.protocol}//${parsed.host}`.replace(/\/+$/, '');
   } catch {
     return null;

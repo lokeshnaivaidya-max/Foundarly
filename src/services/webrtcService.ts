@@ -11,6 +11,15 @@ export interface SignalPayload {
   email?: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderRole?: string;
+  text: string;
+  timestamp: string;
+}
+
 export interface WebRTCUser {
   id: string;
   stream?: MediaStream;
@@ -46,6 +55,7 @@ export class WebRTCService {
   public onRemoteUserLeft?: (remoteUserId: string) => void;
   public onPresenceUpdate?: (participantCount: number, participants: Array<{ id: string; name?: string; email?: string }>) => void;
   public onConnectionStateChange?: (state: RTCPeerConnectionState, remoteUserId: string) => void;
+  public onChatMessage?: (message: ChatMessage) => void;
 
   constructor(userId: string, userInfo?: { name?: string; email?: string }) {
     this.userId = userId;
@@ -192,6 +202,14 @@ export class WebRTCService {
     // Listen for broadcast signaling events
     this.channel.on('broadcast', { event: 'signal' }, async ({ payload }) => {
       await this.handleSignalPayload(payload);
+    });
+
+    // Listen for real-time in-meeting chat messages
+    this.channel.on('broadcast', { event: 'chat' }, ({ payload }) => {
+      console.log('[WebRTC Chat] Received incoming chat payload:', payload);
+      if (this.onChatMessage && payload) {
+        this.onChatMessage(payload as ChatMessage);
+      }
     });
 
     // Listen for presence changes
@@ -648,6 +666,35 @@ export class WebRTCService {
       });
     } catch (err) {
       console.error('[Signaling] Failed to send broadcast signal:', err);
+    }
+  }
+
+  /**
+   * Broadcast an in-meeting chat message to all participants in the room
+   */
+  async sendChatMessage(text: string, senderRole: string = 'Participant', customName?: string): Promise<ChatMessage | null> {
+    const cleanText = text.trim();
+    if (!cleanText || !this.channel) return null;
+
+    const chatMsg: ChatMessage = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      senderId: this.userId,
+      senderName: customName || this.userInfo.name || 'Participant',
+      senderRole,
+      text: cleanText,
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      await this.channel.send({
+        type: 'broadcast',
+        event: 'chat',
+        payload: chatMsg,
+      });
+      return chatMsg;
+    } catch (err) {
+      console.error('[WebRTC Chat] Failed to broadcast message:', err);
+      return null;
     }
   }
 

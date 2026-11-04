@@ -43,10 +43,10 @@
       "has": [
         {
           "type": "host",
-          "value": "foundarly-delta.vercel.app"
+          "value": "foundarlybusinessworld.in"
         }
       ],
-      "destination": "https://foundarlybusinessworld.in/:path*",
+      "destination": "https://www.foundarlybusinessworld.in/:path*",
       "permanent": true
     },
     {
@@ -54,10 +54,10 @@
       "has": [
         {
           "type": "host",
-          "value": "www.foundarlybusinessworld.in"
+          "value": "foundarly-delta.vercel.app"
         }
       ],
-      "destination": "https://foundarlybusinessworld.in/:path*",
+      "destination": "https://www.foundarlybusinessworld.in/:path*",
       "permanent": true
     },
     {
@@ -68,7 +68,7 @@
           "value": "foundarly.com"
         }
       ],
-      "destination": "https://foundarlybusinessworld.in/:path*",
+      "destination": "https://www.foundarlybusinessworld.in/:path*",
       "permanent": true
     },
     {
@@ -79,7 +79,7 @@
           "value": "www.foundarly.com"
         }
       ],
-      "destination": "https://foundarlybusinessworld.in/:path*",
+      "destination": "https://www.foundarlybusinessworld.in/:path*",
       "permanent": true
     }
   ],

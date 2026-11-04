@@ -164,43 +164,43 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
     // 3. Reconcile user_id link on consultant record (best-effort; requires admin RLS)
     if (consultant.user_id !== userId) {
-      try {
-        await activeDbClient
-          .from('consultants')
-          .update({ user_id: userId, is_active: true })
-          .eq('id', consultant.id);
-        consultant.user_id = userId;
-        consultant.is_active = true;
-      } catch (linkErr) {
+      const { error: linkErr } = await activeDbClient
+        .from('consultants')
+        .update({ user_id: userId, is_active: true })
+        .eq('id', consultant.id);
+      if (linkErr) {
         // Non-admin users cannot update consultants.user_id due to RLS.
         // The consultant record is still valid; frontend direct-query fallback
         // handles role resolution. Linking will be retried by admin-side sync.
-        console.warn(
+        secureLog.warn(
           '[Consultant Me] Could not link consultant user_id (RLS or write error):',
-          linkErr?.message || linkErr
+          { userId, consultantId: consultant.id, error: linkErr?.message || String(linkErr) }
         );
+      } else {
+        consultant.user_id = userId;
+        consultant.is_active = true;
       }
     }
 
     // 4. Reconcile email if missing (best-effort; requires admin RLS)
     if (!consultant.email && userEmail) {
-      try {
-        await activeDbClient
-          .from('consultants')
-          .update({ email: userEmail })
-          .eq('id', consultant.id);
-        consultant.email = userEmail;
-      } catch (emailErr) {
-        console.warn(
+      const { error: emailErr } = await activeDbClient
+        .from('consultants')
+        .update({ email: userEmail })
+        .eq('id', consultant.id);
+      if (emailErr) {
+        secureLog.warn(
           '[Consultant Me] Could not update consultant email (RLS or write error):',
-          emailErr?.message || emailErr
+          { userId, consultantId: consultant.id, error: emailErr?.message || String(emailErr) }
         );
+      } else {
+        consultant.email = userEmail;
       }
     }
 
     // 5. Authoritatively update user profile role in profiles table (unless admin)
     if (!isSuper && !isDev) {
-      await activeDbClient
+      const { error: profileErr } = await activeDbClient
         .from('profiles')
         .upsert({
           id: userId,
@@ -208,6 +208,12 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           full_name: consultant.name,
           is_consultant: true,
         });
+      if (profileErr) {
+        secureLog.warn(
+          '[Consultant Me] Could not update profile role (RLS or write error):',
+          { userId, error: profileErr?.message || String(profileErr) }
+        );
+      }
     }
 
     secureLog.info('[Consultant Me] Returning isConsultant=true', {

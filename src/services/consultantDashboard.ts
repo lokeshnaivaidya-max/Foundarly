@@ -79,15 +79,21 @@ function parseUserIdentifier(userParam: UserIdentifier): { userId: string; userE
 async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; name: string; email: string | null; user_id: string | null } | null> {
   const { userId, userEmail } = parseUserIdentifier(userParam);
 
-  // 1. Try server API /api/consultant/me first (authoritative & auto-links)
+  // 1. Try server API /api/consultant/me first (authoritative & auto-links).
+  // Bounded with an AbortController — a hung server function must never leave
+  // this request pending indefinitely (production incident evidence).
   try {
     const session = (await supabase.auth.getSession()).data.session;
     if (session?.access_token) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       const res = await fetch("/api/consultant/me", {
         headers: {
           Authorization: `Bearer ${session.access_token}`,
         },
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       const json = await res.json().catch(() => null);
       if (res.ok && json?.success && json?.consultant) {
         return json.consultant;
@@ -207,15 +213,19 @@ export const consultantDashboardService = {
 
   // Get consultant's bookings
   async getConsultantBookings(userParam: UserIdentifier): Promise<ConsultantBooking[]> {
-    // 1. Try server API /api/consultant/bookings first
+    // 1. Try server API /api/consultant/bookings first (bounded — see me.ts note)
     try {
       const session = (await supabase.auth.getSession()).data.session;
       if (session?.access_token) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
         const res = await fetch("/api/consultant/bookings", {
           headers: {
             Authorization: `Bearer ${session.access_token}`,
           },
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         const json = await res.json().catch(() => null);
         if (res.ok && json?.success && Array.isArray(json?.bookings)) {
           return json.bookings;

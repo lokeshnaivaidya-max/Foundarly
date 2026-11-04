@@ -57,12 +57,14 @@ export function getCanonicalSiteUrl(req?: RequestWithHeaders, explicitUrl?: stri
     return sanitizedExplicit;
   }
 
-  // 2. Client-side Vite environment variables
-  if (typeof import.meta !== 'undefined' && import.meta.env) {
-    const viteSiteUrl = sanitizeOrigin(import.meta.env.VITE_SITE_URL as string);
+  // 2. Client-side Vite environment variables (typed cast: Vercel's isolated
+  // per-function type-check lacks Vite's ImportMeta.env ambient types).
+  const viteEnv = (import.meta as { env?: Record<string, string | undefined> }).env;
+  if (typeof import.meta !== 'undefined' && viteEnv) {
+    const viteSiteUrl = sanitizeOrigin(viteEnv.VITE_SITE_URL as string);
     if (viteSiteUrl) return viteSiteUrl;
 
-    const viteAppUrl = sanitizeOrigin(import.meta.env.VITE_APP_URL as string);
+    const viteAppUrl = sanitizeOrigin(viteEnv.VITE_APP_URL as string);
     if (viteAppUrl) return viteAppUrl;
   }
 

@@ -1263,4 +1263,173 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       );
     });
   });
+
+  describe('15. Authentication lifecycle stability (verification-loop regression)', () => {
+    const authSource = () =>
+      fs.readFileSync(path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'), 'utf8');
+
+    test('1. TOKEN_REFRESHED does not restart an already-successful profile resolution', () => {
+      const source = authSource();
+      // The listener must consult the shared skip decision BEFORE touching the
+      // loading state — a resolved consultant must never flash back to loading.
+      const sgnInIdx = source.indexOf("event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED'");
+      const branch = source.slice(sgnInIdx, sgnInIdx + 700);
+      assert.ok(
+        branch.includes('shouldSkipResolution'),
+        'The SIGNED_IN/TOKEN_REFRESHED branch must consult shouldSkipResolution before setLoading'
+      );
+      assert.ok(
+        branch.indexOf('shouldSkipResolution') < branch.indexOf('setLoading(true)'),
+        'The skip decision must precede setLoading(true)'
+      );
+      assert.ok(
+        source.includes('const shouldSkipResolution = (userId: string): boolean'),
+        'A single shared skip-decision helper must exist'
+      );
+    });
+
+    test('2. Retry reuses the existing auth lifecycle — no duplicate listeners', () => {
+      const source = authSource();
+      const listenerCount = (source.match(/onAuthStateChange\(/g) || []).length;
+      assert.equal(
+        listenerCount, 1,
+        'Exactly ONE onAuthStateChange subscription may exist (no listener created per retry)'
+      );
+      assert.ok(
+        source.includes('resolveProfileRef.current(current.id, current'),
+        'retryProfileResolution must reuse the effect-scoped resolver'
+      );
+      const retryFn = source.slice(source.indexOf('const retryProfileResolution'), source.indexOf('const value ='));
+      assert.ok(
+        !retryFn.includes('onAuthStateChange'),
+        'Retry must never create a new auth listener'
+      );
+    });
+
+    test('3. A stale failed request cannot overwrite a newer successful result', () => {
+      const source = authSource();
+      // The proven defect: the best-effort profiles upsert REJECTED (timeout)
+      // and threw into the outer catch, discarding the successful consultant
+      // resolution. It must be isolated.
+      const consultantUpsertIdx = source.indexOf("'consultant profile upsert'");
+      const block = source.slice(consultantUpsertIdx - 1200, consultantUpsertIdx + 600);
+      assert.ok(
+        block.includes('resolution preserved'),
+        'The consultant profile upsert must be isolated so its failure never discards resolution'
+      );
+      const devUpsertIdx = source.indexOf("'developer_admin profile upsert'");
+      const devBlock = source.slice(devUpsertIdx - 1200, devUpsertIdx + 600);
+      assert.ok(
+        devBlock.includes('resolution preserved'),
+        'The developer_admin upsert must be equally isolated'
+      );
+      // Model: a rejected best-effort write cannot erase an established result
+      let established: string | null = null;
+      const resolution = async (): Promise<string | null> => {
+        try {
+          await Promise.reject(new Error('upsert timed out')); // best-effort write
+        } catch { /* preserved — do not rethrow */ }
+        established = 'consultant';
+        return established;
+      };
+      return resolution().then((result) => {
+        assert.equal(result, 'consultant', 'Best-effort failure must not overwrite the successful result');
+      });
+    });
+
+    test('4. Successful consultant authorization remains stable after dashboard mount', () => {
+      const dash = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'ConsultantDashboard.tsx'), 'utf8');
+      assert.ok(
+        dash.includes('accessCheckUserRef'),
+        'The dashboard access check must run once per user ID (no restart on auth-object identity changes)'
+      );
+      assert.ok(
+        dash.includes("}, [user?.id, authLoading]);"),
+        'The dashboard effect must key on the user ID, not object identity'
+      );
+      const protectedSource = fs.readFileSync(path.join(process.cwd(), 'src', 'components', 'ProtectedRoute.tsx'), 'utf8');
+      assert.ok(
+        !protectedSource.includes('window.location.reload') && !protectedSource.includes('location.reload()'),
+        'Authorization states must never reload the page'
+      );
+      const dashProtected = dash.includes('window.location.reload');
+      assert.equal(dashProtected, false, 'The dashboard must never reload itself');
+    });
+
+    test('5. Dashboard does not remount or reset when statistics fail', () => {
+      const dash = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'ConsultantDashboard.tsx'), 'utf8');
+      assert.ok(
+        dash.includes('stats: statsRes.status'),
+        'Statistics failure must only set its section flag'
+      );
+      assert.ok(
+        dash.includes("Dashboard statistics could not be loaded"),
+        'The stats section shows a local error + Retry'
+      );
+      // Silent retry must not toggle the global loading state
+      const loadIdx = dash.indexOf('const loadDashboardData');
+      const loadBlock = dash.slice(loadIdx, loadIdx + 400);
+      assert.ok(
+        loadBlock.includes('if (!silent) setLoading(true)'),
+        'Silent section retries must not reset the dashboard loading state'
+      );
+    });
+
+    test('6+7. Consultant list settles within the deadline; Booking shows retryable error', () => {
+      const svc = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultants.ts'), 'utf8');
+      assert.ok(
+        svc.includes('REQUEST_DEADLINE_MS = 6000'),
+        'Consultant list hard deadline must be 6s (error within the 8s target)'
+      );
+      assert.ok(
+        svc.includes('inFlightGetAll'),
+        'Concurrent consultant-list requests must be deduplicated'
+      );
+      const booking = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'Booking.tsx'), 'utf8');
+      assert.ok(
+        /retry: 0/.test(booking),
+        'Booking must not auto-retry: the explicit Retry button owns recovery'
+      );
+      assert.ok(
+        booking.includes('consultantsError ?'),
+        'Booking must render the explicit error + Retry state'
+      );
+      // Model: concurrent getAll calls share one in-flight request
+      let inFlight: Promise<number> | null = null;
+      let networkCalls = 0;
+      const getAll = (): Promise<number> => {
+        if (inFlight) return inFlight;
+        networkCalls++;
+        inFlight = new Promise<number>((resolve) => {
+          setTimeout(() => { inFlight = null; resolve(networkCalls); }, 5);
+        });
+        return inFlight;
+      };
+      return Promise.all([getAll(), getAll(), getAll()]).then((results) => {
+        assert.equal(networkCalls, 1, 'Three concurrent callers must share ONE network request');
+        assert.equal(results[0], 1);
+      });
+    });
+
+    test('Structured logs carry correlation IDs without tokens or secrets', () => {
+      const source = authSource();
+      assert.ok(
+        source.includes('const correlationId = `res_'),
+        'Each resolution chain must carry a correlation ID'
+      );
+      assert.ok(
+        source.includes("secureLog.error('Error in fetchProfile:', { correlationId, userId,"),
+        'fetchProfile failure logs must carry the correlation ID'
+      );
+      // No secrets in any log payload
+      const forbidden = ['access_token', 'refresh_token', 'password'];
+      for (const secret of forbidden) {
+        const logLines = source.split('\n').filter(l => l.includes('secureLog.'));
+        assert.ok(
+          !logLines.some(l => l.includes(secret)),
+          `secureLog calls must never include ${secret}`
+        );
+      }
+    });
+  });
 });

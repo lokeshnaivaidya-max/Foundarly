@@ -7,7 +7,7 @@
  * matching Foundarly's official brand palette, typography, and visual identity.
  */
 
-import { getCanonicalSiteUrl } from './canonicalUrl';
+import { getCanonicalSiteUrl } from './canonicalUrl.js';
 
 export const FOUNDARLY_BRAND = {
   name: 'Foundarly',

@@ -14,6 +14,12 @@ type ConsultantUpdate = Database['public']['Tables']['consultants']['Update'];
 
 let consultantsCache: { data: Consultant[]; timestamp: number } | null = null;
 const CACHE_TTL = 30000; // 30 seconds
+// REQUEST DEADLINE: the acceptance target is a useful error within 8 seconds —
+// the request itself must settle in 6s so a failure surfaces in time.
+const REQUEST_DEADLINE_MS = 6000;
+// CONCURRENT REQUEST DEDUPE: parallel callers (e.g. the Booking page and the
+// chatbot widget) share ONE in-flight request instead of duplicating it.
+let inFlightGetAll: { activeOnly: boolean; promise: Promise<Consultant[]> } | null = null;
 
 export const consultantsService = {
   async getAll(activeOnly = false, forceRefresh = false) {
@@ -21,10 +27,24 @@ export const consultantsService = {
       return activeOnly ? consultantsCache.data.filter(c => c.is_active) : consultantsCache.data;
     }
 
+    // Dedupe concurrent identical requests (same activeOnly scope)
+    if (inFlightGetAll && inFlightGetAll.activeOnly === activeOnly) {
+      return inFlightGetAll.promise;
+    }
+
+    const request = this.performGetAll(activeOnly)
+      .finally(() => {
+        if (inFlightGetAll?.promise === request) inFlightGetAll = null;
+      });
+    inFlightGetAll = { activeOnly, promise: request };
+    return request;
+  },
+
+  async performGetAll(activeOnly: boolean): Promise<Consultant[]> {
     // Direct Supabase query with timeout - no unnecessary admin API call for regular users
     for (let attempt = 0; attempt < 2; attempt++) {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_DEADLINE_MS);
 
       try {
         let query = supabase.from('consultants').select('*').order('created_at', { ascending: false });
@@ -41,7 +61,7 @@ export const consultantsService = {
         const { data, error } = await Promise.race([
           query.abortSignal(controller.signal),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Consultant list request timed out')), 8000)
+            setTimeout(() => reject(new Error('Consultant list request timed out')), REQUEST_DEADLINE_MS)
           ),
         ]) as { data: Consultant[] | null; error: { message?: string } | null };
         clearTimeout(timeoutId);

@@ -106,8 +106,11 @@ export default function BookingPage() {
   const { data: consultants, isLoading, error: consultantsError, refetch: refetchConsultants } = useQuery({
     queryKey: ["consultants", "active"],
     queryFn: () => consultantsService.getAll(true, true), // forceRefresh=true on every refetch
-    retry: 2,
-    retryDelay: 1000,
+    // NO automatic retries: the request settles in <=6s (hard deadline) and a
+    // failure surfaces the explicit error + Retry button immediately (acceptance:
+    // useful error within 8 seconds). Concurrent duplicate requests are
+    // deduplicated inside consultantsService.
+    retry: 0,
     staleTime: 0, // Always refetch to avoid stale consultant data
   });
 

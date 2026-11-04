@@ -1,5 +1,5 @@
 import type { User } from '@supabase/supabase-js';
-import type { Database } from '@/lib/database.types';
+import type { Database } from './database.types.js';
 
 export type UserRole = 'super_admin' | 'developer_admin' | 'admin' | 'consultant' | 'client';
 
@@ -38,10 +38,13 @@ type Profile = Database['public']['Tables']['profiles']['Row'] | {
  * Personal email accounts are NEVER granted super admin rights by default.
  */
 export function getAdminAllowlist(): string[] {
+  // Typed cast: Vercel's isolated per-function type-check does not include
+  // Vite's ImportMeta.env ambient types (TS2339) — runtime behaviour unchanged.
+  const viteEnv = (import.meta as { env?: Record<string, string | undefined> }).env;
   const envEmails = (
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPER_ADMIN_EMAILS) ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_EMAILS) ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_EMAIL) ||
+    (typeof import.meta !== 'undefined' && viteEnv?.VITE_SUPER_ADMIN_EMAILS) ||
+    (typeof import.meta !== 'undefined' && viteEnv?.VITE_ADMIN_EMAILS) ||
+    (typeof import.meta !== 'undefined' && viteEnv?.VITE_ADMIN_EMAIL) ||
     (typeof process !== 'undefined' && (process.env?.ADMIN_EMAILS || process.env?.SUPER_ADMIN_EMAILS)) ||
     ''
   );

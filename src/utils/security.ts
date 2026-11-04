@@ -259,7 +259,8 @@ export function validateEnvVars(): void {
     'VITE_RAZORPAY_KEY_ID',
   ];
 
-  const missing = required.filter(key => !import.meta.env[key]);
+  const viteEnv = (import.meta as { env?: Record<string, string | undefined> }).env;
+  const missing = required.filter(key => !viteEnv?.[key]);
   
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);

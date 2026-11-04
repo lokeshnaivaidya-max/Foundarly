@@ -246,11 +246,15 @@ export const followUpService = {
     if (!token || !user) return { success: false, error: 'Authentication required', followUps: [] };
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
       const response = await fetch('/api/follow-ups/consultant', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       const data = await response.json().catch(() => null);
       if (response.ok && data?.success) {

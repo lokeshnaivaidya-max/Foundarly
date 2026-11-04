@@ -113,6 +113,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const activeSessionRef = useRef<Session | null>(initialSession);
   const inFlightFetchRef = useRef<Map<string, Promise<Profile | null>>>(new Map());
   const isMountedRef = useRef(true);
+  // Tracks whether initial session restoration has been processed, so we never
+  // clear the user or flip loading=false before onAuthStateChange has had a
+  // chance to deliver INITIAL_SESSION. This prevents a logged-in user from being
+  // briefly routed to /login during a page refresh.
+  const initialAuthProcessedRef = useRef(false);
 
   const applyAuth = (newSession: Session | null, newUser: User | null) => {
     activeSessionRef.current = newSession;
@@ -140,7 +145,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const resolveProfile = async (userId: string, currentUser: User | null) => {
       try {
         // fetchProfile writes the resolved profile into React state + cache internally.
-        await fetchProfile(userId, currentUser);
+        secureLog.info('[AuthContext] resolveProfile: starting authoritative role resolution');
+        const resolved = await fetchProfile(userId, currentUser);
+        secureLog.info(
+          '[AuthContext] resolveProfile: role resolution complete',
+          { role: resolved?.role ?? 'null', isConsultant: resolved?.is_consultant ?? false }
+        );
       } catch (err) {
         console.warn('[AuthContext] Authoritative profile resolution failed:', err);
         const cached = getCachedProfile(userId);
@@ -172,7 +182,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(true);
           await resolveProfile(currentSession.user.id, currentSession.user);
         }
-        setLoading(false);
+        initialAuthProcessedRef.current = true;
+        if (inFlightFetchRef.current.size === 0) {
+          setLoading(false);
+        }
         return;
       }
 
@@ -192,6 +205,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             applyAuth(null, null);
             setProfile(null);
           }
+        }
+        initialAuthProcessedRef.current = true;
+        if (inFlightFetchRef.current.size === 0) {
           setLoading(false);
         }
       }
@@ -208,17 +224,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(true);
         await resolveProfile(data.session.user.id, data.session.user);
       } else {
-        // Non-destructive: check storage and active ref before clearing
+        // Non-destructive: check storage and active ref before clearing.
+        // Do not clear the user if onAuthStateChange has not yet had a chance
+        // to deliver INITIAL_SESSION; doing so could briefly route a logged-in
+        // user to /login during a page refresh.
         const stored = getStoredSession();
-        if (!stored && !activeUserRef.current) {
+        if (!initialAuthProcessedRef.current) {
+          // onAuthStateChange has not yet processed the initial session;
+          // defer to it rather than clearing user here.
+          if (stored?.user && !activeUserRef.current) {
+            applyAuth(stored, stored.user);
+            setLoading(true);
+            await resolveProfile(stored.user.id, stored.user);
+          }
+        } else if (!stored && !activeUserRef.current) {
           applyAuth(null, null);
           setProfile(null);
         }
       }
-      setLoading(false);
+      initialAuthProcessedRef.current = true;
+      if (inFlightFetchRef.current.size === 0) {
+        setLoading(false);
+      }
     }).catch((err) => {
       console.warn('[AuthContext] getSession error:', err);
-      setLoading(false);
+      initialAuthProcessedRef.current = true;
+      if (inFlightFetchRef.current.size === 0) {
+        setLoading(false);
+      }
     });
 
     // Safety timeout: loading will never block the UI past 1200ms, but only when no
@@ -281,6 +314,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           setCachedProfile(userId, superProfile);
           setProfile(superProfile);
+          secureLog.info('[AuthContext] fetchProfile: resolved role=super_admin');
           return superProfile;
         }
 
@@ -294,6 +328,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
           setCachedProfile(userId, superProfile);
           setProfile(superProfile);
+          secureLog.info('[AuthContext] fetchProfile: resolved role=super_admin');
           return superProfile;
         }
 
@@ -307,6 +342,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
           setCachedProfile(userId, adminProfile);
           setProfile(adminProfile);
+          secureLog.info('[AuthContext] fetchProfile: resolved role=admin');
           return adminProfile;
         }
 
@@ -327,6 +363,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           setCachedProfile(userId, resolvedDevProfile);
           setProfile(resolvedDevProfile);
+          secureLog.info('[AuthContext] fetchProfile: resolved role=developer_admin');
           return resolvedDevProfile;
         }
 
@@ -435,6 +472,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           setCachedProfile(userId, consultantProfile);
           setProfile(consultantProfile);
+          secureLog.info('[AuthContext] fetchProfile: resolved role=consultant');
           return consultantProfile;
         }
 
@@ -461,6 +499,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setCachedProfile(userId, clientProfile);
         setProfile(clientProfile);
+        secureLog.info('[AuthContext] fetchProfile: resolved role=client');
         return clientProfile;
       } catch (error) {
         secureLog.error('Error in fetchProfile:', error);

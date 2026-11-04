@@ -63,9 +63,20 @@ export const consultantApplicationsService = {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
+      // Forward the session token (when signed in) so the server can capture the
+      // authenticated UUID on the application for authoritative approval linking.
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+      } catch {
+        // Anonymous submissions remain fully supported without the token
+      }
       const res = await fetch('/api/consultant-applications', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(sanitizedApp),
         signal: controller.signal,
       });

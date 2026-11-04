@@ -25,6 +25,22 @@ export interface Profile {
 // still detecting same-session Client → Consultant approvals.
 const CLIENT_ROLE_RECHECK_MS = 5 * 60 * 1000;
 
+// Every profile-resolution DB operation is bounded so fetchProfile ALWAYS
+// settles. An unbounded awaited write (e.g. a profiles upsert) that hangs would
+// wedge AuthContext `loading` on true forever — the exact cause of production
+// pages stuck on "Authenticating...".
+const withDbTimeout = <T,>(
+  operation: PromiseLike<T>,
+  label: string,
+  ms = 8000
+): Promise<T> =>
+  Promise.race([
+    Promise.resolve(operation),
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`[AuthContext] ${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+
 interface AuthContextType {
   user: User | null;
   profile: Profile | null;
@@ -318,9 +334,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }, 2000);
 
+    // Hard cap: even if a profile fetch somehow outlives every individual bound,
+    // release the loading state so ProtectedRoute never wedges on
+    // "Authenticating..." indefinitely. Resolution completing later still
+    // updates state and re-renders authorization.
+    const hardCapTimer = setTimeout(() => {
+      if (isMountedRef.current && inFlightFetchRef.current.size > 0) {
+        secureLog.warn('[AuthContext] Profile resolution exceeded hard cap; releasing loading state');
+        setLoading(false);
+      }
+    }, 12000);
+
     return () => {
       isMountedRef.current = false;
       clearTimeout(safetyTimer);
+      clearTimeout(hardCapTimer);
       subscription.unsubscribe();
     };
   }, []);
@@ -410,11 +438,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             is_consultant: false,
           };
           if (!data || data.role !== 'developer_admin') {
-            const { error: upsertErr } = await supabase.from('profiles').upsert({
-              id: userId,
-              role: 'developer_admin',
-              full_name: resolvedDevProfile.full_name,
-            });
+            const { error: upsertErr } = await withDbTimeout(
+              supabase.from('profiles').upsert({
+                id: userId,
+                role: 'developer_admin',
+                full_name: resolvedDevProfile.full_name,
+              }),
+              'developer_admin profile upsert'
+            );
             if (upsertErr) {
               secureLog.warn('[AuthContext] Failed to upsert developer_admin profile:', {
                 userId,
@@ -484,7 +515,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             });
             clearTimeout(timeoutId);
             if (meRes.ok) {
-              const meJson = await meRes.json().catch(() => null);
+              const meJson = await Promise.race([
+                meRes.json().catch(() => null),
+                new Promise((r) => setTimeout(() => r(null), 2500)),
+              ]);
               if (meJson?.success && meJson?.isConsultant) {
                 isConsultantUser = true;
                 consultantName = consultantName || meJson.consultant?.name;
@@ -547,12 +581,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // (email-based match requires a verified email)
         if (!isConsultantUser && userEmail && emailVerified) {
           try {
-            const { data: approvedApps } = await supabase
-              .from('consultant_applications')
-              .select('id, name, status, email')
-              .ilike('email', userEmail)
-              .eq('status', 'approved')
-              .limit(1);
+            const { data: approvedApps } = await withDbTimeout(
+              supabase
+                .from('consultant_applications')
+                .select('id, name, status, email')
+                .ilike('email', userEmail)
+                .eq('status', 'approved')
+                .limit(1),
+              'approved application check'
+            );
 
             if (approvedApps && approvedApps.length > 0) {
               isConsultantUser = true;
@@ -572,12 +609,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
 
           if (!profileData || profileData.role !== 'consultant') {
-            const { error: upsertErr } = await supabase.from('profiles').upsert({
-              id: userId,
-              full_name: consultantProfile.full_name,
-              role: 'consultant',
-              is_consultant: true,
-            });
+            const { error: upsertErr } = await withDbTimeout(
+              supabase.from('profiles').upsert({
+                id: userId,
+                full_name: consultantProfile.full_name,
+                role: 'consultant',
+                is_consultant: true,
+              }),
+              'consultant profile upsert'
+            );
             if (upsertErr) {
               secureLog.warn('[AuthContext] Failed to upsert consultant profile:', {
                 userId,
@@ -606,11 +646,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (!profileData) {
           try {
-            await supabase.from('profiles').upsert({
-              id: userId,
-              full_name: fallbackName,
-              role: 'client',
-            });
+            await withDbTimeout(
+              supabase.from('profiles').upsert({
+                id: userId,
+                full_name: fallbackName,
+                role: 'client',
+              }),
+              'client profile upsert'
+            );
           } catch {
             // ignore
           }

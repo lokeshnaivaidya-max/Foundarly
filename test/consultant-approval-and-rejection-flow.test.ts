@@ -674,4 +674,125 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       assert.equal(secondProfile.role, 'consultant', 'Second sign-in should resolve to consultant after approval');
     });
   });
+
+  describe('10. Production Approval Linkage & Identity Regression', () => {
+    const approvalSource = () =>
+      fs.readFileSync(path.join(process.cwd(), 'api', 'admin', 'approve-consultant-application.ts'), 'utf8');
+
+    test('Approval handler never matches profiles by display name (production bug)', () => {
+      const source = approvalSource();
+      assert.ok(
+        !source.includes("ilike('full_name'"),
+        'Display-name matching must be removed — it linked the wrong account in production'
+      );
+      assert.ok(
+        !source.includes("select('id, full_name, role')"),
+        'The name-match profile lookup must be gone entirely'
+      );
+    });
+
+    test('Approval handler prefers the authenticated user_id captured on the application', () => {
+      const source = approvalSource();
+      assert.ok(
+        source.includes('app.user_id'),
+        'Approval must prefer the authenticated UUID stamped on the application'
+      );
+    });
+
+    test('Approval handler reports profile-role update failures instead of silently succeeding', () => {
+      const source = approvalSource();
+      assert.ok(
+        source.includes('const { error: profileUpsertErr }'),
+        'profiles upsert must destructure { error } — an unchecked upsert silently no-ops under RLS'
+      );
+      assert.ok(
+        source.includes('FAILED to update applicant profile role'),
+        'Profile update failure must be logged loudly'
+      );
+      assert.ok(
+        source.includes('profileUpdated'),
+        'Response must include explicit profileUpdated status'
+      );
+    });
+
+    test('Approval handler fails loudly when the consultant record cannot be activated', () => {
+      const source = approvalSource();
+      assert.ok(
+        source.includes('Failed to activate consultant record'),
+        'Consultant activation failure must surface as 500, not silent success'
+      );
+    });
+
+    test('Application submission stamps the verified authenticated UUID (never name-based)', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant-applications.ts'), 'utf8');
+      assert.ok(
+        source.includes('user_id: authenticatedUserId'),
+        'Submission must stamp the authenticated UUID when identity is proven'
+      );
+      assert.ok(
+        source.includes('applicantEmailVerified'),
+        'user_id may only be stamped for a verified account email'
+      );
+      assert.ok(
+        source.includes('applicantEmail === normalizedEmail'),
+        'user_id may only be stamped when the account email matches the application email'
+      );
+    });
+
+    test('Submission client forwards the session token for identity capture', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultantApplications.ts'), 'utf8');
+      const createIdx = source.indexOf('async create(');
+      assert.ok(createIdx !== -1, 'create() must exist');
+      const chunk = source.slice(createIdx, createIdx + 1600);
+      assert.ok(
+        chunk.includes('Bearer ${session.access_token}'),
+        'create() fetch must forward the session token to /api/consultant-applications'
+      );
+    });
+
+    test('consultant/me reclaims provably stale UUID links for verified email matches', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      assert.ok(
+        source.includes('storedLinkProvablyStale'),
+        'Stale-link verification must exist'
+      );
+      assert.ok(
+        source.includes('reclaiming link for verified requester'),
+        'Provably stale links must be reclaimed for verified requesters'
+      );
+      assert.ok(
+        source.includes('not overwriting'),
+        'Live different-owner links must still be refused'
+      );
+    });
+
+    test('AuthContext bounds every profile-resolution DB operation (no infinite AUTHENTICATING)', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'), 'utf8');
+      const bounded = (source.match(/withDbTimeout\(/g) || []).length;
+      assert.ok(
+        bounded >= 4,
+        `All blocking DB awaits must use withDbTimeout (found ${bounded}, need >= 4)`
+      );
+      assert.ok(
+        source.includes('Profile resolution exceeded hard cap'),
+        'Hard cap must release the loading state so ProtectedRoute never wedges'
+      );
+      assert.ok(
+        !source.includes('const { error: upsertErr } = await supabase.from'),
+        'Bare awaited upserts must be wrapped in withDbTimeout'
+      );
+    });
+
+    test('Consultants page renders bounded error/empty states instead of infinite skeletons', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'Consultants.tsx'), 'utf8');
+      assert.ok(source.includes('isError'), 'Query error state must be destructured and rendered');
+      assert.ok(source.includes('Consultant list could not be loaded'), 'Error state must be visible');
+      assert.ok(source.includes('refetchConsultants'), 'Retry action must be wired to refetch');
+      assert.ok(source.includes('No Consultants Available'), 'Genuine empty state must be distinct from filter-empty');
+      assert.ok(
+        source.includes('retry: 2'),
+        'Query must use bounded retries'
+      );
+    });
+  });
 });

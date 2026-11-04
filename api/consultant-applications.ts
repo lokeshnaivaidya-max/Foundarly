@@ -120,6 +120,34 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     // Guarantee whatsapp is NEVER null (violates PostgreSQL NOT NULL constraint)
     const cleanWhatsapp = (whatsapp ? String(whatsapp).trim() : cleanPhone) || cleanPhone;
 
+    // Identity capture: when the applicant is signed in with a VERIFIED account
+    // whose email matches the application email, stamp the authenticated UUID on
+    // the application. Approval then links the consultant record by UUID instead
+    // of guessing by name or unverified email.
+    let authenticatedUserId: string | null = null;
+    try {
+      const appAuthHeader = req.headers?.authorization;
+      const appToken = typeof appAuthHeader === 'string' && appAuthHeader.startsWith('Bearer ')
+        ? appAuthHeader.slice(7).trim()
+        : null;
+      if (appToken) {
+        const { data: { user: applicantUser } } = await supabaseAdminClient.auth.getUser(appToken);
+        const applicantEmail = (applicantUser?.email || '').toLowerCase().trim();
+        const applicantEmailVerified = Boolean(
+          (applicantUser as { email_confirmed_at?: string })?.email_confirmed_at ||
+            (applicantUser as { confirmed_at?: string })?.confirmed_at
+        );
+        if (applicantUser && applicantEmailVerified && applicantEmail === normalizedEmail) {
+          authenticatedUserId = applicantUser.id;
+          console.log(
+            `[Consultant Application] [${requestId}] Identity captured for ${maskIdentifier(normalizedEmail)}`
+          );
+        }
+      }
+    } catch (identityErr: any) {
+      console.warn(`[Consultant Application] [${requestId}] Identity capture notice:`, identityErr?.message);
+    }
+
     const payload = {
       name: String(name).trim(),
       email: normalizedEmail,
@@ -135,6 +163,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       linkedin_url: linkedin_url && String(linkedin_url).trim().length > 0 ? String(linkedin_url).trim() : null,
       status: 'pending',
       created_at: new Date().toISOString(),
+      ...(authenticatedUserId ? { user_id: authenticatedUserId } : {}),
     };
 
     console.log(

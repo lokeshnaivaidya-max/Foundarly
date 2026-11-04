@@ -27,7 +27,8 @@ import {
   ChevronRight,
   LayoutGrid,
   Layers,
-  X
+  X,
+  AlertCircle
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -192,9 +193,17 @@ export default function ConsultantsPage() {
   const rotateX = useTransform(mouseY, [-300, 300], [4, -4]);
   const rotateY = useTransform(mouseX, [-300, 300], [-4, 4]);
 
-  const { data: consultants, isLoading } = useQuery({
+  const {
+    data: consultants,
+    isLoading,
+    isError,
+    refetch: refetchConsultants,
+  } = useQuery({
     queryKey: ["consultants", "active"],
     queryFn: () => consultantsService.getAll(true),
+    retry: 2,
+    retryDelay: 1000,
+    staleTime: 30000,
   });
 
   const { data: dbCategories } = useQuery({
@@ -498,9 +507,22 @@ export default function ConsultantsPage() {
             </div>
           </motion.div>
 
-          {/* Grid or Empty */}
+          {/* Grid, Error, or Empty — every state is bounded: skeletons only
+              while loading, an explicit retry on failure, and a distinct
+              empty state. No infinite skeleton loaders. */}
           {isLoading ? (
             <SkeletonGrid count={6} cols={3} avatar={true} />
+          ) : isError ? (
+            <div className="text-center py-16 bg-destructive/10 border border-destructive/30 rounded-3xl max-w-md mx-auto">
+              <AlertCircle className="w-10 h-10 text-destructive mx-auto mb-3 opacity-70" />
+              <h3 className="font-bold text-lg text-foreground mb-1">Consultant list could not be loaded</h3>
+              <p className="text-xs text-muted-foreground mb-4">
+                This is usually temporary. Please try again.
+              </p>
+              <Button size="sm" onClick={() => refetchConsultants()}>
+                Retry
+              </Button>
+            </div>
           ) : filtered && filtered.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {filtered.map((c, i) => <ConsultantCard key={c.id} c={c} index={i} />)}
@@ -508,13 +530,23 @@ export default function ConsultantsPage() {
           ) : (
             <div className="text-center py-20 bg-secondary/20 border border-border/80 rounded-3xl max-w-md mx-auto">
               <Tag className="w-10 h-10 text-muted-foreground mx-auto mb-3 opacity-50" />
-              <h3 className="font-bold text-lg text-foreground mb-1">No Consultants Found</h3>
+              <h3 className="font-bold text-lg text-foreground mb-1">
+                {consultants && consultants.length === 0 ? "No Consultants Available" : "No Consultants Found"}
+              </h3>
               <p className="text-xs text-muted-foreground mb-4">
-                No experts matched your search query or selected category.
+                {consultants && consultants.length === 0
+                  ? "No active experts are available right now. Please check back soon."
+                  : "No experts matched your search query or selected category."}
               </p>
-              <Button size="sm" variant="outline" onClick={() => { setSelectedCategory("All"); setSearchQuery(""); }}>
-                Reset Filters
-              </Button>
+              {consultants && consultants.length === 0 ? (
+                <Button size="sm" variant="outline" onClick={() => refetchConsultants()}>
+                  Refresh
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => { setSelectedCategory("All"); setSearchQuery(""); }}>
+                  Reset Filters
+                </Button>
+              )}
             </div>
           )}
         </div>

@@ -147,48 +147,48 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       return res.status(400).json({ success: false, error: 'Applicant record lacks a valid email address.' });
     }
 
-    // 4. Identity Mapping: check if an authenticated user account already exists
-    let linkedUserId: string | null = null;
-    try {
-      if (hasServiceRoleKey) {
-        const { data: usersData } = await supabaseAdminClient.auth.admin.listUsers({
+    // 4. Identity Mapping — authoritative only; display-name matching is
+    // deliberately NOT used (it linked the wrong account in production).
+    // Preference order:
+    //   1) user_id captured on the application at submission time (a verified
+    //      authenticated account whose email matched the application email)
+    //   2) service-role lookup of the auth account owning the application email
+    // If neither succeeds, the consultant record is created UNLINKED; the
+    // applicant's next authenticated /api/consultant/me call links it by
+    // verified email.
+    let linkedUserId: string | null =
+      typeof app.user_id === 'string' && app.user_id.trim().length > 20 ? app.user_id.trim() : null;
+
+    if (linkedUserId) {
+      console.log(`[Approve Consultant] Application carries authenticated user_id; linking by UUID: ${linkedUserId}`);
+    } else if (hasServiceRoleKey) {
+      try {
+        const { data: usersData, error: listUsersErr } = await supabaseAdminClient.auth.admin.listUsers({
           page: 1,
           perPage: 1000,
         });
-
-        const matchedUser = usersData?.users?.find(
-          (u) => (u.email || '').toLowerCase().trim() === cleanEmail
-        );
-
-        if (matchedUser?.id) {
-          linkedUserId = matchedUser.id;
+        if (listUsersErr) {
+          console.warn('[Approve Consultant] Auth admin user lookup failed:', listUsersErr.message);
+        } else {
+          const matchedUser = usersData?.users?.find(
+            (u) => (u.email || '').toLowerCase().trim() === cleanEmail
+          );
+          if (matchedUser?.id) {
+            linkedUserId = matchedUser.id;
+          }
         }
-      }
-    } catch (authLookupErr) {
-      console.warn('[Approve Consultant] Auth admin user lookup warning:', authLookupErr);
-    }
-
-    // Fallback user matching: check profiles by full_name or consultants by email
-    if (!linkedUserId && app.name) {
-      try {
-        const { data: matchedProfile } = await activeDbClient
-          .from('profiles')
-          .select('id, full_name, role')
-          .ilike('full_name', app.name.trim())
-          .limit(1);
-
-        if (matchedProfile?.[0]?.id) {
-          linkedUserId = matchedProfile[0].id;
-        }
-      } catch (pErr) {
-        console.warn('[Approve Consultant] Profile name lookup warning:', pErr);
+      } catch (authLookupErr) {
+        console.warn('[Approve Consultant] Auth admin user lookup warning:', authLookupErr);
       }
     }
 
+    // 4b. Update the applicant's profile role (never demote admins).
+    // The write result is checked explicitly: a silently failed profile update
+    // is the exact bug that left approved consultants classified as clients.
+    let profileUpdated = false;
     if (linkedUserId) {
       console.log(`[Approve Consultant] Matched applicant ${cleanEmail} to user ID ${linkedUserId}`);
 
-      // Update profile role to consultant (preserve admin privileges if already admin)
       try {
         const { data: existingProfile } = await activeDbClient
           .from('profiles')
@@ -203,7 +203,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           isAllowedAdminEmail(cleanEmail);
 
         if (!isApplicantAdmin) {
-          await activeDbClient
+          const { error: profileUpsertErr } = await activeDbClient
             .from('profiles')
             .upsert({
               id: linkedUserId,
@@ -211,10 +211,28 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
               full_name: app.name,
               is_consultant: true,
             });
+          if (profileUpsertErr) {
+            console.error('[Approve Consultant] FAILED to update applicant profile role:', {
+              linkedUserId,
+              error: profileUpsertErr?.message || String(profileUpsertErr),
+            });
+            profileUpdated = false;
+          } else {
+            profileUpdated = true;
+          }
+        } else {
+          // Admin privileges preserved; profile role left untouched.
+          profileUpdated = true;
         }
-      } catch (profErr) {
-        console.warn('[Approve Consultant] Profile update notice:', profErr);
+      } catch (profErr: any) {
+        console.error('[Approve Consultant] Profile update exception:', profErr?.message || profErr);
+        profileUpdated = false;
       }
+    } else {
+      console.warn(
+        `[Approve Consultant] No authenticated account could be verified for ${cleanEmail}. ` +
+          'Consultant record will be created unlinked; it self-links by verified email at sign-in.'
+      );
     }
 
     // 5. Idempotent Consultant Record Creation / Activation
@@ -256,9 +274,16 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
         .select()
         .single();
 
-      if (!updateErr && updatedCons) {
-        consultant = updatedCons;
+      if (updateErr || !updatedCons) {
+        // Consultant activation is the core deliverable of approval; fail loudly
+        // so the admin knows to retry instead of silently "succeeding".
+        console.error('[Approve Consultant] Error updating consultant record:', updateErr);
+        return res.status(500).json({
+          success: false,
+          error: `Failed to activate consultant record: ${updateErr?.message || 'unknown error'}`,
+        });
       }
+      consultant = updatedCons;
     } else {
       // Insert new consultant record
       console.log(`[Approve Consultant] Inserting new consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
@@ -358,6 +383,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       message: `${app.name} has been approved as an active consultant.`,
       consultant,
       linkedUserId,
+      profileUpdated,
       emailSent,
       emailNotice,
     });

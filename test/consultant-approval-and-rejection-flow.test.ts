@@ -991,4 +991,60 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       );
     });
   });
+
+  describe('12. Wedged auth-lock lifecycle regression (production 9d05159 incident)', () => {
+    const authSource = () =>
+      fs.readFileSync(path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'), 'utf8');
+
+    test('auth.getSession is raced — profile resolution can never wedge on the auth lock', () => {
+      const source = authSource();
+      // The exact production wedge: an un-raced getSession awaited while a hung
+      // startup token refresh holds the supabase-js auth lock pre-dispatch.
+      assert.ok(
+        !source.includes('await supabase.auth.getSession()'),
+        'auth.getSession must never be awaited un-raced inside profile resolution'
+      );
+      assert.ok(
+        source.includes("supabase.auth.getSession(),") && source.includes("'auth session lookup'"),
+        'getSession must be raced via withDbTimeout so resolution always settles'
+      );
+    });
+
+    test('A timed-out profile lookup is transient failure, never client classification', () => {
+      const source = authSource();
+      assert.ok(
+        source.includes('profilesLookupFailed'),
+        'The profiles race must capture its error instead of discarding it'
+      );
+      assert.ok(
+        source.includes('refusing client fallback'),
+        'Transient lookup failure must refuse the client fallback (consultant misclassification guard)'
+      );
+      const raceIdx = source.indexOf('const { data, error: profileFetchError }');
+      assert.ok(raceIdx !== -1, 'The profiles race must destructure its error');
+    });
+
+    test('consultantsService.getAll hard-settles even when abortSignal cannot reject', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultants.ts'), 'utf8');
+      assert.ok(
+        source.includes('Consultant list request timed out'),
+        'getAll must race the query against a rejecting timeout — abortSignal cannot reject a never-dispatched request'
+      );
+      const raceIdx = source.indexOf('Promise.race([\n          query.abortSignal');
+      assert.ok(raceIdx !== -1, 'The abortSignal query must be wrapped in a settling race');
+    });
+
+    test('Hard cap is followed by a terminal watchdog with an explicit error state', () => {
+      const source = authSource();
+      assert.ok(
+        source.includes('Profile resolution exceeded terminal watchdog'),
+        'A terminal watchdog must surface the verification-failed state instead of indefinite "Verifying your account..."'
+      );
+      const protectedSource = fs.readFileSync(path.join(process.cwd(), 'src', 'components', 'ProtectedRoute.tsx'), 'utf8');
+      assert.ok(
+        protectedSource.includes("Couldn't Verify Your Access"),
+        'The terminal state must be the explicit verification-failed card with retry'
+      );
+    });
+  });
 });

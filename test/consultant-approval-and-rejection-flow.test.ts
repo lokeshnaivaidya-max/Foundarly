@@ -1515,4 +1515,104 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       assert.equal(isStale, true, 'Cache beyond the TTL is stale');
     });
   });
+
+  describe('17. Degraded role cache authorization audit (fail-closed)', () => {
+    const authSource = () =>
+      fs.readFileSync(path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'), 'utf8');
+
+    test('Elevated roles are NEVER served from cache (super_admin / admin / developer_admin)', () => {
+      const source = authSource();
+      assert.ok(
+        source.includes('const isElevatedCacheRole = (role?: string | null): boolean'),
+        'An explicit elevated-role filter must exist'
+      );
+      assert.ok(
+        source.includes("role === 'super_admin' || role === 'admin' || role === 'developer_admin'"),
+        'All three elevated roles must be blocked'
+      );
+      const degradedCount = (source.match(/getDegradedCachedRole\(/g) || []).length;
+      assert.ok(
+        degradedCount >= 2,
+        `getDegradedCachedRole must guard every cache-serving path (found ${degradedCount} usages)`
+      );
+      // Serving paths must not call the raw cache accessors directly
+      assert.ok(
+        !source.includes('const cachedRoleProfile = getCachedRoleProfile(userId);'),
+        'Degraded path must not use the unfiltered role cache'
+      );
+    });
+
+    test('Cached consultant role is revoked when the live consultants lookup positively returns empty', () => {
+      const source = authSource();
+      assert.ok(
+        source.includes('consultantLookupDefinitivelyEmpty'),
+        'The live lookup outcome must be threaded into the degraded decision'
+      );
+      const degradedIdx = source.indexOf('serving DEGRADED cached role');
+      const degradedBlock = source.slice(Math.max(0, degradedIdx - 800), degradedIdx + 200);
+      assert.ok(
+        degradedBlock.includes('consultantLookupDefinitivelyEmpty'),
+        'A cached consultant role must not be served after a definitive empty lookup'
+      );
+      // Timeout/error must NOT positively disconfirm (fail-open only for cache-eligible non-elevated roles)
+      assert.ok(
+        source.includes('Array.isArray(rawConsultants) && rawConsultants.length === 0 && !queryError'),
+        'Only a clean 200-empty response revokes the cached consultant role'
+      );
+    });
+
+    test('SIGNED_OUT purges the per-user cached profile', () => {
+      const source = authSource();
+      assert.ok(
+        source.includes('const purgeCachedProfile = (userId?: string | null) =>'),
+        'A cache purge helper must exist'
+      );
+      const signOutIdx = source.indexOf("if (event === 'SIGNED_OUT')");
+      const signOutBlock = source.slice(signOutIdx, signOutIdx + 700);
+      assert.ok(
+        signOutBlock.includes('purgeCachedProfile('),
+        'SIGNED_OUT must purge the cached profile for the signed-out user'
+      );
+    });
+
+    test('Elevated authorization still requires allowlist or an authoritative server read', () => {
+      const source = authSource();
+      // The top of resolution still resolves allowlisted admins WITHOUT the cache
+      const allowlistIdx = source.indexOf('isAllowedAdminEmail');
+      const degradedIdx = source.indexOf('serving DEGRADED cached role');
+      assert.ok(
+        allowlistIdx !== -1 && degradedIdx !== -1 && allowlistIdx < degradedIdx,
+        'Allowlist-based admin resolution runs before any degraded path — cache cannot preempt it'
+      );
+      // Admin gate helper used by ProtectedRoute remains allowlist/DB authoritative
+      const authorization = fs.readFileSync(path.join(process.cwd(), 'src', 'lib', 'authorization.ts'), 'utf8');
+      const isUserAdminIdx = authorization.indexOf('export function isUserAdmin');
+      const isUserAdminBlock = authorization.slice(isUserAdminIdx, isUserAdminIdx + 400);
+      assert.ok(
+        !isUserAdminBlock.includes('getCached') && !isUserAdminBlock.includes('cached'),
+        'isUserAdmin must never consult the degraded cache'
+      );
+    });
+
+    test('Model: degraded cache decision matrix (elevated refused, consultant gated, client allowed, purged)', () => {
+      const isElevatedRole = (role) => role === 'super_admin' || role === 'admin' || role === 'developer_admin';
+      const getDegradedCachedRole = (cached, lookupDefinitivelyEmpty) => {
+        if (!cached) return null;
+        if (isElevatedRole(cached.role)) return null; // fail closed
+        if (cached.role === 'consultant' && lookupDefinitivelyEmpty) return null; // disconfirmed
+        return cached; // client, or consultant when lookup unknown
+      };
+      // Elevated roles — always refused
+      assert.equal(getDegradedCachedRole({ role: 'super_admin' }, false), null);
+      assert.equal(getDegradedCachedRole({ role: 'admin' }, false), null);
+      assert.equal(getDegradedCachedRole({ role: 'developer_admin' }, false), null);
+      // Consultant — gated by live lookup
+      assert.equal(getDegradedCachedRole({ role: 'consultant', is_consultant: true }, true), null);
+      assert.equal(getDegradedCachedRole({ role: 'consultant', is_consultant: true }, false)?.role, 'consultant');
+      // Client — allowed (non-elevated)
+      assert.equal(getDegradedCachedRole({ role: 'client' }, true)?.role, 'client');
+      // No cache — never assigned
+      assert.equal(getDegradedCachedRole(null, false), null);
+    });
+  });
 });

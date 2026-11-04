@@ -96,12 +96,19 @@ const getCachedProfile = (userId: string): Profile | null => {
 // DEGRADED-MODE ROLE CACHE: when the authoritative profiles lookup hangs or
 // fails (server-side RLS/policy evaluation incident), the last
 // authoritatively-resolved role for THIS authenticated user is reused so the
-// session keeps working. Security: the cache is keyed by the authenticated
-// userId and was ONLY ever written by a prior successful authoritative
-// resolution in this browser — it can never grant a role the user did not
-// legitimately hold. Stale beyond ROLE_CACHE_TTL_MS → discarded (the user
-// gets the explicit verification-failed state, never a guessed role).
+// session keeps working. Hard rules:
+// - Entries are keyed by the authenticated userId and were ONLY ever written
+//   by a prior successful authoritative resolution in this browser.
+// - ELEVATED ROLES (super_admin / admin / developer_admin) are NEVER served
+//   from cache — administrator authorization must come from the env allowlist
+//   or an authoritative server read, never from localStorage.
+// - consultant requires the live consultants lookup to NOT have positively
+//   returned empty (a 200 empty result revokes the cached consultant role).
+// - Stale beyond ROLE_CACHE_TTL_MS → discarded (verification-failed state).
 const ROLE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+const isElevatedCacheRole = (role?: string | null): boolean =>
+  role === 'super_admin' || role === 'admin' || role === 'developer_admin';
 
 const getCachedRoleProfile = (userId: string): Profile | null => {
   const cached = getCachedProfile(userId);
@@ -118,6 +125,30 @@ const getCachedRoleProfile = (userId: string): Profile | null => {
     return null;
   }
   return cached;
+};
+
+// Fail-closed variant for authorization decisions: elevated roles are NEVER
+// served from cache. A revoked admin/developer_admin gets the explicit
+// verification-failed state, never retained access.
+const getDegradedCachedRole = (userId: string): Profile | null => {
+  const cached = getCachedRoleProfile(userId);
+  if (!cached) return null;
+  if (isElevatedCacheRole(cached.role)) {
+    return null;
+  }
+  return cached;
+};
+
+// SIGNED_OUT purges the per-user cached profile so an account that is logged
+// out never regains a stale cached role from a previous device session.
+const purgeCachedProfile = (userId?: string | null) => {
+  try {
+    if (userId && typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(`foundarly_profile_${userId}`);
+    }
+  } catch {
+    // ignore
+  }
 };
 
 const setCachedProfile = (userId: string, p: Profile | null) => {
@@ -285,7 +316,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         secureLog.warn('[AuthContext] resolveProfile: resolution exception', {
           correlationId, userId, error: err instanceof Error ? err.message : String(err),
         });
-        const cached = getCachedProfile(userId);
+        // Fail closed for elevated roles: even the exception fallback serves
+        // only non-elevated cached roles.
+        const cached = getDegradedCachedRole(userId);
         if (cached) setProfile(cached);
       } finally {
         resolveInFlightRef.current = false;
@@ -307,6 +340,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (event === 'SIGNED_OUT') {
+        // Purge the per-user cached profile: a signed-out account never regains
+        // a stale cached role from localStorage in this browser/device.
+        purgeCachedProfile(currentSession?.user?.id ?? activeUserRef.current?.id ?? null);
         applyAuth(null, null);
         setProfile(null);
         setLoading(false);
@@ -600,6 +636,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // - OR user is found in the consultants table by user_id OR email
         let isConsultantUser = Boolean(profileData?.role === 'consultant' || profileData?.is_consultant);
         let consultantName = profileData?.full_name;
+        // Live consultants lookup outcome — a definitive 200-empty response
+        // positively disconfirms a cached consultant role (fail-closed).
+        let consultantLookupDefinitivelyEmpty = false;
 
         secureLog.info('[AuthContext] fetchProfile: consultant check initial state', {
           userId,
@@ -697,10 +736,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               consultantQuery = consultantQuery.eq('user_id', userId);
             }
 
-            const { data: matchedConsultants } = await Promise.race([
+            const queryOutcome = await Promise.race([
               consultantQuery.limit(1),
               new Promise<{ data: null }>((r) => setTimeout(() => r({ data: null }), 3000)),
             ]);
+            const rawConsultants = (queryOutcome as { data?: unknown[] | null } | null | undefined)?.data;
+            const queryError = (queryOutcome as { error?: unknown } | null | undefined)?.error;
+            if (Array.isArray(rawConsultants) && rawConsultants.length === 0 && !queryError) {
+              consultantLookupDefinitivelyEmpty = true;
+            }
+            const matchedConsultants = (Array.isArray(rawConsultants) ? rawConsultants : null) as Array<{
+              id: string;
+              name: string | null;
+              email?: string | null;
+              user_id: string | null;
+              is_active?: boolean;
+            }> | null;
 
             const matchedConsultant = matchedConsultants?.[0];
             if (matchedConsultant) {
@@ -823,12 +874,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // verification-failed state.
         if (profilesLookupFailed && !isConsultantUser) {
           // DEGRADED-MODE FALLBACK: the authoritative profiles read hung or
-          // failed. Never classify as client — but if THIS authenticated user
-          // has a previously authoritatively-resolved role in the role cache,
-          // keep the session working in degraded mode (background retries and
-          // the Retry button recover the authoritative state later).
-          const cachedRoleProfile = getCachedRoleProfile(userId);
-          if (cachedRoleProfile) {
+          // failed. Never classify as client, but never elevate either:
+          // elevated roles are NEVER served from cache (fail closed), and a
+          // cached consultant role is not served when the live consultants
+          // lookup positively returned empty. A verified cache entry for a
+          // non-elevated role keeps this authenticated user's session working;
+          // background retries and the Retry button recover the authoritative
+          // state later.
+          const cachedRoleProfile = getDegradedCachedRole(userId);
+          const cachedRoleAllowed =
+            cachedRoleProfile !== null &&
+            (cachedRoleProfile.role !== 'consultant' || !consultantLookupDefinitivelyEmpty);
+
+          if (cachedRoleProfile && cachedRoleAllowed) {
             setProfile(cachedRoleProfile);
             profileResolvedRef.current = {
               userId,

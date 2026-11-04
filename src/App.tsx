@@ -1,10 +1,12 @@
+import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { getMeetingRedirect, clearMeetingRedirect } from "@/utils/meetingRedirect";
 import { CurrencyProvider } from "@/contexts/CurrencyContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -68,6 +70,25 @@ import RolePreviewBanner from "@/components/RolePreviewBanner";
 
 const queryClient = new QueryClient();
 
+function MeetingRedirectHandler() {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (loading || !user) return;
+    if (location.pathname === '/' || location.pathname === '/home') {
+      const meetingTarget = getMeetingRedirect(location.state, location.search);
+      if (meetingTarget) {
+        clearMeetingRedirect();
+        navigate(meetingTarget, { replace: true });
+      }
+    }
+  }, [user, loading, location.pathname, location.search, location.state, navigate]);
+
+  return null;
+}
+
 const App = () => (
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
@@ -79,6 +100,7 @@ const App = () => (
                 <Toaster />
                 <Sonner />
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                  <MeetingRedirectHandler />
                   <RolePreviewProvider>
                     <RolePreviewBanner />
                     <PaymentRealtimeListener />

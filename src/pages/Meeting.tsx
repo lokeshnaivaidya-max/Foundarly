@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { saveMeetingRedirect, clearMeetingRedirect, buildMeetingLoginUrl } from "@/utils/meetingRedirect";
 import { bookingsService } from "@/services/bookings";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -311,6 +312,7 @@ export default function MeetingPage() {
   const { roomId, bookingId } = useParams<{ roomId?: string; bookingId?: string }>();
   const effectiveRoomId = (roomId || bookingId || "").trim();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, profile, isAdmin, loading: authLoading } = useAuth();
 
   const dashboardPath = isAdmin ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings';
@@ -461,16 +463,25 @@ export default function MeetingPage() {
     } finally {
       setLoading(false);
     }
-  }, [effectiveRoomId]);
+  }, [effectiveRoomId, user?.id, user?.email]);
 
   useEffect(() => {
     if (authLoading) return;
     
-    if (!user) { 
-      navigate("/login", { state: { from: `/meeting/${effectiveRoomId}` } }); 
-      return; 
+    if (!user) {
+      const currentFullUrl = `${location.pathname}${location.search}${location.hash}`;
+      const targetMeetingUrl = currentFullUrl.startsWith('/meeting/') ? currentFullUrl : `/meeting/${effectiveRoomId}`;
+      saveMeetingRedirect(targetMeetingUrl);
+      navigate(buildMeetingLoginUrl(targetMeetingUrl), {
+        replace: true,
+        state: { from: targetMeetingUrl }
+      });
+      return;
     }
     
+    // User is authenticated and reached the meeting page
+    clearMeetingRedirect();
+
     if (!effectiveRoomId) { 
       setManualEntry(true); 
       setLoading(false); 
@@ -480,7 +491,7 @@ export default function MeetingPage() {
     loadMeetingAccess();
     const interval = setInterval(loadMeetingAccess, 45000);
     return () => clearInterval(interval);
-  }, [user, effectiveRoomId, navigate, authLoading, loadMeetingAccess]);
+  }, [user, effectiveRoomId, navigate, location.pathname, location.search, location.hash, authLoading, loadMeetingAccess]);
 
   // Timer countdown during active call
   useEffect(() => {

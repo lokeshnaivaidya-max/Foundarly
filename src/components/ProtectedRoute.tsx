@@ -4,6 +4,7 @@ import { isUserAdmin, isSuperAdmin, UserRole, getUserEffectiveRole } from '@/lib
 import { ShieldAlert, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageLoader } from '@/components/PageLoader';
+import { isMeetingUrl, saveMeetingRedirect, buildMeetingLoginUrl } from '@/utils/meetingRedirect';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -30,6 +31,11 @@ export default function ProtectedRoute({
   if (!user) {
     if (requireAdmin || requireSuperAdmin) {
       return <Navigate to="/admin/login" replace state={{ from: location }} />;
+    }
+    const currentPath = `${location.pathname}${location.search}${location.hash}`;
+    if (isMeetingUrl(currentPath)) {
+      saveMeetingRedirect(currentPath);
+      return <Navigate to={buildMeetingLoginUrl(currentPath)} replace state={{ from: location }} />;
     }
     return <Navigate to="/login" replace state={{ from: location }} />;
   }

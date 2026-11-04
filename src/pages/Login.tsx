@@ -11,6 +11,7 @@ import { isUserAdmin } from "@/lib/authorization";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Eye, EyeOff, Mail, CheckCircle2, AlertCircle } from "lucide-react";
 import { validateEmail } from "@/utils/security";
+import { getMeetingRedirect, saveMeetingRedirect, clearMeetingRedirect } from "@/utils/meetingRedirect";
 import {
   Dialog,
   DialogContent,
@@ -42,15 +43,17 @@ export default function LoginPage() {
       console.log("user:", user);
       console.log("profile:", profile);
 
+      // Critical: Prioritize meeting destination for ALL roles (consultant, client, admin)
+      const meetingTarget = getMeetingRedirect(location.state, location.search);
+      if (meetingTarget) {
+        clearMeetingRedirect();
+        navigate(meetingTarget, { replace: true });
+        return;
+      }
+
       const queryParams = new URLSearchParams(location.search);
       const queryFrom = queryParams.get('from') || queryParams.get('returnUrl') || queryParams.get('redirect');
       const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from || queryFrom;
-
-      // Critical: If user came directly from an email meeting link (/meeting/:roomId), preserve destination for all roles
-      if (typeof fromPath === 'string' && fromPath.startsWith('/meeting/')) {
-        navigate(fromPath, { replace: true });
-        return;
-      }
 
       if (isAdmin || isUserAdmin(user, profile)) {
         const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
@@ -63,7 +66,7 @@ export default function LoginPage() {
         navigate(validUserFrom, { replace: true });
       }
     }
-  }, [user, profile, isAdmin, isConsultant, authLoading, navigate, location.state]);
+  }, [user, profile, isAdmin, isConsultant, authLoading, navigate, location.state, location.search]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,22 +102,31 @@ export default function LoginPage() {
         }
 
         toast.success("Account created successfully!");
+        const meetingTarget = getMeetingRedirect(location.state, location.search);
+        if (meetingTarget) {
+          clearMeetingRedirect();
+          navigate(meetingTarget, { replace: true });
+          return;
+        }
         navigate("/my-bookings", { replace: true });
       } else {
         const { error, profile: userProfile } = await signIn(cleanEmail, password);
         if (error) throw error;
         toast.success("Welcome back!");
 
+        // Priority 1: Check meeting redirect for both clients and consultants
+        const meetingTarget = getMeetingRedirect(location.state, location.search);
+        if (meetingTarget) {
+          clearMeetingRedirect();
+          navigate(meetingTarget, { replace: true });
+          return;
+        }
+
         const activeProfile = userProfile || profile;
 
         const queryParams = new URLSearchParams(location.search);
         const queryFrom = queryParams.get('from') || queryParams.get('returnUrl') || queryParams.get('redirect');
         const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from || queryFrom;
-
-        if (typeof fromPath === 'string' && fromPath.startsWith('/meeting/')) {
-          navigate(fromPath, { replace: true });
-          return;
-        }
 
         if (isUserAdmin(user, activeProfile)) {
           const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
@@ -175,6 +187,10 @@ export default function LoginPage() {
   const handleGoogleSignIn = async () => {
     try {
       setGoogleLoading(true);
+      const meetingTarget = getMeetingRedirect(location.state, location.search);
+      if (meetingTarget) {
+        saveMeetingRedirect(meetingTarget);
+      }
       const { error } = await signInWithGoogle();
       if (error) throw error;
     } catch (error: any) {

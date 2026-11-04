@@ -906,4 +906,89 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       }
     });
   });
+
+  describe('11. Activation vs Publication Separation (test-data safety)', () => {
+    const approvalSource = () =>
+      fs.readFileSync(path.join(process.cwd(), 'api', 'admin', 'approve-consultant-application.ts'), 'utf8');
+
+    test('consultant/me auto-activation creates a NON-PUBLIC identity-only draft', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      const draftIdx = source.indexOf('NON-PUBLIC draft consultant record');
+      assert.ok(draftIdx !== -1, 'Draft creation path must exist for approved applications');
+      const insertBlock = source.slice(draftIdx, draftIdx + 1100);
+      assert.ok(
+        insertBlock.includes('is_active: false'),
+        'Auto-created consultant record must be a NON-PUBLIC draft'
+      );
+      assert.ok(
+        !insertBlock.includes('pricing_30: 1000') && !insertBlock.includes('pricing_60: 1800'),
+        'No invented pricing defaults in auto-created drafts'
+      );
+      assert.ok(
+        !insertBlock.includes('approvedApp.current_job'),
+        'Application current_job must never become a listing title'
+      );
+      assert.ok(
+        !insertBlock.includes('approvedApp.experience'),
+        'Application experience must never become a listing bio'
+      );
+      assert.ok(
+        !insertBlock.includes('approvedApp.qualification'),
+        'Application qualification must never become public expertise'
+      );
+      assert.ok(
+        insertBlock.includes('user_id: userId'),
+        'Draft must be linked to the authenticated UUID'
+      );
+    });
+
+    test('Approval handler creates drafts and never publishes application free-text', () => {
+      const source = approvalSource();
+      assert.ok(
+        !source.includes('is_active: true'),
+        'Approval must never publish (is_active: true) a consultant listing'
+      );
+      const draftIdx = source.indexOf('Inserting NON-PUBLIC draft consultant record');
+      assert.ok(draftIdx !== -1, 'New listings must be created as drafts');
+      const insertBlock = source.slice(draftIdx, draftIdx + 900);
+      assert.ok(insertBlock.includes('is_active: false'), 'New listings must be non-public drafts');
+      assert.ok(insertBlock.includes("title: ''"), 'Draft title must be empty — never application text');
+      assert.ok(insertBlock.includes('pricing_30: 0'), 'Draft pricing must be neutral zero — never invented');
+      assert.ok(!insertBlock.includes('current_job'), 'Application current_job must not be copied into drafts');
+      assert.ok(!insertBlock.includes('app.experience'), 'Application experience must not be copied into drafts');
+
+      // Existing-row updates are identity-only
+      const updateIdx = source.indexOf('IDENTITY ONLY');
+      assert.ok(updateIdx !== -1, 'Re-approval must be documented as identity-only');
+      const updateBlock = source.slice(source.indexOf('const updateData', updateIdx), source.indexOf('.update(', updateIdx));
+      assert.ok(!updateBlock.includes('title:'), 'Existing listing title must never be overwritten on re-approval');
+      assert.ok(!updateBlock.includes('bio:'), 'Existing listing bio must never be overwritten on re-approval');
+      assert.ok(!updateBlock.includes('is_active'), 'Re-approval must never change publication state');
+    });
+
+    test('Dashboard never presents an approved application as a consultant record', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultantDashboard.ts'), 'utf8');
+      assert.ok(
+        !source.includes('id: apps[0].id'),
+        'Application ids must never be returned as consultant ids — consultant_id-keyed writes would orphan'
+      );
+    });
+
+    test('Dashboard access is independent of the public consultants listing', () => {
+      const dashSource = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'ConsultantDashboard.tsx'), 'utf8');
+      assert.ok(
+        dashSource.includes('profile?.role === "consultant"') && dashSource.includes('profile?.is_consultant'),
+        'Dashboard access must be granted from the activated account role, not a public listing record'
+      );
+      const svcSource = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultantDashboard.ts'), 'utf8');
+      assert.ok(
+        svcSource.includes('if (!consultant) return [];'),
+        'Dashboard data loads must degrade gracefully without a listing record'
+      );
+      assert.ok(
+        svcSource.includes('must NEVER be presented'),
+        'The listing-record fallback must document the activation/publication boundary'
+      );
+    });
+  });
 });

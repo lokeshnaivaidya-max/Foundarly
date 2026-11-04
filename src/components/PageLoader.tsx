@@ -11,36 +11,16 @@ export function PageLoader({ text = "Loading..." }: { text?: string }) {
 
       <div className="relative flex flex-col items-center justify-center">
         <motion.div
-          className="relative w-16 h-16 flex items-center justify-center"
-          animate={{ rotate: 360 }}
-          transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
+          className="relative flex items-center justify-center"
+          animate={{ scale: [0.96, 1.04, 0.96] }}
+          transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
         >
-          {/* Outer ring */}
-          <svg className="absolute inset-0 w-full h-full" viewBox="0 0 64 64">
-            <circle cx="32" cy="32" r="28" fill="none" stroke="hsl(45 100% 50% / 0.15)" strokeWidth="3" />
-            <circle
-              cx="32" cy="32" r="28"
-              fill="none"
-              stroke="#F5A623"
-              strokeWidth="3.5"
-              strokeLinecap="round"
-              strokeDasharray="44 132"
-            />
-          </svg>
-          {/* Inner pulsating gold monogram */}
-          <motion.div
-            className="w-7 h-7 rounded-full bg-primary/15 border border-primary/40 flex items-center justify-center text-primary font-serif font-bold text-xs"
-            animate={{ scale: [0.95, 1.1, 0.95] }}
-            transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
-          >
-            F
-          </motion.div>
+          <img
+            src="/foundarly-logo.png?v=20261104"
+            alt="Foundarly"
+            className="h-14 w-auto object-contain rounded-xl shadow-lg border border-primary/20"
+          />
         </motion.div>
-
-        {/* Brand label */}
-        <p className="font-serif font-bold text-sm tracking-widest text-foreground mt-4">
-          FOUNDARLY
-        </p>
       </div>
 
       {text && (

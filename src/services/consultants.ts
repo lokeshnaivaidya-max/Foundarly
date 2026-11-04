@@ -106,7 +106,7 @@ export const consultantsService = {
   },
 
   async create(consultant: Record<string, any>) {
-    let payload = { ...consultant };
+    const payload = { ...consultant };
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const { data, error } = await (supabase as any)
@@ -147,7 +147,7 @@ export const consultantsService = {
   },
 
   async update(id: string, updates: Record<string, any>) {
-    let payload = { ...updates };
+    const payload = { ...updates };
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const { data, error } = await (supabase as any)

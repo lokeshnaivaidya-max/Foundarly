@@ -174,7 +174,7 @@ describe('3. Canonical Room ID Alignment Between Client & Consultant', () => {
       return rawId.startsWith('foundarly-') ? rawId : `foundarly-${rawId}`;
     }
     if (currentRoomId) {
-      let clean = currentRoomId.trim().replace(/^.*\/meeting\//, '').split('?')[0].split('#')[0].replace(/\/+$/, '');
+      const clean = currentRoomId.trim().replace(/^.*\/meeting\//, '').split('?')[0].split('#')[0].replace(/\/+$/, '');
       return clean.startsWith('foundarly-') ? clean : `foundarly-${clean}`;
     }
     return 'default-room';

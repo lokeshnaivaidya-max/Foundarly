@@ -49,14 +49,24 @@ export const consultantApplicationsService = {
   },
 
   async create(application: ConsultantApplicationInsert) {
-    // 1. Try authoritative server API first
+    const cleanPhone = String(application.phone || '').trim();
+    const cleanWhatsapp = (application.whatsapp ? String(application.whatsapp).trim() : cleanPhone) || cleanPhone;
+    const sanitizedApp = {
+      ...application,
+      name: String(application.name || '').trim(),
+      email: String(application.email || '').trim().toLowerCase(),
+      phone: cleanPhone,
+      whatsapp: cleanWhatsapp,
+    };
+
+    // 1. Try authoritative server API first (Vercel serverless / Express endpoint)
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
       const res = await fetch('/api/consultant-applications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(application),
+        body: JSON.stringify(sanitizedApp),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -73,19 +83,23 @@ export const consultantApplicationsService = {
         }
       }
     } catch (apiErr: any) {
-      if (apiErr?.message && !apiErr.message.includes('fetch') && !apiErr.message.includes('abort')) {
+      // If server returned a business validation or rate limit error, throw it directly
+      if (apiErr?.message && !apiErr.message.includes('fetch') && !apiErr.message.includes('abort') && !apiErr.message.includes('Failed to fetch')) {
         throw apiErr;
       }
       console.warn('[consultantApplicationsService] Server API notice, falling back to direct DB insert:', apiErr?.message);
     }
 
-    // 2. Fallback to direct Supabase client insert with a strict timeout race
+    // 2. Fallback to direct Supabase client insert with a resilient 15s timeout race
     const dbPromise = supabase
       .from('consultant_applications')
-      .insert(application);
+      .insert(sanitizedApp);
 
     const timeoutPromise = new Promise<{ error: Error }>((resolve) =>
-      setTimeout(() => resolve({ error: new Error('Submission timed out. Please check your network and try again.') }), 6000)
+      setTimeout(
+        () => resolve({ error: new Error('Submission timed out after 15 seconds. Please check your network connection and try again.') }),
+        15000
+      )
     );
 
     const { error } = (await Promise.race([dbPromise, timeoutPromise])) as any;
@@ -97,8 +111,10 @@ export const consultantApplicationsService = {
         details: error.details,
         hint: error.hint,
       });
-      throw error;
+      throw new Error(error.message || 'Failed to submit application. Please check your details and try again.');
     }
+
+    return { success: true };
   },
 
   async update(id: string, updates: ConsultantApplicationUpdate) {

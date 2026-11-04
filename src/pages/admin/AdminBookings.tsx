@@ -185,7 +185,7 @@ export default function AdminBookings() {
       const data = await bookingsService.getAll();
       
       // Fetch all UPI payments in bulk for performance
-      let paymentsMap = new Map<string, any>();
+      const paymentsMap = new Map<string, any>();
       try {
         const allPayments = await upiPaymentService.getAllPayments();
         allPayments.forEach(p => {

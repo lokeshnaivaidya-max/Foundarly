@@ -108,7 +108,9 @@ export function RolePreviewProvider({ children }: { children: React.ReactNode })
       try {
         sessionStorage.removeItem(STORAGE_KEY_ROLE);
         sessionStorage.removeItem(STORAGE_KEY_CONSULTANT);
-      } catch {}
+      } catch {
+        // Ignore sessionStorage access errors
+      }
     }
   }, [isAdmin, previewRole]);
 
@@ -120,7 +122,9 @@ export function RolePreviewProvider({ children }: { children: React.ReactNode })
       } else {
         sessionStorage.removeItem(STORAGE_KEY_ROLE);
       }
-    } catch {}
+    } catch {
+      // Ignore sessionStorage access errors
+    }
   };
 
   const setPreviewConsultant = (consultant: PreviewConsultant | null) => {
@@ -131,7 +135,9 @@ export function RolePreviewProvider({ children }: { children: React.ReactNode })
       } else {
         sessionStorage.removeItem(STORAGE_KEY_CONSULTANT);
       }
-    } catch {}
+    } catch {
+      // Ignore sessionStorage access errors
+    }
   };
 
   const switchToRole = (
@@ -161,7 +167,9 @@ export function RolePreviewProvider({ children }: { children: React.ReactNode })
     setPreviewRole(null);
     try {
       sessionStorage.removeItem(STORAGE_KEY_ROLE);
-    } catch {}
+    } catch {
+      // Ignore sessionStorage access errors
+    }
     toast.info("Exited role preview mode");
     navigate("/admin/developer");
   };

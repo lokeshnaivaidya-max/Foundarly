@@ -47,7 +47,7 @@ test("Header isActive logic matches correctly for root Home and Experts", () => 
 
 test("Dashboard reload prevention: Tab state preservation via searchParams", () => {
   // Simulate tab state management
-  let searchParams = new URLSearchParams("");
+  const searchParams = new URLSearchParams("");
   const handleTabChange = (val: string) => {
     searchParams.set("tab", val);
   };

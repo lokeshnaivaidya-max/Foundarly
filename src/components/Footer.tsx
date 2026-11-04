@@ -15,9 +15,9 @@ export default function Footer() {
           <div className="md:col-span-2 space-y-4">
             <div className="flex items-center gap-2">
               <img
-                src="/logo.svg"
+                src="/foundarly-logo.png?v=20261104"
                 alt="Foundarly"
-                className="h-8 w-auto object-contain"
+                className="h-8 sm:h-9 w-auto object-contain rounded-md"
                 onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
               />
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold tracking-wider uppercase">

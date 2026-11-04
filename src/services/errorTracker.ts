@@ -29,7 +29,7 @@ export function sanitizeErrorMessage(rawMessage: string): string {
     return "Unknown application error";
   }
 
-  let sanitized = rawMessage
+  const sanitized = rawMessage
     // Strip JWT tokens
     .replace(/eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]*/g, "[REDACTED_JWT]")
     // Strip Bearer headers

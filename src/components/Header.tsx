@@ -48,7 +48,7 @@ export default function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [logoText, setLogoText] = useState("Foundarly");
-  const [logoUrl, setLogoUrl] = useState<string | null>("/logo.svg");
+  const [logoUrl, setLogoUrl] = useState<string | null>("/foundarly-logo.png?v=20261104");
   const location = useLocation();
   const navigate = useNavigate();
   const { user, profile, isAdmin, isSuperAdmin, isDeveloperAdmin, isConsultant, isClient, signOut } = useAuth();
@@ -72,7 +72,11 @@ export default function Header() {
       const logoUrlSetting = settings.find((s) => s.setting_key === "site_logo_url");
 
       if (logoTextSetting?.setting_value) setLogoText(logoTextSetting.setting_value);
-      if (logoUrlSetting?.setting_value) setLogoUrl(logoUrlSetting.setting_value);
+      if (logoUrlSetting?.setting_value) {
+        const val = logoUrlSetting.setting_value;
+        const buster = val.includes("?") ? val : `${val}?v=20261104`;
+        setLogoUrl(buster);
+      }
     } catch (error) {
       console.error("Error loading logo:", error);
     }

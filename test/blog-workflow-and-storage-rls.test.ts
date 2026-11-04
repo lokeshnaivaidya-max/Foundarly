@@ -23,7 +23,7 @@ describe('Foundarly Blog Creation, Storage Upload & Role-Based RLS Suite', () =>
   }
 
   // Simulated Database State
-  let blogDatabase: Array<{
+  const blogDatabase: Array<{
     id: string;
     title: string;
     content: string;
@@ -35,7 +35,7 @@ describe('Foundarly Blog Creation, Storage Upload & Role-Based RLS Suite', () =>
   }> = [];
 
   // Simulated Storage State for 'blog-images'
-  let storageObjects: Array<{
+  const storageObjects: Array<{
     id: string;
     bucket_id: string;
     name: string;

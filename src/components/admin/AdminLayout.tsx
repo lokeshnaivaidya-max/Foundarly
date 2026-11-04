@@ -17,9 +17,9 @@ export default function AdminLayout() {
               <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
               <Link to="/" className="flex items-center gap-2 group">
                 <img
-                  src="/logo.svg"
+                  src="/foundarly-logo.png?v=20261104"
                   alt="Foundarly"
-                  className="h-7 w-auto object-contain"
+                  className="h-8 w-auto object-contain rounded-md"
                   onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
                 />
               </Link>

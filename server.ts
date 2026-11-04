@@ -2463,7 +2463,7 @@ async function startServer() {
         .insert(applicationPayload);
 
       const timeoutPromise = new Promise<{ error: Error }>((resolve) =>
-        setTimeout(() => resolve({ error: new Error("Database operation timed out") }), 5000)
+        setTimeout(() => resolve({ error: new Error("Database operation timed out after 15 seconds") }), 15000)
       );
 
       const { error } = (await Promise.race([insertPromise, timeoutPromise])) as any;

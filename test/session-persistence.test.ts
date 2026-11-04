@@ -346,7 +346,7 @@ describe('Foundarly Login Session Persistence Test Suite', () => {
     safeLocalStorageAdapter.setItem(SUPABASE_AUTH_STORAGE_KEY, JSON.stringify(session));
 
     // Simulate profile query throwing an error (e.g. 500, RLS, offline)
-    let sessionDestroyed = false;
+    const sessionDestroyed = false;
     let fallbackProfileAssigned = false;
 
     try {

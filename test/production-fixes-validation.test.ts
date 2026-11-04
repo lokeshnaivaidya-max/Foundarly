@@ -18,7 +18,10 @@ describe('Production Bug Fixes Validation Suite', () => {
     const { settingsService } = await import('../src/services/settings.js');
     const logoSetting = await settingsService.getBySetting('site_logo_url');
     assert.ok(logoSetting);
-    assert.equal(logoSetting.setting_value, '/logo.svg');
+    assert.ok(
+      logoSetting.setting_value?.includes('/logo.svg') ||
+      logoSetting.setting_value?.includes('/foundarly-logo.png')
+    );
   });
 
   it('3. Consultant role detection preserves consultant status and does not demote to client', async () => {

@@ -350,14 +350,18 @@ function StorySection() {
               <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-primary/12 blur-3xl pointer-events-none" />
               <div className="absolute -bottom-8 -left-8 w-36 h-36 rounded-full bg-amber-400/8 blur-2xl pointer-events-none" />
 
-              {/* F logo */}
+              {/* Official Foundarly Logo */}
               <motion.div
-                className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center mb-8 shadow-xl"
-                style={{ boxShadow: "0 16px 40px -8px hsl(45 100% 50% / 0.45), inset 0 1px 0 hsl(0 0% 100% / 0.3)" }}
+                className="w-16 h-16 rounded-2xl overflow-hidden mb-8 shadow-xl border border-primary/20 bg-background flex items-center justify-center p-1"
+                style={{ boxShadow: "0 16px 40px -8px hsl(45 100% 50% / 0.35)" }}
                 animate={{ rotate: [0, 2, -2, 0] }}
                 transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
               >
-                <span className="font-display text-2xl font-bold text-white">F</span>
+                <img
+                  src="/foundarly-logo.png?v=20261104"
+                  alt="Foundarly"
+                  className="w-full h-full object-contain rounded-xl"
+                />
               </motion.div>
 
               <h3 className="font-display text-2xl font-bold mb-3">

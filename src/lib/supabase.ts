@@ -17,8 +17,7 @@ console.log('[Supabase Initialization]', {
 });
 
 export const isSupabaseConfigured = Boolean(
-  (env?.VITE_SUPABASE_URL || 'https://rfyxnshvtfswvaogjzwq.supabase.co') &&
-  (env?.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd')
+  (env?.VITE_SUPABASE_URL || supabaseUrl) && (env?.VITE_SUPABASE_ANON_KEY || supabaseAnonKey)
 );
 
 // Resilient browser storage adapter that persists across browser & tab sessions

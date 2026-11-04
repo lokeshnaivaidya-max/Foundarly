@@ -31,7 +31,7 @@ import { followUpService } from "@/services/followUpService";
 import ConsultantAvailabilityEditor from "@/components/consultant/ConsultantAvailabilityEditor";
 
 export default function ConsultantDashboard() {
-  const { user, profile } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { formatPrice } = useCurrency();
   
@@ -84,6 +84,8 @@ export default function ConsultantDashboard() {
   const [newTime, setNewTime] = useState("");
 
   useEffect(() => {
+    if (authLoading) return;
+
     if (!user) {
       navigate("/login");
       return;
@@ -91,7 +93,7 @@ export default function ConsultantDashboard() {
 
     // Check if user has consultant role
     checkConsultantAccess();
-  }, [user]);
+  }, [user, authLoading]);
 
   const checkConsultantAccess = async () => {
     if (!user) return;

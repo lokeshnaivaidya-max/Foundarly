@@ -48,7 +48,7 @@ function StarPicker({ value, onChange }: { value: number; onChange: (v: number) 
 export default function ReviewPage() {
   const { bookingId } = useParams<{ bookingId: string }>();
   const navigate = useNavigate();
-  const { user, profile, isAdmin } = useAuth();
+  const { user, profile, isAdmin, loading: authLoading } = useAuth();
 
   const getBackPath = () => isAdmin ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings';
 
@@ -63,9 +63,10 @@ export default function ReviewPage() {
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
+    if (authLoading) return;
     if (!user) { navigate("/login"); return; }
     load();
-  }, [user]);
+  }, [user, authLoading]);
 
   const load = async () => {
     try {

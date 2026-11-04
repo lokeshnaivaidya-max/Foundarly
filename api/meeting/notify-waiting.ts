@@ -11,6 +11,7 @@ import {
 } from '../../src/utils/emailTemplates.js';
 import { sendEmail, getSmtpConfig } from '../../src/server/mailer.js';
 import { checkDistributedRateLimit, extractClientIp } from '../../src/server/rateLimiter.js';
+import { getCanonicalSiteUrl } from '../../src/utils/canonicalUrl.js';
 
 dotenv.config();
 
@@ -267,13 +268,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       });
     }
 
-    const siteUrl = (
-      process.env.APP_URL ||
-      process.env.SITE_URL ||
-      process.env.VITE_SITE_URL ||
-      (req.headers?.origin as string) ||
-      'https://foundarlybusinessworld.in'
-    ).trim();
+    const siteUrl = getCanonicalSiteUrl(req);
 
     const effectiveRoomId = booking.meeting_room_id || `foundarly-${booking.id}`;
     const meetingLink = `${siteUrl}/meeting/${effectiveRoomId}`;

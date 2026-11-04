@@ -49,43 +49,142 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const inFlightFetchRef = useRef<Map<string, Promise<Profile | null>>>(new Map());
+  const isMountedRef = useRef(true);
+  const initialResolvedRef = useRef(false);
+
+  // Synchronously retrieve cached profile from localStorage to prevent role flicker/kicking
+  const getCachedProfile = (userId: string): Profile | null => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const raw = window.localStorage.getItem(`foundarly_profile_${userId}`);
+        if (raw) return JSON.parse(raw);
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  };
+
+  const setCachedProfile = (userId: string, p: Profile | null) => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        if (p) {
+          window.localStorage.setItem(`foundarly_profile_${userId}`, JSON.stringify(p));
+        } else {
+          window.localStorage.removeItem(`foundarly_profile_${userId}`);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
+    isMountedRef.current = true;
+    initialResolvedRef.current = false;
+
     // Clean up any legacy localStorage admin sessions
-    localStorage.removeItem('foundarly_admin_active_session');
-    localStorage.removeItem('foundarly_admin_auth');
+    try {
+      localStorage.removeItem('foundarly_admin_active_session');
+      localStorage.removeItem('foundarly_admin_auth');
+    } catch {
+      // ignore
+    }
 
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setSession(session);
-        setUser(session.user);
-        fetchProfile(session.user.id, session.user);
-      } else {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-        setLoading(false);
+    // Step 1: Authoritative initial session retrieval with token refresh support
+    const initializeAuth = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          console.warn('[AuthContext] getSession notice:', error.message);
+        }
+
+        if (!isMountedRef.current) return;
+
+        const initialSession = data?.session;
+        if (initialSession?.user) {
+          setSession(initialSession);
+          setUser(initialSession.user);
+
+          // Immediately hydrate cached profile to guarantee smooth authorization on first render
+          const cached = getCachedProfile(initialSession.user.id);
+          if (cached) {
+            setProfile(cached);
+          }
+
+          // Authoritatively fetch fresh profile from DB
+          await fetchProfile(initialSession.user.id, initialSession.user);
+        } else {
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+        }
+      } catch (err) {
+        console.warn('[AuthContext] Auth initialization error:', err);
+        if (isMountedRef.current) {
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+        }
+      } finally {
+        initialResolvedRef.current = true;
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
-    });
+    };
 
-    // Listen for auth changes
+    initializeAuth();
+
+    // Step 2: Listen for persistent auth state changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        setSession(session);
-        setUser(session.user);
-        fetchProfile(session.user.id, session.user);
-      } else {
+    } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
+      if (!isMountedRef.current) return;
+
+      if (event === 'SIGNED_OUT') {
         setSession(null);
         setUser(null);
         setProfile(null);
         setLoading(false);
+        return;
+      }
+
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        if (currentSession?.user) {
+          setSession(currentSession);
+          setUser(currentSession.user);
+          const cached = getCachedProfile(currentSession.user.id);
+          if (cached) {
+            setProfile(cached);
+          }
+          await fetchProfile(currentSession.user.id, currentSession.user);
+        }
+        return;
+      }
+
+      if (event === 'INITIAL_SESSION') {
+        if (currentSession?.user) {
+          setSession(currentSession);
+          setUser(currentSession.user);
+          const cached = getCachedProfile(currentSession.user.id);
+          if (cached) {
+            setProfile(cached);
+          }
+          await fetchProfile(currentSession.user.id, currentSession.user);
+        } else if (initialResolvedRef.current) {
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+        }
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMountedRef.current = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const fetchProfile = async (userId: string, currentUser?: User | null): Promise<Profile | null> => {
@@ -130,6 +229,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }).then();
           }
           
+          setCachedProfile(userId, profileData);
           setProfile(profileData);
           return profileData;
         }
@@ -142,6 +242,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           full_name: profileData.full_name || targetUser?.user_metadata?.full_name || 'Developer Admin',
           is_consultant: false,
         };
+        setCachedProfile(userId, resolvedDevProfile);
         setProfile(resolvedDevProfile);
         return resolvedDevProfile;
       }
@@ -223,20 +324,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      setCachedProfile(userId, resolvedProfile);
       setProfile(resolvedProfile);
       return resolvedProfile;
     } catch (error) {
       secureLog.error('Error in fetchProfile:', error);
-      const fallbackProfile: Profile = {
+      const cached = getCachedProfile(userId);
+      const fallbackProfile: Profile = cached || {
         id: userId,
         role: 'client',
-        full_name: user?.email?.split('@')[0] || 'User',
+        full_name: currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || user?.email?.split('@')[0] || 'User',
         is_consultant: false,
       };
       setProfile(fallbackProfile);
       return fallbackProfile;
     } finally {
-      setLoading(false);
       inFlightFetchRef.current.delete(userId);
     }
   })();
@@ -357,12 +459,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    localStorage.removeItem('foundarly_admin_active_session');
-    localStorage.removeItem('foundarly_admin_auth');
+    try {
+      localStorage.removeItem('foundarly_admin_active_session');
+      localStorage.removeItem('foundarly_admin_auth');
+      if (user?.id) {
+        setCachedProfile(user.id, null);
+      }
+    } catch {
+      // ignore
+    }
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
     setSession(null);
+    setLoading(false);
   };
 
   const isCurrentSuperAdmin = isSuperAdmin(user, profile);

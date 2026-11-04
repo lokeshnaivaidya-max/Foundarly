@@ -7,6 +7,8 @@
  * matching Foundarly's official brand palette, typography, and visual identity.
  */
 
+import { getCanonicalSiteUrl } from './canonicalUrl';
+
 export const FOUNDARLY_BRAND = {
   name: 'Foundarly',
   tagline: 'Expert Business Consultation & Professional Consulting Services',
@@ -270,16 +272,10 @@ function resolveSiteUrl(link?: string): string {
   if (link && link.startsWith('http')) {
     try {
       const u = new URL(link);
-      if (
-        u.hostname === 'localhost' ||
-        u.hostname === '127.0.0.1' ||
-        u.hostname.endsWith('.internal') ||
-        u.hostname.includes('vercel.app') ||
-        u.hostname.includes('run.app')
-      ) {
-        return FOUNDARLY_BRAND.domain;
+      const isLocalOrPreview = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname.includes('run.app') || u.hostname.includes('vercel.app');
+      if (!isLocalOrPreview) {
+        return `${u.protocol === 'http:' ? 'https:' : u.protocol}//${u.host}`;
       }
-      return `${u.protocol === 'http:' ? 'https:' : u.protocol}//${u.host}`;
     } catch {
       // fallback
     }
@@ -300,14 +296,8 @@ export function canonicalizeUrl(url?: string): string {
   }
   try {
     const parsed = new URL(clean);
-    const isOutdatedOrLocal =
-      parsed.hostname === 'localhost' ||
-      parsed.hostname === '127.0.0.1' ||
-      parsed.hostname.endsWith('.internal') ||
-      parsed.hostname.includes('vercel.app') ||
-      parsed.hostname.includes('run.app');
-
-    if (isOutdatedOrLocal) {
+    const isLocalOrPreview = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname.endsWith('.internal') || parsed.hostname.includes('run.app') || parsed.hostname.includes('vercel.app');
+    if (isLocalOrPreview) {
       return `${FOUNDARLY_BRAND.domain}${parsed.pathname}${parsed.search}${parsed.hash}`;
     }
     if (parsed.protocol === 'http:') {

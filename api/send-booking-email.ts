@@ -20,6 +20,7 @@ import {
 import { completionEmailStorage } from '../src/server/completionEmailStorage.js';
 import { sendEmail, getSmtpConfig } from '../src/server/mailer.js';
 import { checkDistributedRateLimit, extractClientIp } from '../src/server/rateLimiter.js';
+import { getCanonicalSiteUrl, buildCanonicalUrl } from '../src/utils/canonicalUrl.js';
 
 dotenv.config();
 
@@ -81,7 +82,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }
 
     const smtpConfig = getSmtpConfig();
-    const siteUrl = (process.env.APP_URL || process.env.SITE_URL || process.env.VITE_SITE_URL || 'https://www.foundarlybusinessworld.in').trim();
+    const siteUrl = getCanonicalSiteUrl(req, emailData?.meetingLink);
 
     if (!smtpConfig.pass) {
       return res.status(400).json({
@@ -225,7 +226,9 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       const time = bookingRecord?.time || emailData?.time || 'Flexible';
       const sessionDuration = bookingRecord?.session_duration || emailData?.duration || 60;
       const meetingRoomId = bookingRecord?.meeting_room_id || emailData?.meetingRoomId || `foundarly-${targetBookingId}`;
-      const meetingLink = `${siteUrl}/meeting/${meetingRoomId}`;
+      const meetingLink = emailData?.meetingLink && emailData.meetingLink.startsWith('http')
+        ? emailData.meetingLink
+        : buildCanonicalUrl(`/meeting/${meetingRoomId}`, req, siteUrl);
 
       // Calculate 7-day rejoin deadline
       const timing = parseSessionTimes({
@@ -377,7 +380,9 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           date: booking.date,
           time: booking.time || 'Flexible',
           duration: booking.session_duration || 60,
-          meetingLink: `${siteUrl}/meeting/${meetingRoomId}`,
+          meetingLink: emailData?.meetingLink && emailData.meetingLink.startsWith('http')
+            ? emailData.meetingLink
+            : buildCanonicalUrl(`/meeting/${meetingRoomId}`, req, siteUrl),
           meetingRoomId,
           price: booking.session_price,
           message: booking.message,

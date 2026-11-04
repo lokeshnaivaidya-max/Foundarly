@@ -89,6 +89,39 @@ function MeetingRedirectHandler() {
   return null;
 }
 
+function CanonicalDomainEnforcer() {
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hostname = window.location.hostname;
+    // Exempt local development and preview environments
+    if (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '0.0.0.0' ||
+      hostname.endsWith('.localhost') ||
+      hostname.endsWith('.local') ||
+      hostname.endsWith('.internal') ||
+      hostname.endsWith('.run.app')
+    ) {
+      return;
+    }
+
+    if (
+      hostname === 'foundarly-delta.vercel.app' ||
+      hostname.endsWith('.vercel.app') ||
+      hostname === 'www.foundarlybusinessworld.in' ||
+      hostname === 'foundarly.com' ||
+      hostname === 'www.foundarly.com'
+    ) {
+      const canonicalOrigin = 'https://foundarlybusinessworld.in';
+      const target = canonicalOrigin + window.location.pathname + window.location.search + window.location.hash;
+      window.location.replace(target);
+    }
+  }, []);
+
+  return null;
+}
+
 const App = () => (
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
@@ -100,6 +133,7 @@ const App = () => (
                 <Toaster />
                 <Sonner />
                 <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                  <CanonicalDomainEnforcer />
                   <MeetingRedirectHandler />
                   <RolePreviewProvider>
                     <RolePreviewBanner />

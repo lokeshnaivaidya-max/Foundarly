@@ -4,6 +4,38 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
+    <!-- Centralized Canonical Domain Guard: Immediately enforce https://foundarlybusinessworld.in -->
+    <script>
+      (function() {
+        try {
+          var h = window.location.hostname;
+          // Preserve local development and preview runtimes
+          if (
+            h === 'localhost' ||
+            h === '127.0.0.1' ||
+            h === '0.0.0.0' ||
+            h.slice(-10) === '.localhost' ||
+            h.slice(-6) === '.local' ||
+            h.slice(-8) === '.run.app'
+          ) {
+            return;
+          }
+
+          // If accessed via Vercel deployment domain or www prefix, redirect immediately to official canonical domain
+          var isVercelHost = h === 'foundarly-delta.vercel.app' || h.slice(-11) === '.vercel.app';
+          var isWwwHost = h === 'www.foundarlybusinessworld.in' || h === 'www.foundarly.com';
+
+          if (isVercelHost || isWwwHost) {
+            var targetOrigin = 'https://foundarlybusinessworld.in';
+            var currentTarget = targetOrigin + window.location.pathname + window.location.search + window.location.hash;
+            window.location.replace(currentTarget);
+          }
+        } catch (e) {
+          // Fail silently and proceed
+        }
+      })();
+    </script>
+
     <!-- Primary Meta Tags -->
     <title>foundarly - Expert Business Consultation & Professional Consulting Services</title>
     <meta name="title" content="foundarly - Expert Business Consultation & Professional Consulting Services" />
@@ -17,15 +49,15 @@
     <meta name="distribution" content="global" />
     
     <!-- Canonical URL -->
-    <link rel="canonical" href="https://www.foundarlybusinessworld.in/" />
+    <link rel="canonical" href="https://foundarlybusinessworld.in/" />
     
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://www.foundarlybusinessworld.in/" />
+    <meta property="og:url" content="https://foundarlybusinessworld.in/" />
     <meta property="og:site_name" content="foundarly" />
     <meta property="og:title" content="foundarly - Expert Business Consultation & Professional Consulting Services" />
     <meta property="og:description" content="Connect with top-rated business consultants for personalized 1-on-1 video consultations. Get expert advice on strategy, growth, marketing, finance, and more." />
-    <meta property="og:image" content="https://www.foundarlybusinessworld.in/og-image.jpg" />
+    <meta property="og:image" content="https://foundarlybusinessworld.in/og-image.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="foundarly - Expert Business Consultation Platform" />
@@ -33,12 +65,12 @@
     
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:url" content="https://www.foundarlybusinessworld.in/" />
+    <meta name="twitter:url" content="https://foundarlybusinessworld.in/" />
     <meta name="twitter:site" content="@foundarly" />
     <meta name="twitter:creator" content="@foundarly" />
     <meta name="twitter:title" content="foundarly - Expert Business Consultation & Professional Consulting Services" />
     <meta name="twitter:description" content="Connect with top-rated business consultants for personalized 1-on-1 video consultations. Get expert advice on strategy, growth, marketing, finance, and more." />
-    <meta name="twitter:image" content="https://www.foundarlybusinessworld.in/og-image.jpg" />
+    <meta name="twitter:image" content="https://foundarlybusinessworld.in/og-image.jpg" />
     <meta name="twitter:image:alt" content="foundarly - Expert Business Consultation Platform" />
     
     <!-- Additional SEO Meta Tags -->
@@ -70,9 +102,9 @@
       "@type": "ProfessionalService",
       "name": "foundarly",
       "description": "Expert business consultation and professional consulting services. Connect with verified industry experts for personalized 1-on-1 video consultations.",
-      "url": "https://www.foundarlybusinessworld.in",
-      "logo": "https://www.foundarlybusinessworld.in/logo.png",
-      "image": "https://www.foundarlybusinessworld.in/og-image.jpg",
+      "url": "https://foundarlybusinessworld.in",
+      "logo": "https://foundarlybusinessworld.in/logo.png",
+      "image": "https://foundarlybusinessworld.in/og-image.jpg",
       "priceRange": "₹₹",
       "telephone": "+91-XXXXXXXXXX",
       "address": {
@@ -104,10 +136,10 @@
       "@context": "https://schema.org",
       "@type": "WebSite",
       "name": "foundarly",
-      "url": "https://www.foundarlybusinessworld.in",
+      "url": "https://foundarlybusinessworld.in",
       "potentialAction": {
         "@type": "SearchAction",
-        "target": "https://www.foundarlybusinessworld.in/consultants?search={search_term_string}",
+        "target": "https://foundarlybusinessworld.in/consultants?search={search_term_string}",
         "query-input": "required name=search_term_string"
       }
     }

@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, expect } from 'vitest';
 import assert from 'node:assert/strict';
 import {
   isMeetingUrl,

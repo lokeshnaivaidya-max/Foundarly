@@ -3,15 +3,15 @@ import { createClient } from '@supabase/supabase-js';
 import {
   calculateRejoinEligibility,
   validateParticipantAccess,
-} from '../../src/utils/meetingRejoin.js';
+} from '../../utils/meetingRejoin.js';
 import {
   generateParticipantWaitingEmailHTML,
   generateParticipantWaitingEmailText,
   EmailParticipantWaitingData,
-} from '../../src/utils/emailTemplates.js';
-import { sendEmail, getSmtpConfig } from '../../src/server/mailer.js';
-import { checkDistributedRateLimit, extractClientIp } from '../../src/server/rateLimiter.js';
-import { getCanonicalSiteUrl } from '../../src/utils/canonicalUrl.js';
+} from '../../utils/emailTemplates.js';
+import { sendEmail, getSmtpConfig } from '../mailer.js';
+import { checkDistributedRateLimit, extractClientIp } from '../rateLimiter.js';
+import { getCanonicalSiteUrl } from '../../utils/canonicalUrl.js';
 
 dotenv.config();
 

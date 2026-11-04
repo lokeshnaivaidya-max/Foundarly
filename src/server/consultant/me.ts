@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import { extractClientIp } from '../../src/server/rateLimiter.js';
-import { isAllowedAdminEmail } from '../../src/lib/authorization.js';
-import { secureLog } from '../../src/utils/security.js';
+import { extractClientIp } from '../rateLimiter.js';
+import { isAllowedAdminEmail } from '../../lib/authorization.js';
+import { secureLog } from '../../utils/security.js';
 
 dotenv.config();
 
@@ -52,13 +52,40 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     return res.status(401).json({ success: false, error: 'Authentication required. Missing Bearer token.' });
   }
 
+  // Hoisted for the outer catch: an error may occur before the authenticated
+  // user is known; the failure log must never itself throw (TS18004 catch bug).
+  let userId = '';
+
   try {
-    const { data: { user }, error: userError } = await supabaseAdminClient.auth.getUser(token);
+    // BOUNDED EXECUTION: server-side RLS/policy evaluation on some tables
+    // (profiles, consultant_applications) has been observed to hang for
+    // authenticated sessions (production incident on 9929d98 — /api/consultant/me
+    // pending forever). Every Supabase call is raced against a shared deadline
+    // so this function ALWAYS returns a response within ~8s. A timeout surfaces
+    // as an honest 500 — never a fake success and never an indefinite pending.
+    const deadline = Date.now() + 8000;
+    const bounded = async <T>(operation: PromiseLike<T>, label: string, ms = 4000): Promise<T> => {
+      const remaining = Math.min(ms, deadline - Date.now());
+      if (remaining < 250) {
+        throw new Error(`Server deadline exceeded before ${label}`);
+      }
+      return await Promise.race([
+        Promise.resolve(operation),
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(remaining)}ms`)), remaining)
+        ),
+      ]);
+    };
+
+    const { data: { user }, error: userError } = await bounded(
+      supabaseAdminClient.auth.getUser(token),
+      'auth user verification'
+    );
     if (userError || !user) {
       return res.status(401).json({ success: false, error: 'Invalid or expired session token.' });
     }
 
-    const userId = user.id;
+    userId = user.id;
     const userEmail = (user.email || '').toLowerCase().trim();
     // Email-based identity matching is only trusted when Supabase has confirmed
     // the address (email_confirmed_at; confirmed_at covers legacy accounts and
@@ -93,11 +120,14 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     const activeDbClient = hasServiceRoleKey ? supabaseAdminClient : authenticatedClient;
 
     // Check existing profile role so we never demote super admins or developer admins
-    const { data: userProfile } = await activeDbClient
-      .from('profiles')
-      .select('role')
-      .eq('id', userId)
-      .maybeSingle();
+    const { data: userProfile } = await bounded(
+      activeDbClient
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle(),
+      'profile role lookup'
+    );
 
     const isSuper = (userProfile?.role === 'super_admin' || userProfile?.role === 'admin') && isAllowedAdminEmail(userEmail);
     const isDev = userProfile?.role === 'developer_admin';
@@ -114,19 +144,22 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       consultantQuery = consultantQuery.eq('user_id', userId);
     }
 
-    const { data: consultants } = await consultantQuery.limit(1);
+    const { data: consultants } = await bounded(consultantQuery.limit(1), 'consultant lookup');
     let consultant = consultants?.[0] || null;
 
     // 2. If not found in consultants, check if user has an APPROVED application
     // in consultant_applications (email-based match requires a verified email)
     if (!consultant && userEmail && emailVerified) {
-      const { data: applications } = await activeDbClient
-        .from('consultant_applications')
-        .select('*')
-        .ilike('email', userEmail)
-        .eq('status', 'approved')
-        .order('created_at', { ascending: false })
-        .limit(1);
+      const { data: applications } = await bounded(
+        activeDbClient
+          .from('consultant_applications')
+          .select('*')
+          .ilike('email', userEmail)
+          .eq('status', 'approved')
+          .order('created_at', { ascending: false })
+          .limit(1),
+        'approved application lookup'
+      );
 
       const approvedApp = applications?.[0];
       if (approvedApp) {
@@ -139,21 +172,24 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
         // and the profile is published explicitly via the Manage Consultants
         // toggle. Nothing here becomes publicly visible until is_active=true.
         console.log(`[Consultant Me] Approved application found; creating NON-PUBLIC draft consultant record for ${userEmail}`);
-        const { data: newConsultant, error: createErr } = await activeDbClient
-          .from('consultants')
-          .insert({
-            name: approvedApp.name,
-            email: userEmail,
-            user_id: userId,
-            is_active: false,
-            title: '',
-            bio: '',
-            expertise: [],
-            pricing_30: 0,
-            pricing_60: 0,
-          })
-          .select()
-          .single();
+        const { data: newConsultant, error: createErr } = await bounded(
+          activeDbClient
+            .from('consultants')
+            .insert({
+              name: approvedApp.name,
+              email: userEmail,
+              user_id: userId,
+              is_active: false,
+              title: '',
+              bio: '',
+              expertise: [],
+              pricing_30: 0,
+              pricing_60: 0,
+            })
+            .select()
+            .single(),
+          'draft consultant creation'
+        );
 
         if (!createErr && newConsultant) {
           consultant = newConsultant;
@@ -201,11 +237,17 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       let storedUserEmail: string | null = null;
       if (hasServiceRoleKey) {
         try {
-          const { data: usersData } = await supabaseAdminClient.auth.admin.listUsers({
-            page: 1,
-            perPage: 1000,
-          });
-          const storedUser = usersData?.users?.find((u) => u.id === consultant.user_id);
+          const { data: usersData } = await bounded(
+            supabaseAdminClient.auth.admin.listUsers({
+              page: 1,
+              perPage: 1000,
+            }),
+            'auth admin user lookup'
+          );
+          // Explicit shape: supabase-js listUsers types resolve differently
+          // under Vercel's node16 moduleResolution (users can infer as never[]).
+          const users = (usersData as { users?: Array<{ id: string; email?: string | null }> } | null | undefined)?.users;
+          const storedUser = users?.find((u) => u.id === consultant.user_id);
           storedUserEmail = (storedUser?.email || '').toLowerCase().trim() || null;
         } catch {
           storedUserEmail = null;
@@ -227,10 +269,13 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           '[Consultant Me] Stored user_id no longer matches the consultant email; reclaiming link for verified requester',
           { userId, consultantId: consultant.id, existingUserId: consultant.user_id }
         );
-        const { error: linkErr } = await activeDbClient
-          .from('consultants')
-          .update({ user_id: userId, is_active: true })
-          .eq('id', consultant.id);
+        const { error: linkErr } = await bounded(
+          activeDbClient
+            .from('consultants')
+            .update({ user_id: userId, is_active: true })
+            .eq('id', consultant.id),
+          'stale-link reclaim update'
+        );
         if (linkErr) {
           // Non-admin users cannot update consultants.user_id due to RLS.
           // The consultant record is still valid (matched by UUID or verified
@@ -247,10 +292,13 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
         }
       }
     } else if (!linked) {
-      const { error: linkErr } = await activeDbClient
-        .from('consultants')
-        .update({ user_id: userId, is_active: true })
-        .eq('id', consultant.id);
+      const { error: linkErr } = await bounded(
+        activeDbClient
+          .from('consultants')
+          .update({ user_id: userId, is_active: true })
+          .eq('id', consultant.id),
+        'consultant user_id link update'
+      );
       if (linkErr) {
         // Non-admin users cannot update consultants.user_id due to RLS.
         // The consultant record is still valid (matched by UUID or verified
@@ -270,10 +318,13 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     // 4. Reconcile email if missing (best-effort; requires admin RLS). Only a
     // verified email may be written onto the consultant record.
     if (!consultant.email && userEmail && emailVerified) {
-      const { error: emailErr } = await activeDbClient
-        .from('consultants')
-        .update({ email: userEmail })
-        .eq('id', consultant.id);
+      const { error: emailErr } = await bounded(
+        activeDbClient
+          .from('consultants')
+          .update({ email: userEmail })
+          .eq('id', consultant.id),
+        'consultant email backfill'
+      );
       if (emailErr) {
         secureLog.warn(
           '[Consultant Me] Could not update consultant email (RLS or write error):',
@@ -286,14 +337,17 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
     // 5. Authoritatively update user profile role in profiles table (unless admin)
     if (!isSuper && !isDev) {
-      const { error: profileErr } = await activeDbClient
-        .from('profiles')
-        .upsert({
-          id: userId,
-          role: 'consultant',
-          full_name: consultant.name,
-          is_consultant: true,
-        });
+      const { error: profileErr } = await bounded(
+        activeDbClient
+          .from('profiles')
+          .upsert({
+            id: userId,
+            role: 'consultant',
+            full_name: consultant.name,
+            is_consultant: true,
+          }),
+        'profile role upsert'
+      );
       if (profileErr) {
         secureLog.warn(
           '[Consultant Me] Could not update profile role (RLS or write error):',

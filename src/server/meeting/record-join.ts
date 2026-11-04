@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import { meetingParticipantStorage } from '../../src/server/meetingParticipantStorage.js';
-import { checkDistributedRateLimit, extractClientIp } from '../../src/server/rateLimiter.js';
+import { meetingParticipantStorage } from '../meetingParticipantStorage.js';
+import { checkDistributedRateLimit, extractClientIp } from '../rateLimiter.js';
 
 dotenv.config();
 

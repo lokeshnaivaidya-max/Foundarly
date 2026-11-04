@@ -76,10 +76,27 @@ export default function AdminConsultantApplications() {
         ? `Welcome email sent to ${selectedApp.email}.`
         : (res?.emailNotice ? `(Email: ${res.emailNotice})` : '');
 
-      toast({
-        title: 'Application Approved & Consultant Activated',
-        description: `${selectedApp.name} is now an active consultant! ${emailMsg}`,
-      });
+      // Distinguish FULL activation from PENDING linkage — a failed profile
+      // upsert must never silently appear as a fully activated consultant.
+      const linkedUserId = res?.linkedUserId;
+      const profileUpdated = res?.profileUpdated === true;
+      const serviceRoleMissing = res?.serviceRoleConfigured === false;
+
+      if (linkedUserId && profileUpdated) {
+        toast({
+          title: 'Application Approved & Consultant Activated',
+          description: `${selectedApp.name} is now an active consultant with a linked account. ${emailMsg}`,
+        });
+      } else {
+        const reason = !linkedUserId
+          ? 'No verified account is linked to the application email yet — the consultant record will link automatically when the applicant signs in with the account that matches their application email.'
+          : `The consultant record was activated, but the profile role update failed${serviceRoleMissing ? ' because SUPABASE_SERVICE_ROLE_KEY is not configured on the server' : ''}. The account will self-link at the applicant's next verified sign-in.`;
+        toast({
+          title: 'Approved — Account Link Pending',
+          description: `${selectedApp.name} was approved, but full account activation is pending. ${reason} ${emailMsg}`,
+          variant: 'destructive',
+        });
+      }
 
       setViewDialogOpen(false);
       loadApplications();

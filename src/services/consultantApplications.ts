@@ -223,39 +223,36 @@ export const consultantApplicationsService = {
 
     const cleanEmail = (app.email || '').toLowerCase().trim();
 
-    // Identity Mapping: check for linked user account by consultant email, profile name, or auth session
-    let linkedUserId: string | null = null;
-    try {
-      const { data: existingConsultants } = await supabase
-        .from('consultants')
-        .select('id, user_id, email')
-        .ilike('email', cleanEmail)
-        .limit(1);
+    // Identity Mapping — authoritative only; display-name matching is forbidden
+    // (it linked the wrong account in production). Prefer the authenticated
+    // user_id captured on the application; otherwise reuse an existing
+    // consultants.user_id for the same consultant email. Otherwise the record
+    // is created unlinked and self-links by verified email at sign-in.
+    let linkedUserId: string | null =
+      typeof (app as any).user_id === 'string' && (app as any).user_id.trim().length > 20
+        ? (app as any).user_id.trim()
+        : null;
 
-      if (existingConsultants?.[0]?.user_id) {
-        linkedUserId = existingConsultants[0].user_id;
-      }
-    } catch {
-      // ignore
-    }
-
-    if (!linkedUserId && app.name) {
+    if (!linkedUserId) {
       try {
-        const { data: matchedProfiles } = await supabase
-          .from('profiles')
-          .select('id, full_name, role')
-          .ilike('full_name', app.name.trim())
+        const { data: existingConsultants } = await supabase
+          .from('consultants')
+          .select('id, user_id, email')
+          .ilike('email', cleanEmail)
           .limit(1);
 
-        if (matchedProfiles?.[0]?.id) {
-          linkedUserId = matchedProfiles[0].id;
+        if (existingConsultants?.[0]?.user_id) {
+          linkedUserId = existingConsultants[0].user_id;
         }
       } catch {
         // ignore
       }
     }
 
-    // If an auth user profile exists, promote role to 'consultant' and set is_consultant = true
+    // If an auth user profile exists, promote role to 'consultant' and set is_consultant = true.
+    // The write result is checked: a failed profile update must surface as
+    // profileUpdated=false, never as a silently "fully activated" account.
+    let profileUpdated = false;
     if (linkedUserId) {
       try {
         const { data: currentProfile } = await supabase
@@ -267,7 +264,7 @@ export const consultantApplicationsService = {
         const isSuperAdminUser = currentProfile?.role === 'super_admin' || currentProfile?.role === 'developer_admin';
 
         if (!isSuperAdminUser) {
-          await (supabase as any)
+          const { error: profileRoleErr } = await (supabase as any)
             .from('profiles')
             .update({
               role: 'consultant',
@@ -275,10 +272,22 @@ export const consultantApplicationsService = {
               updated_at: new Date().toISOString(),
             })
             .eq('id', linkedUserId);
-          console.log(`[consultantApplicationsService] Updated profile role to consultant for user ${linkedUserId}`);
+          if (profileRoleErr) {
+            console.error('[consultantApplicationsService] FAILED to update profile role:', {
+              linkedUserId,
+              error: profileRoleErr.message || String(profileRoleErr),
+            });
+            profileUpdated = false;
+          } else {
+            profileUpdated = true;
+          }
+        } else {
+          // Admin privileges preserved; profile role left untouched.
+          profileUpdated = true;
         }
       } catch (profErr) {
-        console.warn('[consultantApplicationsService] Profile role update warning:', profErr);
+        console.error('[consultantApplicationsService] Profile role update exception:', profErr);
+        profileUpdated = false;
       }
     }
 
@@ -380,6 +389,7 @@ export const consultantApplicationsService = {
       success: true,
       consultant,
       linkedUserId,
+      profileUpdated,
       emailSent,
       emailNotice,
     };

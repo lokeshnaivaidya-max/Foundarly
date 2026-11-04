@@ -794,5 +794,116 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
         'Query must use bounded retries'
       );
     });
+
+    test('ProtectedRoute never routes an unresolved profile as Client', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'components', 'ProtectedRoute.tsx'), 'utf8');
+      assert.ok(
+        source.includes('if (user && !profile)'),
+        'An authenticated user with a null profile must be intercepted before role computation'
+      );
+      assert.ok(
+        source.includes('Verifying your account'),
+        'In-flight resolution must show an explicit verifying state'
+      );
+      assert.ok(
+        source.includes('retryProfileResolution'),
+        'Definitive resolution failure must offer an explicit retry'
+      );
+      assert.ok(
+        source.includes("Couldn't Verify Your Access"),
+        'Failed verification must be an explicit error state, not a silent client route'
+      );
+    });
+
+    test('AuthContext exposes explicit role-resolution failure state and bounded retry', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'), 'utf8');
+      assert.ok(
+        source.includes('roleResolutionFailed'),
+        'AuthContext must expose roleResolutionFailed'
+      );
+      assert.ok(
+        source.includes('retryProfileResolution'),
+        'AuthContext must expose an explicit retry'
+      );
+      // The flag must be set on definitive failure AND cleared on success
+      const failSet = source.includes('setRoleResolutionFailed(true)');
+      const clearedOnSuccess = source.includes('setRoleResolutionFailed(false)');
+      assert.ok(failSet, 'Failure must set roleResolutionFailed=true');
+      assert.ok(clearedOnSuccess, 'Success/sign-out must clear roleResolutionFailed');
+    });
+
+    test('Login never routes an unresolved profile to the client dashboard', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'Login.tsx'), 'utf8');
+      assert.ok(
+        source.includes('if (!profile) {'),
+        'Post-login routing must wait for a resolved profile'
+      );
+      assert.ok(
+        source.includes('Verifying your account access'),
+        'Sign-in with unresolved profile must not silently route as client'
+      );
+    });
+
+    test('Client-side approval fallback has no display-name matching and reports profileUpdated', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultantApplications.ts'), 'utf8');
+      assert.ok(
+        !source.includes("ilike('full_name'"),
+        'Client-side fallback must not match profiles by display name'
+      );
+      assert.ok(
+        source.includes('(app as any).user_id'),
+        'Fallback must prefer the authenticated UUID captured on the application'
+      );
+      assert.ok(
+        source.includes('const { error: profileRoleErr }'),
+        'Fallback profile update must destructure { error }'
+      );
+      assert.ok(
+        source.includes('profileUpdated'),
+        'Fallback result must include profileUpdated'
+      );
+    });
+
+    test('Admin approval UI distinguishes full activation from pending account linkage', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'admin', 'AdminConsultantApplications.tsx'), 'utf8');
+      assert.ok(
+        source.includes('profileUpdated'),
+        'Approval handler must consume profileUpdated'
+      );
+      assert.ok(
+        source.includes('Approved — Account Link Pending'),
+        'Pending linkage must be an explicit, visible outcome'
+      );
+      assert.ok(
+        source.includes('serviceRoleConfigured'),
+        'Missing service-role configuration must be surfaced operationally'
+      );
+      assert.ok(
+        source.includes('fully activated') || source.includes('with a linked account'),
+        'Full activation message must be distinct from the pending one'
+      );
+    });
+
+    test('Approve endpoint reports service-role configuration state (server-side only secret)', () => {
+      const source = approvalSource();
+      assert.ok(
+        source.includes('serviceRoleConfigured: hasServiceRoleKey'),
+        'Approve response must include serviceRoleConfigured for operational visibility'
+      );
+      // The service-role key must never be referenced in client bundles
+      const clientFiles = [
+        path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'),
+        path.join(process.cwd(), 'src', 'services', 'consultants.ts'),
+        path.join(process.cwd(), 'src', 'services', 'consultantApplications.ts'),
+        path.join(process.cwd(), 'src', 'lib', 'supabase.ts'),
+      ];
+      for (const f of clientFiles) {
+        const src = fs.readFileSync(f, 'utf8');
+        assert.ok(
+          !src.includes('SUPABASE_SERVICE_ROLE_KEY'),
+          `${path.basename(f)} must never reference the service-role key`
+        );
+      }
+    });
   });
 });

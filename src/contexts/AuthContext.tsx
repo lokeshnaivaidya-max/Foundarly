@@ -68,6 +68,14 @@ interface AuthContextType {
   isClient: boolean;
   isConsultant: boolean;
   hasRole: (role: UserRole) => boolean;
+  /**
+   * True when an authenticated user's role resolution definitively FAILED
+   * (network/RLS after retries). Authorization must never be decided from a
+   * null profile — callers must wait or show an explicit error/retry state.
+   */
+  roleResolutionFailed: boolean;
+  /** Re-run authoritative role resolution for the current user. */
+  retryProfileResolution: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -132,6 +140,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  // Explicit terminal-unresolved flag: an authenticated user whose role
+  // resolution definitively failed. ProtectedRoute must NEVER interpret a null
+  // profile as 'client' — it waits or shows an explicit error/retry state.
+  const [roleResolutionFailed, setRoleResolutionFailed] = useState<boolean>(false);
 
   // Active references to prevent stale asynchronous operations from clobbering state
   const activeUserRef = useRef<User | null>(initialSession?.user || null);
@@ -146,6 +158,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Tracks whether the profile has been authoritatively resolved, so TOKEN_REFRESHED
   // events don't unnecessarily reset loading and re-fetch the same role.
   const profileResolvedRef = useRef<{ userId: string; role: string; resolvedAt: number } | null>(null);
+  // Component-scope handle to the effect-scoped resolveProfile so an explicit
+  // retry can be offered when authoritative resolution definitively fails.
+  const resolveProfileRef = useRef<((userId: string, currentUser: User | null, retryCount?: number) => Promise<void>) | null>(null);
 
   const applyAuth = (newSession: Session | null, newUser: User | null) => {
     activeSessionRef.current = newSession;
@@ -195,9 +210,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
         secureLog.info('[AuthContext] resolveProfile: starting authoritative role resolution');
+        setRoleResolutionFailed(false);
         const resolved = await fetchProfile(userId, currentUser);
         if (resolved) {
           profileResolvedRef.current = { userId, role: resolved.role ?? 'null', resolvedAt: Date.now() };
+          setRoleResolutionFailed(false);
           secureLog.info(
             '[AuthContext] resolveProfile: role resolution complete',
             { role: resolved.role ?? 'null', isConsultant: resolved.is_consultant ?? false }
@@ -208,16 +225,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await new Promise((r) => setTimeout(r, 500));
           return resolveProfile(userId, currentUser, retryCount + 1);
         } else {
+          // Definitive failure: the profile is unresolved. Callers (ProtectedRoute,
+          // Login) must wait or show an explicit error state — never route as client.
+          setRoleResolutionFailed(true);
           secureLog.warn('[AuthContext] resolveProfile: profile resolution failed after retries', {
             userId,
           });
         }
       } catch (err) {
         console.warn('[AuthContext] Authoritative profile resolution failed:', err);
+        setRoleResolutionFailed(true);
         const cached = getCachedProfile(userId);
         if (cached) setProfile(cached);
       }
     };
+
+    // Expose the effect-scoped resolver for explicit retries
+    resolveProfileRef.current = resolveProfile;
 
     // Step 1: Listen for persistent auth state changes from Supabase
     const {
@@ -235,6 +259,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null);
         setLoading(false);
         setAuthError(null);
+        setRoleResolutionFailed(false);
         profileResolvedRef.current = null;
         return;
       }
@@ -826,6 +851,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return isCurrentClient;
   };
 
+  // Explicit retry after a definitive role-resolution failure. Bounded: uses the
+  // same resolveProfile (all inner operations time-bounded) and always releases
+  // the loading state.
+  const retryProfileResolution = async () => {
+    const current = activeUserRef.current;
+    if (!current || !resolveProfileRef.current) return;
+    setRoleResolutionFailed(false);
+    setLoading(true);
+    try {
+      await resolveProfileRef.current(current.id, current, 0);
+    } finally {
+      if (inFlightFetchRef.current.size === 0) {
+        setLoading(false);
+      }
+    }
+  };
+
   const value = {
     user,
     profile,
@@ -843,6 +885,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isClient: isCurrentClient,
     isConsultant: isCurrentConsultant,
     hasRole,
+    roleResolutionFailed,
+    retryProfileResolution,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

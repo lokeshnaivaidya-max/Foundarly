@@ -384,6 +384,10 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       consultant,
       linkedUserId,
       profileUpdated,
+      // Operational visibility: when false, admin-side profile linking and
+      // auth-account lookups could not run (missing SUPABASE_SERVICE_ROLE_KEY)
+      // and the consultant account will self-link at next verified sign-in.
+      serviceRoleConfigured: hasServiceRoleKey,
       emailSent,
       emailNotice,
     });

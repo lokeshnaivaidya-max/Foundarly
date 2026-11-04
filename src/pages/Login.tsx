@@ -40,6 +40,14 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!authLoading && user) {
+      // An authenticated user with an UNRESOLVED profile must never be routed —
+      // a null profile is not 'client'. Wait for authoritative resolution to
+      // complete (bounded) or fail; on failure the user stays here and can
+      // retry sign-in. Routing only happens with a resolved role.
+      if (!profile) {
+        return;
+      }
+
       console.log("user:", user);
       console.log("profile:", profile);
 
@@ -134,6 +142,14 @@ export default function LoginPage() {
         }
 
         const activeProfile = userProfile || profile;
+
+        // If role resolution failed (null profile), DO NOT default to the client
+        // destination — the auth event flow will route once resolution completes.
+        if (!activeProfile) {
+          console.warn('[Login] handleSubmit: profile unresolved after sign-in; waiting for resolution');
+          toast.message('Verifying your account access…');
+          return;
+        }
 
         const queryParams = new URLSearchParams(location.search);
         const queryFrom = queryParams.get('from') || queryParams.get('returnUrl') || queryParams.get('redirect');

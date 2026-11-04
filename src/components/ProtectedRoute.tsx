@@ -20,11 +20,52 @@ export default function ProtectedRoute({
   requireSuperAdmin = false,
   allowedRoles
 }: ProtectedRouteProps) {
-  const { user, profile, isAdmin, isSuperAdmin: authIsSuperAdmin, loading } = useAuth();
+  const { user, profile, isAdmin, isSuperAdmin: authIsSuperAdmin, loading, roleResolutionFailed, retryProfileResolution } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   if (loading) {
     return <PageLoader text="Authenticating..." />;
+  }
+
+  // Authorization must NEVER be decided from an unresolved profile. A null
+  // profile is NOT 'client': either resolution is still in flight (bounded) or
+  // it definitively failed. Wait in the first case; show an explicit
+  // verification-failed state with a retry in the second. This runs for ALL
+  // protected routes (admin, consultant, client) before any role computation.
+  if (user && !profile) {
+    if (roleResolutionFailed) {
+      return (
+        <div className="min-h-[70vh] flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-card border border-destructive/30 rounded-xl p-8 text-center space-y-4 shadow-xl">
+            <ShieldAlert className="w-12 h-12 text-destructive mx-auto" />
+            <h2 className="text-xl font-display font-bold text-foreground">
+              Couldn't Verify Your Access
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              We couldn't confirm your account permissions due to a temporary
+              network or service issue. Your access level was NOT changed —
+              please retry.
+            </p>
+            <div className="pt-2 flex flex-col gap-2">
+              <Button
+                onClick={() => { retryProfileResolution(); }}
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                Retry Verification
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => navigate(-1)}
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Go Back
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return <PageLoader text="Verifying your account..." />;
   }
 
   const userRole = getUserEffectiveRole(user, profile);

@@ -674,4 +674,236 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       assert.equal(secondProfile.role, 'consultant', 'Second sign-in should resolve to consultant after approval');
     });
   });
+
+  describe('10. Production Approval Linkage & Identity Regression', () => {
+    const approvalSource = () =>
+      fs.readFileSync(path.join(process.cwd(), 'api', 'admin', 'approve-consultant-application.ts'), 'utf8');
+
+    test('Approval handler never matches profiles by display name (production bug)', () => {
+      const source = approvalSource();
+      assert.ok(
+        !source.includes("ilike('full_name'"),
+        'Display-name matching must be removed — it linked the wrong account in production'
+      );
+      assert.ok(
+        !source.includes("select('id, full_name, role')"),
+        'The name-match profile lookup must be gone entirely'
+      );
+    });
+
+    test('Approval handler prefers the authenticated user_id captured on the application', () => {
+      const source = approvalSource();
+      assert.ok(
+        source.includes('app.user_id'),
+        'Approval must prefer the authenticated UUID stamped on the application'
+      );
+    });
+
+    test('Approval handler reports profile-role update failures instead of silently succeeding', () => {
+      const source = approvalSource();
+      assert.ok(
+        source.includes('const { error: profileUpsertErr }'),
+        'profiles upsert must destructure { error } — an unchecked upsert silently no-ops under RLS'
+      );
+      assert.ok(
+        source.includes('FAILED to update applicant profile role'),
+        'Profile update failure must be logged loudly'
+      );
+      assert.ok(
+        source.includes('profileUpdated'),
+        'Response must include explicit profileUpdated status'
+      );
+    });
+
+    test('Approval handler fails loudly when the consultant record cannot be activated', () => {
+      const source = approvalSource();
+      assert.ok(
+        source.includes('Failed to activate consultant record'),
+        'Consultant activation failure must surface as 500, not silent success'
+      );
+    });
+
+    test('Application submission stamps the verified authenticated UUID (never name-based)', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant-applications.ts'), 'utf8');
+      assert.ok(
+        source.includes('user_id: authenticatedUserId'),
+        'Submission must stamp the authenticated UUID when identity is proven'
+      );
+      assert.ok(
+        source.includes('applicantEmailVerified'),
+        'user_id may only be stamped for a verified account email'
+      );
+      assert.ok(
+        source.includes('applicantEmail === normalizedEmail'),
+        'user_id may only be stamped when the account email matches the application email'
+      );
+    });
+
+    test('Submission client forwards the session token for identity capture', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultantApplications.ts'), 'utf8');
+      const createIdx = source.indexOf('async create(');
+      assert.ok(createIdx !== -1, 'create() must exist');
+      const chunk = source.slice(createIdx, createIdx + 1600);
+      assert.ok(
+        chunk.includes('Bearer ${session.access_token}'),
+        'create() fetch must forward the session token to /api/consultant-applications'
+      );
+    });
+
+    test('consultant/me reclaims provably stale UUID links for verified email matches', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+      assert.ok(
+        source.includes('storedLinkProvablyStale'),
+        'Stale-link verification must exist'
+      );
+      assert.ok(
+        source.includes('reclaiming link for verified requester'),
+        'Provably stale links must be reclaimed for verified requesters'
+      );
+      assert.ok(
+        source.includes('not overwriting'),
+        'Live different-owner links must still be refused'
+      );
+    });
+
+    test('AuthContext bounds every profile-resolution DB operation (no infinite AUTHENTICATING)', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'), 'utf8');
+      const bounded = (source.match(/withDbTimeout\(/g) || []).length;
+      assert.ok(
+        bounded >= 4,
+        `All blocking DB awaits must use withDbTimeout (found ${bounded}, need >= 4)`
+      );
+      assert.ok(
+        source.includes('Profile resolution exceeded hard cap'),
+        'Hard cap must release the loading state so ProtectedRoute never wedges'
+      );
+      assert.ok(
+        !source.includes('const { error: upsertErr } = await supabase.from'),
+        'Bare awaited upserts must be wrapped in withDbTimeout'
+      );
+    });
+
+    test('Consultants page renders bounded error/empty states instead of infinite skeletons', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'Consultants.tsx'), 'utf8');
+      assert.ok(source.includes('isError'), 'Query error state must be destructured and rendered');
+      assert.ok(source.includes('Consultant list could not be loaded'), 'Error state must be visible');
+      assert.ok(source.includes('refetchConsultants'), 'Retry action must be wired to refetch');
+      assert.ok(source.includes('No Consultants Available'), 'Genuine empty state must be distinct from filter-empty');
+      assert.ok(
+        source.includes('retry: 2'),
+        'Query must use bounded retries'
+      );
+    });
+
+    test('ProtectedRoute never routes an unresolved profile as Client', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'components', 'ProtectedRoute.tsx'), 'utf8');
+      assert.ok(
+        source.includes('if (user && !profile)'),
+        'An authenticated user with a null profile must be intercepted before role computation'
+      );
+      assert.ok(
+        source.includes('Verifying your account'),
+        'In-flight resolution must show an explicit verifying state'
+      );
+      assert.ok(
+        source.includes('retryProfileResolution'),
+        'Definitive resolution failure must offer an explicit retry'
+      );
+      assert.ok(
+        source.includes("Couldn't Verify Your Access"),
+        'Failed verification must be an explicit error state, not a silent client route'
+      );
+    });
+
+    test('AuthContext exposes explicit role-resolution failure state and bounded retry', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'), 'utf8');
+      assert.ok(
+        source.includes('roleResolutionFailed'),
+        'AuthContext must expose roleResolutionFailed'
+      );
+      assert.ok(
+        source.includes('retryProfileResolution'),
+        'AuthContext must expose an explicit retry'
+      );
+      // The flag must be set on definitive failure AND cleared on success
+      const failSet = source.includes('setRoleResolutionFailed(true)');
+      const clearedOnSuccess = source.includes('setRoleResolutionFailed(false)');
+      assert.ok(failSet, 'Failure must set roleResolutionFailed=true');
+      assert.ok(clearedOnSuccess, 'Success/sign-out must clear roleResolutionFailed');
+    });
+
+    test('Login never routes an unresolved profile to the client dashboard', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'Login.tsx'), 'utf8');
+      assert.ok(
+        source.includes('if (!profile) {'),
+        'Post-login routing must wait for a resolved profile'
+      );
+      assert.ok(
+        source.includes('Verifying your account access'),
+        'Sign-in with unresolved profile must not silently route as client'
+      );
+    });
+
+    test('Client-side approval fallback has no display-name matching and reports profileUpdated', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultantApplications.ts'), 'utf8');
+      assert.ok(
+        !source.includes("ilike('full_name'"),
+        'Client-side fallback must not match profiles by display name'
+      );
+      assert.ok(
+        source.includes('(app as any).user_id'),
+        'Fallback must prefer the authenticated UUID captured on the application'
+      );
+      assert.ok(
+        source.includes('const { error: profileRoleErr }'),
+        'Fallback profile update must destructure { error }'
+      );
+      assert.ok(
+        source.includes('profileUpdated'),
+        'Fallback result must include profileUpdated'
+      );
+    });
+
+    test('Admin approval UI distinguishes full activation from pending account linkage', () => {
+      const source = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'admin', 'AdminConsultantApplications.tsx'), 'utf8');
+      assert.ok(
+        source.includes('profileUpdated'),
+        'Approval handler must consume profileUpdated'
+      );
+      assert.ok(
+        source.includes('Approved — Account Link Pending'),
+        'Pending linkage must be an explicit, visible outcome'
+      );
+      assert.ok(
+        source.includes('serviceRoleConfigured'),
+        'Missing service-role configuration must be surfaced operationally'
+      );
+      assert.ok(
+        source.includes('fully activated') || source.includes('with a linked account'),
+        'Full activation message must be distinct from the pending one'
+      );
+    });
+
+    test('Approve endpoint reports service-role configuration state (server-side only secret)', () => {
+      const source = approvalSource();
+      assert.ok(
+        source.includes('serviceRoleConfigured: hasServiceRoleKey'),
+        'Approve response must include serviceRoleConfigured for operational visibility'
+      );
+      // The service-role key must never be referenced in client bundles
+      const clientFiles = [
+        path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'),
+        path.join(process.cwd(), 'src', 'services', 'consultants.ts'),
+        path.join(process.cwd(), 'src', 'services', 'consultantApplications.ts'),
+        path.join(process.cwd(), 'src', 'lib', 'supabase.ts'),
+      ];
+      for (const f of clientFiles) {
+        const src = fs.readFileSync(f, 'utf8');
+        assert.ok(
+          !src.includes('SUPABASE_SERVICE_ROLE_KEY'),
+          `${path.basename(f)} must never reference the service-role key`
+        );
+      }
+    });
+  });
 });

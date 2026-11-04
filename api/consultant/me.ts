@@ -178,12 +178,61 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     // securely linked when the link is missing or could not be established.
     let linked = consultant.user_id === userId;
     if (!linked && consultant.user_id) {
-      // Already linked to a different authenticated account — never overwrite
-      // another account's claim on this consultant record.
-      secureLog.warn(
-        '[Consultant Me] Consultant record is linked to a different authenticated user; not overwriting',
-        { userId, consultantId: consultant.id, existingUserId: consultant.user_id }
-      );
+      // The record carries a different user_id. Before refusing, check whether
+      // that link is provably stale: with the service role key we can confirm no
+      // live authenticated account owns this link with the consultant's email
+      // (auth emails are unique, so a stored account with a different email
+      // cannot be the legitimate owner). Only then may the verified-email
+      // requester reclaim the link. Without the service role key we never
+      // overwrite another account's claim.
+      let storedUserEmail: string | null = null;
+      if (hasServiceRoleKey) {
+        try {
+          const { data: usersData } = await supabaseAdminClient.auth.admin.listUsers({
+            page: 1,
+            perPage: 1000,
+          });
+          const storedUser = usersData?.users?.find((u) => u.id === consultant.user_id);
+          storedUserEmail = (storedUser?.email || '').toLowerCase().trim() || null;
+        } catch {
+          storedUserEmail = null;
+        }
+      }
+
+      const storedLinkProvablyStale =
+        hasServiceRoleKey && storedUserEmail !== null && storedUserEmail !== userEmail;
+
+      if (!storedLinkProvablyStale) {
+        // Already linked to a different authenticated account — never overwrite
+        // another account's claim on this consultant record.
+        secureLog.warn(
+          '[Consultant Me] Consultant record is linked to a different authenticated user; not overwriting',
+          { userId, consultantId: consultant.id, existingUserId: consultant.user_id }
+        );
+      } else {
+        secureLog.warn(
+          '[Consultant Me] Stored user_id no longer matches the consultant email; reclaiming link for verified requester',
+          { userId, consultantId: consultant.id, existingUserId: consultant.user_id }
+        );
+        const { error: linkErr } = await activeDbClient
+          .from('consultants')
+          .update({ user_id: userId, is_active: true })
+          .eq('id', consultant.id);
+        if (linkErr) {
+          // Non-admin users cannot update consultants.user_id due to RLS.
+          // The consultant record is still valid (matched by UUID or verified
+          // email); `linked` stays false so callers know the DB link is not
+          // established. Linking will be retried by admin-side sync.
+          secureLog.warn(
+            '[Consultant Me] Could not link consultant user_id (RLS or write error):',
+            { userId, consultantId: consultant.id, error: linkErr?.message || String(linkErr) }
+          );
+        } else {
+          consultant.user_id = userId;
+          consultant.is_active = true;
+          linked = true;
+        }
+      }
     } else if (!linked) {
       const { error: linkErr } = await activeDbClient
         .from('consultants')

@@ -283,41 +283,68 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // 5. Consultant check:
         // A user is a consultant if:
         // - profile in DB has role === 'consultant' or is_consultant === true
+        // - OR /api/consultant/me returns isConsultant === true
         // - OR user is found in the consultants table by user_id OR email
         let isConsultantUser = Boolean(profileData?.role === 'consultant' || profileData?.is_consultant);
         let consultantName = profileData?.full_name;
 
+        // Try server-side authoritative check first
         try {
-          let consultantQuery = supabase
-            .from('consultants')
-            .select('id, name, email, user_id, is_active');
-
-          if (userEmail) {
-            consultantQuery = consultantQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
-          } else {
-            consultantQuery = consultantQuery.eq('user_id', userId);
-          }
-
-          const { data: matchedConsultants } = await Promise.race([
-            consultantQuery.limit(1),
-            new Promise<{ data: null }>((r) => setTimeout(() => r({ data: null }), 4000)),
-          ]);
-
-          const matchedConsultant = matchedConsultants?.[0];
-          if (matchedConsultant) {
-            isConsultantUser = true;
-            consultantName = consultantName || matchedConsultant.name;
-
-            if (matchedConsultant.user_id !== userId) {
-              supabase
-                .from('consultants')
-                .update({ user_id: userId })
-                .eq('id', matchedConsultant.id)
-                .then();
+          const session = (await supabase.auth.getSession()).data.session;
+          if (session?.access_token) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3500);
+            const meRes = await fetch('/api/consultant/me', {
+              headers: { Authorization: `Bearer ${session.access_token}` },
+              signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+            if (meRes.ok) {
+              const meJson = await meRes.json().catch(() => null);
+              if (meJson?.success && meJson?.isConsultant) {
+                isConsultantUser = true;
+                consultantName = consultantName || meJson.consultant?.name;
+              }
             }
           }
-        } catch (consErr) {
-          console.warn('[AuthContext] Consultant check non-fatal warning:', consErr);
+        } catch (apiErr) {
+          console.warn('[AuthContext] /api/consultant/me notice:', apiErr);
+        }
+
+        // Direct query check if not yet confirmed
+        if (!isConsultantUser) {
+          try {
+            let consultantQuery = supabase
+              .from('consultants')
+              .select('id, name, email, user_id, is_active');
+
+            if (userEmail) {
+              consultantQuery = consultantQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
+            } else {
+              consultantQuery = consultantQuery.eq('user_id', userId);
+            }
+
+            const { data: matchedConsultants } = await Promise.race([
+              consultantQuery.limit(1),
+              new Promise<{ data: null }>((r) => setTimeout(() => r({ data: null }), 3000)),
+            ]);
+
+            const matchedConsultant = matchedConsultants?.[0];
+            if (matchedConsultant) {
+              isConsultantUser = true;
+              consultantName = consultantName || matchedConsultant.name;
+
+              if (matchedConsultant.user_id !== userId) {
+                supabase
+                  .from('consultants')
+                  .update({ user_id: userId })
+                  .eq('id', matchedConsultant.id)
+                  .then();
+              }
+            }
+          } catch (consErr) {
+            console.warn('[AuthContext] Consultant check non-fatal warning:', consErr);
+          }
         }
 
         if (isConsultantUser) {
@@ -333,6 +360,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               id: userId,
               full_name: consultantProfile.full_name,
               role: 'consultant',
+              is_consultant: true,
             }).then();
           }
 

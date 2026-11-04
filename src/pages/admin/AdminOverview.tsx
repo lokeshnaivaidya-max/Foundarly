@@ -42,67 +42,54 @@ export default function AdminOverview() {
   const [recentPayments, setRecentPayments] = useState<any[]>([]);
 
   const fetchDashboardData = async () => {
-    console.log("[AdminOverview] fetchDashboardData called");
     try {
-      // 1. Fetch Bookings using bookingsService.getAll()
-      console.log('[AdminOverview] Fetching bookings via bookingsService.getAll()...');
-      const bookings = await bookingsService.getAll();
-      console.log('[AdminOverview] Loaded bookings count:', bookings.length);
+      const safeQuery = <T,>(p: Promise<T>, fallback: T, ms = 4000): Promise<T> => {
+        return Promise.race([
+          p,
+          new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
+        ]).catch(() => fallback);
+      };
+
+      const [bookingsRes, paymentsRes, consultantsRes, profilesRes] = await Promise.allSettled([
+        safeQuery(bookingsService.getAll(), []),
+        safeQuery(
+          supabase
+            .from('upi_payments')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .then(({ data }) => data || []),
+          []
+        ),
+        safeQuery(
+          supabase
+            .from('consultants')
+            .select('*', { count: 'exact', head: true })
+            .then(({ count }) => count || 0),
+          0
+        ),
+        safeQuery(
+          supabase
+            .from('profiles')
+            .select('*', { count: 'exact', head: true })
+            .then(({ count }) => count || 0),
+          0
+        ),
+      ]);
+
+      const bookings = bookingsRes.status === 'fulfilled' ? bookingsRes.value : [];
+      const paymentsList = paymentsRes.status === 'fulfilled' ? paymentsRes.value : [];
+      const consultantsCount = consultantsRes.status === 'fulfilled' ? consultantsRes.value : 0;
+      const usersCount = profilesRes.status === 'fulfilled' ? profilesRes.value : 0;
 
       const totalBookings = bookings.length;
       const pendingBookings = bookings.filter(b => b.status === 'pending').length;
       const confirmedBookings = bookings.filter(b => b.status === 'confirmed').length;
       const cancelledBookings = bookings.filter(b => b.status === 'cancelled').length;
+      const pendingPaymentsCount = paymentsList.filter((p: any) => p.status === 'pending').length;
 
-      // Calculate total revenue from paid/confirmed bookings
       const totalRevenue = bookings
         .filter(b => b.payment_status === 'paid' || b.status === 'confirmed' || b.status === 'completed')
         .reduce((sum, b) => sum + Number(b.session_price || 0), 0);
-
-      // 2. Fetch UPI Payments
-      let pendingPaymentsCount = 0;
-      let paymentsList: any[] = [];
-      try {
-        const { data: paymentsData, error: paymentsErr } = await supabase
-          .from('upi_payments')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (!paymentsErr && paymentsData) {
-          paymentsList = paymentsData;
-          pendingPaymentsCount = paymentsData.filter(p => p.status === 'pending').length;
-        }
-      } catch (err) {
-        console.warn("UPI payments query warning:", err);
-      }
-
-      // 3. Fetch Consultants Count
-      let consultantsCount = 0;
-      try {
-        const { count, error: consultantsErr } = await supabase
-          .from('consultants')
-          .select('*', { count: 'exact', head: true });
-        
-        if (!consultantsErr && count !== null) {
-          consultantsCount = count;
-        }
-      } catch (err) {
-        console.warn("Consultants query warning:", err);
-      }
-
-      // 4. Fetch Profiles / Users Count
-      let usersCount = 0;
-      try {
-        const { count, error: usersErr } = await supabase
-          .from('profiles')
-          .select('*', { count: 'exact', head: true });
-
-        if (!usersErr && count !== null) {
-          usersCount = count;
-        }
-      } catch (err) {
-        console.warn("Profiles query warning:", err);
-      }
 
       setStats({
         totalBookings,

@@ -14,7 +14,12 @@ export default function Footer() {
           {/* Brand Info & Video CTA */}
           <div className="md:col-span-2 space-y-4">
             <div className="flex items-center gap-2">
-              <span className="font-display text-2xl font-bold text-gradient-gold">Foundarly</span>
+              <img
+                src="/logo.svg"
+                alt="Foundarly"
+                className="h-8 w-auto object-contain"
+                onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+              />
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold tracking-wider uppercase">
                 Premium
               </span>

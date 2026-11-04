@@ -2296,6 +2296,7 @@ async function startServer() {
             id: user.id,
             role: "consultant",
             full_name: consultant.name,
+            is_consultant: true,
           });
       }
 
@@ -2307,6 +2308,87 @@ async function startServer() {
     } catch (err: any) {
       console.error("[Consultant API] Error fetching consultant profile:", err);
       return res.status(500).json({ success: false, error: "Failed to resolve consultant profile." });
+    }
+  });
+
+  // Client Bookings API: authoritative endpoint to load user bookings bypassing RLS restrictions
+  app.get("/api/my-bookings", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({ success: false, error: "Authentication required.", bookings: [] });
+    }
+
+    const user = auth.user;
+    const userEmail = (user.email || "").toLowerCase().trim();
+
+    try {
+      let query = supabaseAdminClient
+        .from("bookings")
+        .select(`
+          *,
+          consultants (
+            name,
+            title,
+            image_url,
+            gender
+          )
+        `);
+
+      if (userEmail) {
+        query = query.or(`user_id.eq.${user.id},email.ilike.${userEmail}`);
+      } else {
+        query = query.eq("user_id", user.id);
+      }
+
+      const { data: bookings, error: bErr } = await query.order("created_at", { ascending: false });
+
+      if (bErr) {
+        // Fallback to flat select if relation error
+        const { data: flatBookings } = await supabaseAdminClient
+          .from("bookings")
+          .select("*")
+          .or(`user_id.eq.${user.id},email.ilike.${userEmail}`)
+          .order("created_at", { ascending: false });
+
+        return res.json({
+          success: true,
+          bookings: flatBookings || [],
+        });
+      }
+
+      const formatted = (bookings || []).map((b: any) => ({
+        ...b,
+        consultants: Array.isArray(b.consultants) ? b.consultants[0] : b.consultants,
+      }));
+
+      return res.json({
+        success: true,
+        bookings: formatted,
+      });
+    } catch (err: any) {
+      console.error("[Client Bookings API] Error fetching bookings:", err);
+      return res.status(500).json({ success: false, error: "Failed to fetch bookings.", bookings: [] });
+    }
+  });
+
+  // Admin Consultants API: high-speed cached endpoint for admin dashboard
+  app.get("/api/admin/consultants", requireAdminAuth, async (req, res) => {
+    try {
+      const { data: consultants, error } = await supabaseAdminClient
+        .from("consultants")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        return res.status(500).json({ success: false, error: error.message, consultants: [] });
+      }
+
+      return res.json({
+        success: true,
+        consultants: consultants || [],
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message, consultants: [] });
     }
   });
 

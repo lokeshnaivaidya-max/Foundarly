@@ -12,8 +12,39 @@ type Consultant = Database['public']['Tables']['consultants']['Row'];
 type ConsultantInsert = Database['public']['Tables']['consultants']['Insert'];
 type ConsultantUpdate = Database['public']['Tables']['consultants']['Update'];
 
+let consultantsCache: { data: Consultant[]; timestamp: number } | null = null;
+const CACHE_TTL = 30000; // 30 seconds
+
 export const consultantsService = {
-  async getAll(activeOnly = false) {
+  async getAll(activeOnly = false, forceRefresh = false) {
+    if (!forceRefresh && consultantsCache && (Date.now() - consultantsCache.timestamp < CACHE_TTL)) {
+      return activeOnly ? consultantsCache.data.filter(c => c.is_active) : consultantsCache.data;
+    }
+
+    // 1. Try server admin API first if session available
+    try {
+      const session = (await supabase.auth.getSession()).data.session;
+      if (session?.access_token) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch('/api/admin/consultants', {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const json = await res.json().catch(() => null);
+          if (json?.success && Array.isArray(json?.consultants)) {
+            consultantsCache = { data: json.consultants, timestamp: Date.now() };
+            return activeOnly ? json.consultants.filter((c: any) => c.is_active) : json.consultants;
+          }
+        }
+      }
+    } catch {
+      // Fall through to direct query
+    }
+
+    // 2. Direct Supabase query
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         let query = supabase.from('consultants').select('*').order('created_at', { ascending: false });
@@ -25,23 +56,25 @@ export const consultantsService = {
         const { data, error } = await query;
         if (error) {
           if (attempt === 0) {
-            await new Promise(r => setTimeout(r, 300));
+            await new Promise(r => setTimeout(r, 200));
             continue;
           }
           console.warn('Unable to fetch consultants:', error.message || error);
-          return [];
+          return consultantsCache?.data || [];
         }
-        return (data || []) as Consultant[];
+        const result = (data || []) as Consultant[];
+        consultantsCache = { data: result, timestamp: Date.now() };
+        return result;
       } catch (err: any) {
         if (attempt === 0) {
-          await new Promise(r => setTimeout(r, 300));
+          await new Promise(r => setTimeout(r, 200));
           continue;
         }
         console.warn('Error fetching consultants:', err?.message || err);
-        return [];
+        return consultantsCache?.data || [];
       }
     }
-    return [];
+    return consultantsCache?.data || [];
   },
 
   async getById(id: string) {

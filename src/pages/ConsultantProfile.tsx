@@ -180,9 +180,16 @@ export default function ConsultantProfile() {
               <div className="relative group shrink-0">
                 <Avatar className="w-28 h-28 sm:w-36 sm:h-36 rounded-2xl border-2 border-primary/30 shadow-2xl shadow-primary/10 overflow-hidden">
                   <AvatarImage
-                    src={consultant.image_url || undefined}
+                    src={consultant.image_url || (consultant.gender === 'female' ? '/female-default.jpg' : '/male-default.png')}
                     alt={consultant.name}
                     className="object-cover"
+                    onError={(e) => {
+                      const target = e.currentTarget as HTMLImageElement;
+                      const fallback = consultant.gender === 'female' ? '/female-default.jpg' : '/male-default.png';
+                      if (!target.src.endsWith(fallback)) {
+                        target.src = fallback;
+                      }
+                    }}
                   />
                   <AvatarFallback className="bg-primary/15 text-primary text-2xl font-bold">
                     {getInitials(consultant.name)}

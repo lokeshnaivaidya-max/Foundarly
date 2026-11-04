@@ -73,14 +73,28 @@ export default function ConsultantsSection() {
               <div className="absolute inset-0 bg-gradient-to-b from-primary/0 to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none rounded-2xl" />
 
               <div>
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div>
-                    <h3 className="font-display text-lg font-semibold group-hover:text-primary transition-colors">{c.name}</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">{c.title}</p>
-                  </div>
-                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-[10px] font-semibold shrink-0">
-                    <BadgeCheck className="h-3 w-3 text-primary" />
-                    <span>Verified</span>
+                <div className="flex items-start gap-3 mb-3">
+                  <img
+                    src={c.image_url || (c.gender === 'female' ? '/female-default.jpg' : '/male-default.png')}
+                    alt={c.name}
+                    className="w-12 h-12 rounded-xl object-cover border border-border/80 shrink-0 shadow-sm"
+                    onError={(e) => {
+                      const target = e.currentTarget as HTMLImageElement;
+                      const fallback = c.gender === 'female' ? '/female-default.jpg' : '/male-default.png';
+                      if (!target.src.endsWith(fallback)) {
+                        target.src = fallback;
+                      }
+                    }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1">
+                      <h3 className="font-display text-base font-semibold group-hover:text-primary transition-colors truncate">{c.name}</h3>
+                      <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-[9px] font-semibold shrink-0">
+                        <BadgeCheck className="h-3 w-3 text-primary" />
+                        <span>Verified</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate">{c.title}</p>
                   </div>
                 </div>
 

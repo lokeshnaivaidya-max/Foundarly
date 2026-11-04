@@ -48,7 +48,7 @@ export default function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [logoText, setLogoText] = useState("Foundarly");
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>("/logo.svg");
   const location = useLocation();
   const navigate = useNavigate();
   const { user, profile, isAdmin, isSuperAdmin, isDeveloperAdmin, isConsultant, isClient, signOut } = useAuth();
@@ -134,7 +134,12 @@ export default function Header() {
         {/* Brand Logo */}
         <Link to="/" className="flex items-center gap-2 shrink-0 group">
           {logoUrl ? (
-            <img src={logoUrl} alt={logoText} className="h-7 sm:h-8 w-auto object-contain" />
+            <img
+              src={logoUrl}
+              alt={logoText}
+              className="h-8 sm:h-9 w-auto object-contain transition-transform duration-200 group-hover:scale-105"
+              onError={() => setLogoUrl(null)}
+            />
           ) : (
             <span className="font-display text-xl sm:text-2xl font-bold tracking-tight text-gradient-gold group-hover:opacity-90 transition-opacity whitespace-nowrap">
               {logoText}

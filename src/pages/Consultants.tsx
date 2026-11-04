@@ -87,7 +87,18 @@ function ConsultantCard({ c, index }: { c: any; index: number }) {
         {/* Header Avatar + Name + Verified Badge */}
         <div className="flex items-start gap-4 mb-4">
           <Avatar className="w-14 h-14 rounded-2xl border-2 border-primary/20 shadow-md overflow-hidden shrink-0 group-hover:border-primary transition-colors">
-            <AvatarImage src={c.image_url || undefined} alt={c.name} className="object-cover" />
+            <AvatarImage
+              src={c.image_url || (c.gender === 'female' ? '/female-default.jpg' : '/male-default.png')}
+              alt={c.name}
+              className="object-cover"
+              onError={(e) => {
+                const target = e.currentTarget as HTMLImageElement;
+                const fallback = c.gender === 'female' ? '/female-default.jpg' : '/male-default.png';
+                if (!target.src.endsWith(fallback)) {
+                  target.src = fallback;
+                }
+              }}
+            />
             <AvatarFallback className="bg-primary/15 text-primary font-bold text-sm">
               {getInitials(c.name)}
             </AvatarFallback>

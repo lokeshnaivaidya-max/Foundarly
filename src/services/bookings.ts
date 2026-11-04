@@ -224,45 +224,79 @@ export const bookingsService = {
 
     console.log('[BookingsService.getByUserId] Fetching bookings for user ID:', userId, 'email:', maskEmail(email));
 
-    const { data: byUserId, error: err1 } = await supabase
-      .from('bookings')
-      .select(`
-        *,
-        consultants (
-          name,
-          title
-        )
-      `)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+    // 1. Try authoritative server endpoint first (bypasses RLS issues)
+    try {
+      const session = (await supabase.auth.getSession()).data.session;
+      if (session?.access_token) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const res = await fetch('/api/my-bookings', {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const json = await res.json().catch(() => null);
+          if (json?.success && Array.isArray(json?.bookings)) {
+            return json.bookings;
+          }
+        }
+      }
+    } catch (apiErr) {
+      console.warn('[BookingsService.getByUserId] /api/my-bookings check error, trying Supabase direct:', apiErr);
+    }
 
-    let byEmail: any[] = [];
-    if (email) {
-      const { data: emailData } = await supabase
+    // 2. Direct Supabase query fallback
+    try {
+      const { data: byUserId, error: err1 } = await supabase
         .from('bookings')
         .select(`
           *,
           consultants (
             name,
-            title
+            title,
+            image_url,
+            gender
           )
         `)
-        .eq('email', email.toLowerCase().trim())
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
-      byEmail = emailData || [];
+
+      let byEmail: any[] = [];
+      if (email) {
+        const { data: emailData } = await supabase
+          .from('bookings')
+          .select(`
+            *,
+            consultants (
+              name,
+              title,
+              image_url,
+              gender
+            )
+          `)
+          .eq('email', email.toLowerCase().trim())
+          .order('created_at', { ascending: false });
+        byEmail = emailData || [];
+      }
+
+      if (err1 && !byEmail.length) {
+        console.error('[BookingsService.getByUserId] Supabase error:', err1);
+      }
+
+      const map = new Map<string, any>();
+      (byUserId || []).forEach(b => map.set(b.id, b));
+      byEmail.forEach(b => map.set(b.id, b));
+
+      return Array.from(map.values()).sort((a, b) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+    } catch (dbErr) {
+      console.warn('[BookingsService.getByUserId] Direct query error:', dbErr);
+      return [];
     }
-
-    if (err1 && !byEmail.length) {
-      console.error('[BookingsService.getByUserId] COMPLETE SUPABASE ERROR OBJECT:', JSON.stringify(err1, null, 2), err1);
-    }
-
-    const map = new Map<string, any>();
-    (byUserId || []).forEach(b => map.set(b.id, b));
-    byEmail.forEach(b => map.set(b.id, b));
-
-    return Array.from(map.values()).sort((a, b) => 
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
   },
 
   async create(booking: BookingInsert) {

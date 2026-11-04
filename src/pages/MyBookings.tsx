@@ -534,16 +534,33 @@ export default function MyBookingsPage() {
   const rotateY = useTransform(mouseX, [-300, 300], [-4, 4]);
 
   useEffect(() => {
-    if (!authLoading && !user) { navigate("/login"); return; }
-    if (!authLoading && (isAdmin || isUserAdmin(user, profile))) { navigate("/admin", { replace: true }); return; }
-    if (!authLoading && (isConsultant || profile?.role === 'consultant' || profile?.is_consultant)) { navigate("/consultant/dashboard", { replace: true }); return; }
-    if (user) loadBookings();
+    if (!authLoading && !user) {
+      setLoading(false);
+      navigate("/login");
+      return;
+    }
+    if (!authLoading && (isAdmin || isUserAdmin(user, profile))) {
+      setLoading(false);
+      navigate("/admin", { replace: true });
+      return;
+    }
+    if (!authLoading && (isConsultant || profile?.role === 'consultant' || profile?.is_consultant)) {
+      setLoading(false);
+      navigate("/consultant/dashboard", { replace: true });
+      return;
+    }
+    if (user) {
+      loadBookings();
+    } else if (!authLoading) {
+      setLoading(false);
+    }
   }, [user, profile, isAdmin, isConsultant, authLoading, navigate]);
 
   const loadFollowUps = async () => {
     try {
-      const res = await followUpService.listClientFollowUps();
-      if (res.success && res.followUps) {
+      const timeoutP = new Promise<{ success: boolean; followUps: [] }>((res) => setTimeout(() => res({ success: false, followUps: [] }), 3000));
+      const res = await Promise.race([followUpService.listClientFollowUps(), timeoutP]);
+      if (res && res.success && res.followUps) {
         const map: Record<string, FollowUpRequest> = {};
         res.followUps.forEach((f) => {
           if (!map[f.booking_id] || ['pending_consultant', 'alternative_proposed', 'confirmed'].includes(f.status)) {
@@ -558,15 +575,23 @@ export default function MyBookingsPage() {
   };
 
   const loadBookings = async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     try {
-      const bookingsPromise = bookingsService.getByUserId(user!.id, user!.email);
-      const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 8000));
+      const bookingsPromise = bookingsService.getByUserId(user.id, user.email);
+      const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 4500));
       const res = await Promise.race([bookingsPromise, timeoutPromise]);
       setBookings(res || []);
-      await loadFollowUps();
+      // Non-blocking load of follow ups
+      loadFollowUps().catch(() => {});
+    } catch (e) {
+      console.error("Error loading user bookings:", e);
+      setBookings([]);
+    } finally {
+      setLoading(false);
     }
-    catch (e) { console.error("Error loading user bookings:", e); }
-    finally { setLoading(false); }
   };
 
   const openFollowUpDialog = (booking: Booking, maxDate: string) => {

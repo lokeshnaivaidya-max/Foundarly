@@ -104,10 +104,18 @@ export default function ConsultantDashboard() {
 
       // 1. Resolve consultant profile with timeout protection
       const consultantPromise = consultantDashboardService.getConsultantProfile(userParam);
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 7000));
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000));
       const consultant = await Promise.race([consultantPromise, timeoutPromise]);
 
-      if (!consultant && profile?.role !== "consultant") {
+      const isUserConsultant = Boolean(
+        consultant ||
+        profile?.role === "consultant" ||
+        profile?.is_consultant ||
+        (user.user_metadata as any)?.role === "consultant" ||
+        (user.user_metadata as any)?.is_consultant
+      );
+
+      if (!isUserConsultant) {
         console.log("User is not linked to an active consultant record");
         setAccessDenied(true);
         setLoading(false);
@@ -121,7 +129,7 @@ export default function ConsultantDashboard() {
         console.log("Syncing user role to consultant in profiles table");
         supabase
           .from("profiles")
-          .upsert({ id: user.id, role: "consultant", full_name: consultant.name })
+          .upsert({ id: user.id, role: "consultant", is_consultant: true, full_name: consultant.name })
           .then(() => {})
           .catch((err) => console.warn("Could not sync consultant role:", err));
       }
@@ -130,7 +138,7 @@ export default function ConsultantDashboard() {
       await loadDashboardData();
     } catch (error) {
       console.error("Error checking consultant access:", error);
-      if (profile?.role === "consultant") {
+      if (profile?.role === "consultant" || profile?.is_consultant) {
         setAccessDenied(false);
         await loadDashboardData();
       } else {

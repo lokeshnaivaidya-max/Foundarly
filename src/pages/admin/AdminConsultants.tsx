@@ -377,6 +377,13 @@ export default function AdminConsultants() {
                           src={c.image_url || getDefaultAvatar(c.gender)}
                           alt={c.name}
                           className="w-8 h-8 rounded-full object-cover border border-border shrink-0"
+                          onError={(e) => {
+                            const target = e.currentTarget as HTMLImageElement;
+                            const fallback = getDefaultAvatar(c.gender);
+                            if (!target.src.endsWith(fallback)) {
+                              target.src = fallback;
+                            }
+                          }}
                         />
                         {c.name}
                       </div>

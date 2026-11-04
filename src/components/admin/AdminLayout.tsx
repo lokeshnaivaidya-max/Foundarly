@@ -15,8 +15,13 @@ export default function AdminLayout() {
           <header className="h-14 flex items-center justify-between border-b border-border px-4 md:px-6 bg-background/80 backdrop-blur-sm sticky top-0 z-20 shrink-0">
             <div className="flex items-center gap-3">
               <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
-              <Link to="/" className="font-display text-lg font-bold text-gradient-gold">
-                Foundarly
+              <Link to="/" className="flex items-center gap-2 group">
+                <img
+                  src="/logo.svg"
+                  alt="Foundarly"
+                  className="h-7 w-auto object-contain"
+                  onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                />
               </Link>
               
               {isSuperAdmin ? (

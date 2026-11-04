@@ -146,7 +146,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // fails — it is never applied before the fresh fetch completes. This prevents an
     // approved Consultant from being routed to /my-bookings based on a stale cached
     // Client profile while the Consultant role is still being resolved.
-    const resolveProfile = async (userId: string, currentUser: User | null) => {
+    const resolveProfile = async (
+      userId: string,
+      currentUser: User | null,
+      retryCount = 0
+    ) => {
       try {
         // Skip re-resolution if profile already resolved for this user/role
         const existing = profileResolvedRef.current;
@@ -156,11 +160,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         secureLog.info('[AuthContext] resolveProfile: starting authoritative role resolution');
         const resolved = await fetchProfile(userId, currentUser);
-        profileResolvedRef.current = { userId, role: resolved?.role ?? 'null' };
-        secureLog.info(
-          '[AuthContext] resolveProfile: role resolution complete',
-          { role: resolved?.role ?? 'null', isConsultant: resolved?.is_consultant ?? false }
-        );
+        if (resolved) {
+          profileResolvedRef.current = { userId, role: resolved.role ?? 'null' };
+          secureLog.info(
+            '[AuthContext] resolveProfile: role resolution complete',
+            { role: resolved.role ?? 'null', isConsultant: resolved.is_consultant ?? false }
+          );
+        } else if (retryCount < 2) {
+          // Retry once after a short delay to handle transient network/RLS errors
+          // that could cause a consultant to be misclassified as a client
+          await new Promise((r) => setTimeout(r, 500));
+          return resolveProfile(userId, currentUser, retryCount + 1);
+        } else {
+          secureLog.warn('[AuthContext] resolveProfile: profile resolution failed after retries', {
+            userId,
+          });
+        }
       } catch (err) {
         console.warn('[AuthContext] Authoritative profile resolution failed:', err);
         const cached = getCachedProfile(userId);
@@ -398,7 +413,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           isConsultantUser: isConsultantUser,
         });
 
-        // Try server-side authoritative check first
+        // IMMEDIATE consultant resolution: if profiles DB already confirms consultant role,
+        // set profile immediately without waiting for /api/consultant/me or other lookups.
+        // This prevents an approved Consultant from being treated as a Client due to
+        // delayed or failed API calls.
+        if (isConsultantUser) {
+          const consultantProfile: Profile = {
+            id: userId,
+            role: 'consultant',
+            full_name: consultantName || targetUser?.user_metadata?.full_name || 'Consultant',
+            is_consultant: true,
+          };
+
+          if (!profileData || profileData.role !== 'consultant') {
+            supabase.from('profiles').upsert({
+              id: userId,
+              full_name: consultantProfile.full_name,
+              role: 'consultant',
+              is_consultant: true,
+            }).then();
+          }
+
+          setCachedProfile(userId, consultantProfile);
+          setProfile(consultantProfile);
+          profileResolvedRef.current = { userId, role: 'consultant' };
+          secureLog.info('[AuthContext] fetchProfile: resolved role=consultant (from profiles DB)');
+          return consultantProfile;
+        }
+
+        // Try server-side authoritative check first (only if not yet confirmed as consultant)
         try {
           const session = (await supabase.auth.getSession()).data.session;
           if (session?.access_token) {
@@ -512,13 +555,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return consultantProfile;
         }
 
-        // 6. Regular Client
+        // 6. Regular Client — only reached if ALL consultant resolution paths failed.
+        // Do NOT silently default to client if the profile fetch errored; instead,
+        // return null so the caller can decide (keep loading=true, show error, etc.).
         const fallbackName = targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'User';
-        secureLog.warn('[AuthContext] fetchProfile: falling through to role=client', {
-          userId,
-          profileRole: profileData?.role ?? 'null',
-          isConsultantUser: isConsultantUser,
-        });
         const clientProfile: Profile = {
           id: userId,
           role: 'client',
@@ -545,25 +585,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return clientProfile;
       } catch (error) {
         secureLog.error('Error in fetchProfile:', error);
-        // Resilient fallback: Check cached profile or user metadata
-        const cached = getCachedProfile(userId);
-        if (cached) {
-          secureLog.warn('[AuthContext] fetchProfile: error fallback to cached profile', {
-            userId,
-            cachedRole: cached.role ?? 'null',
-          });
-          setProfile(cached);
-          return cached;
-        }
-
-        const fallbackProfile: Profile = {
-          id: userId,
-          role: 'client',
-          full_name: currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || user?.email?.split('@')[0] || 'User',
-          is_consultant: false,
-        };
-        setProfile(fallbackProfile);
-        return fallbackProfile;
+        // On error, do NOT fall through to 'client'. Return null so the caller
+        // can keep loading=true and retry, preventing a consultant from being
+        // misclassified as a client due to a transient network/RLS error.
+        return null;
       } finally {
         inFlightFetchRef.current.delete(userId);
       }

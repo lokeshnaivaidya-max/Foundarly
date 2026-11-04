@@ -44,9 +44,12 @@ export const consultantsService = {
       // Fall through to direct query
     }
 
-    // 2. Direct Supabase query
+    // 2. Direct Supabase query with timeout
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        
         let query = supabase.from('consultants').select('*').order('created_at', { ascending: false });
         
         if (activeOnly) {
@@ -54,6 +57,8 @@ export const consultantsService = {
         }
         
         const { data, error } = await query;
+        clearTimeout(timeoutId);
+        
         if (error) {
           if (attempt === 0) {
             await new Promise(r => setTimeout(r, 200));

@@ -305,7 +305,7 @@ function getCanonicalRoomId(currentRoomId?: string, currentBooking?: any): strin
     return rawId.startsWith('foundarly-') ? rawId : `foundarly-${rawId}`;
   }
   if (currentRoomId) {
-    let clean = currentRoomId.trim().replace(/^.*\/meeting\//, '').split('?')[0].split('#')[0].replace(/\/+$/, '');
+    const clean = currentRoomId.trim().replace(/^.*\/meeting\//, '').split('?')[0].split('#')[0].replace(/\/+$/, '');
     return clean.startsWith('foundarly-') ? clean : `foundarly-${clean}`;
   }
   return 'default-room';
@@ -390,7 +390,9 @@ export default function MeetingPage() {
       if (cached) {
         setChatMessages(JSON.parse(cached));
       }
-    } catch {}
+    } catch (_err) {
+      // Ignore storage errors
+    }
   }, [effectiveRoomId, booking]);
 
   // Hook recorder events
@@ -472,7 +474,9 @@ export default function MeetingPage() {
         const updated = [...prev, sent];
         try {
           sessionStorage.setItem(`foundarly_chat_${canonicalRoom}`, JSON.stringify(updated));
-        } catch {}
+        } catch (_err) {
+          // Ignore storage errors
+        }
         return updated;
       });
     } else {
@@ -540,7 +544,13 @@ export default function MeetingPage() {
   const loadMeetingAccess = useCallback(async () => {
     if (!effectiveRoomId) return;
     try {
-      const accessResult = await meetingService.validateAccess(effectiveRoomId);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Meeting session verification timed out')), 8000)
+      );
+      const accessResult = await Promise.race([
+        meetingService.validateAccess(effectiveRoomId),
+        timeoutPromise,
+      ]);
 
       if (!accessResult.success || !accessResult.authorized) {
         setAccessError({
@@ -589,8 +599,8 @@ export default function MeetingPage() {
     } catch (err: any) {
       console.error("[Meeting] Validation failed:", err);
       setAccessError({
-        title: 'Connection Error',
-        message: 'Unable to verify meeting authorization with the server.',
+        title: 'Connection Issue',
+        message: 'Unable to reach the server to verify meeting authorization. Please check your network and retry.',
         code: 'NETWORK_ERROR',
       });
     } finally {
@@ -738,7 +748,9 @@ export default function MeetingPage() {
           const updated = [...prev, msg];
           try {
             sessionStorage.setItem(`foundarly_chat_${canonicalRoom}`, JSON.stringify(updated));
-          } catch {}
+          } catch (_err) {
+            // Ignore storage errors
+          }
           return updated;
         });
         setIsChatOpen((open) => {
@@ -989,15 +1001,28 @@ export default function MeetingPage() {
             )}
 
             <div className="space-y-2 pt-2">
+              {accessError.code === "NETWORK_ERROR" && (
+                <Button
+                  className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+                  onClick={() => {
+                    setLoading(true);
+                    setAccessError(null);
+                    loadMeetingAccess();
+                  }}
+                >
+                  Retry Connection
+                </Button>
+              )}
               <Button
                 className="w-full glow-gold"
+                variant={accessError.code === "NETWORK_ERROR" ? "outline" : "default"}
                 onClick={() => navigate(dashboardPath)}
               >
                 Return to Bookings
               </Button>
               <Button
-                variant="outline"
-                className="w-full"
+                variant="ghost"
+                className="w-full text-muted-foreground"
                 onClick={() => navigate("/consultants")}
               >
                 Book a New Consultation

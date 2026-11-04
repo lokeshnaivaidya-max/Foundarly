@@ -559,10 +559,13 @@ export default function MyBookingsPage() {
 
   const loadBookings = async () => {
     try {
-      setBookings(await bookingsService.getByUserId(user!.id, user!.email));
+      const bookingsPromise = bookingsService.getByUserId(user!.id, user!.email);
+      const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 8000));
+      const res = await Promise.race([bookingsPromise, timeoutPromise]);
+      setBookings(res || []);
       await loadFollowUps();
     }
-    catch (e) { console.error(e); }
+    catch (e) { console.error("Error loading user bookings:", e); }
     finally { setLoading(false); }
   };
 

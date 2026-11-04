@@ -95,53 +95,80 @@ export const bookingsService = {
     }
   },
   async getAll(statusFilter?: 'all' | 'pending' | 'confirmed' | 'rejected' | string) {
-    console.log(`[BookingsService.getAll] Fetching bookings from Supabase with filter: ${statusFilter || 'all'}...`);
+    console.log(`[BookingsService.getAll] Fetching bookings with filter: ${statusFilter || 'all'}...`);
     let rawBookings: any[] = [];
-    
-    let query = supabase
-      .from('bookings')
-      .select(`
-        *,
-        consultants (
-          name,
-          title,
-          email
-        )
-      `, { count: 'exact' });
 
-    if (statusFilter === 'pending') {
-      query = query.eq('status', 'pending').neq('payment_status', 'rejected');
-    } else if (statusFilter === 'confirmed') {
-      query = query.in('status', ['confirmed', 'completed']).neq('payment_status', 'rejected');
-    } else if (statusFilter === 'rejected') {
-      query = query.or('status.in.(rejected,cancelled),payment_status.eq.rejected');
+    // 1. Try authoritative server admin API endpoint first
+    try {
+      const session = (await supabase.auth.getSession()).data.session;
+      if (session?.access_token) {
+        const queryParam = statusFilter && statusFilter !== 'all' ? `?status=${encodeURIComponent(statusFilter)}` : '';
+        const res = await fetch(`/api/admin/bookings${queryParam}`, {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+        if (res.ok) {
+          const json = await res.json().catch(() => null);
+          if (json?.success && Array.isArray(json?.bookings)) {
+            return json.bookings;
+          }
+        }
+      }
+    } catch (apiErr) {
+      console.warn('[BookingsService.getAll] Admin bookings API notice, attempting direct query:', apiErr);
     }
     
-    const response = await query.order('created_at', { ascending: false });
-    
-    if (response.error) {
-      console.warn('[BookingsService.getAll] Joined query failed, attempting flat select fallback:', response.error);
-      let fallbackQuery = supabase
+    // 2. Direct Supabase query fallback
+    try {
+      let query = supabase
         .from('bookings')
-        .select('*');
+        .select(`
+          *,
+          consultants (
+            name,
+            title,
+            email
+          )
+        `, { count: 'exact' });
 
       if (statusFilter === 'pending') {
-        fallbackQuery = fallbackQuery.eq('status', 'pending').neq('payment_status', 'rejected');
+        query = query.eq('status', 'pending').neq('payment_status', 'rejected');
       } else if (statusFilter === 'confirmed') {
-        fallbackQuery = fallbackQuery.in('status', ['confirmed', 'completed']).neq('payment_status', 'rejected');
+        query = query.in('status', ['confirmed', 'completed']).neq('payment_status', 'rejected');
       } else if (statusFilter === 'rejected') {
-        fallbackQuery = fallbackQuery.or('status.in.(rejected,cancelled),payment_status.eq.rejected');
+        query = query.or('status.in.(rejected,cancelled),payment_status.eq.rejected');
       }
+      
+      const response = await query.order('created_at', { ascending: false });
+      
+      if (response.error) {
+        console.warn('[BookingsService.getAll] Joined query failed, attempting flat select fallback:', response.error);
+        let fallbackQuery = supabase
+          .from('bookings')
+          .select('*');
 
-      const fallbackResponse = await fallbackQuery.order('created_at', { ascending: false });
+        if (statusFilter === 'pending') {
+          fallbackQuery = fallbackQuery.eq('status', 'pending').neq('payment_status', 'rejected');
+        } else if (statusFilter === 'confirmed') {
+          fallbackQuery = fallbackQuery.in('status', ['confirmed', 'completed']).neq('payment_status', 'rejected');
+        } else if (statusFilter === 'rejected') {
+          fallbackQuery = fallbackQuery.or('status.in.(rejected,cancelled),payment_status.eq.rejected');
+        }
 
-      if (fallbackResponse.error) {
-        console.error('[BookingsService.getAll] Flat select fallback also failed:', fallbackResponse.error);
-        throw fallbackResponse.error;
+        const fallbackResponse = await fallbackQuery.order('created_at', { ascending: false });
+
+        if (fallbackResponse.error) {
+          console.warn('[BookingsService.getAll] Flat select fallback notice:', fallbackResponse.error);
+          return [];
+        }
+        rawBookings = fallbackResponse.data || [];
+      } else {
+        rawBookings = response.data || [];
       }
-      rawBookings = fallbackResponse.data || [];
-    } else {
-      rawBookings = response.data || [];
+    } catch (err) {
+      console.warn('[BookingsService.getAll] Exception querying bookings:', err);
+      return [];
     }
 
     console.log('[BookingsService.getAll] Fetched bookings count:', rawBookings.length);

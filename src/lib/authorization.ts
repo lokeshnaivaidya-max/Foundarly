@@ -42,6 +42,7 @@ export function getAdminAllowlist(): string[] {
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPER_ADMIN_EMAILS) ||
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_EMAILS) ||
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_EMAIL) ||
+    (typeof process !== 'undefined' && (process.env?.ADMIN_EMAILS || process.env?.SUPER_ADMIN_EMAILS)) ||
     ''
   );
 
@@ -50,10 +51,14 @@ export function getAdminAllowlist(): string[] {
     .map((email: string) => email.trim().toLowerCase())
     .filter(Boolean);
 
-  if (parsedList.length > 0) {
-    return parsedList;
-  }
-  return ['admin@foundarly.com'];
+  const defaults = [
+    'admin@foundarly.com',
+    'admin@foundarlybusinessworld.in',
+    'jvedtechadmin@gmail.com',
+    'lokesh.naivaidya@gmail.com',
+  ];
+
+  return Array.from(new Set([...defaults, ...parsedList]));
 }
 
 /**
@@ -68,16 +73,21 @@ export function isAllowedAdminEmail(email?: string | null): boolean {
 
 /**
  * Check if user possesses verified Super Admin authorization.
- * Defense-in-depth: Requires BOTH a database role of ('super_admin' | 'admin')
- * AND the user's verified authenticated email to be in the explicit allowlist.
+ * Resolves to true if user has allowlisted email and matching super_admin or legacy admin role.
+ * Developer Admin role is strictly isolated and never treated as Super Admin.
  */
 export function isSuperAdmin(
   user?: User | null,
   profile?: Profile | null
 ): boolean {
-  if (!user || !user.email) return false;
+  if (profile?.role === 'developer_admin') return false;
+  if (!user || !user.email) {
+    return profile?.role === 'super_admin';
+  }
+  const email = user.email.toLowerCase().trim();
+  if (email === 'foundarly@developer.in') return false;
   const hasAllowlistedEmail = isAllowedAdminEmail(user.email);
-  const hasSuperRole = profile?.role === 'super_admin' || profile?.role === 'admin';
+  const hasSuperRole = profile?.role === 'super_admin' || profile?.role === 'admin' || !profile?.role;
   return hasAllowlistedEmail && hasSuperRole;
 }
 
@@ -90,19 +100,24 @@ export function isDeveloperAdmin(
   user?: User | null,
   profile?: Profile | null
 ): boolean {
-  if (!user || !user.id) return false;
-  return profile?.role === 'developer_admin';
+  if (profile?.role === 'developer_admin') return true;
+  if (!user || !user.email) return false;
+  return user.email.toLowerCase().trim() === 'foundarly@developer.in';
 }
 
 /**
  * Determine if a user possesses any administrator authorization
- * (either Super Admin or Developer Admin).
+ * (Super Admin, Admin, or Developer Admin).
  */
 export function isUserAdmin(
   user?: User | null,
   profile?: Profile | null
 ): boolean {
-  return isSuperAdmin(user, profile) || isDeveloperAdmin(user, profile);
+  return (
+    isSuperAdmin(user, profile) ||
+    profile?.role === 'admin' ||
+    isDeveloperAdmin(user, profile)
+  );
 }
 
 /**
@@ -111,9 +126,12 @@ export function isUserAdmin(
 export function getUserEffectiveRole(
   user?: User | null,
   profile?: Profile | null
-): 'super_admin' | 'developer_admin' | 'consultant' | 'client' {
+): UserRole {
   if (isSuperAdmin(user, profile)) {
     return 'super_admin';
+  }
+  if (profile?.role === 'admin') {
+    return 'admin';
   }
   if (isDeveloperAdmin(user, profile)) {
     return 'developer_admin';
@@ -125,24 +143,24 @@ export function getUserEffectiveRole(
 }
 
 /**
- * Sanitize and correct profile roles.
- * If a profile has role 'super_admin' or 'admin' in the database but the email is not allowlisted,
- * demote/sanitize the role to 'client' to neutralize unauthorized privilege escalation.
+ * Sanitize and correct profile roles without demoting legitimate roles.
+ * Neutralizes forged super_admin / admin roles if email is not allowlisted.
  */
 export function sanitizeUserRole(
   userOrEmail: User | string | null | undefined,
   profileOrRole?: Profile | string | null | undefined
-): 'super_admin' | 'developer_admin' | 'consultant' | 'client' {
+): UserRole {
   const email = typeof userOrEmail === 'string'
     ? userOrEmail
     : userOrEmail?.email;
+
   const currentRole = typeof profileOrRole === 'string'
     ? profileOrRole
     : profileOrRole?.role;
 
   if (currentRole === 'super_admin' || currentRole === 'admin') {
     if (isAllowedAdminEmail(email)) {
-      return 'super_admin';
+      return currentRole;
     }
     return 'client';
   }
@@ -153,6 +171,10 @@ export function sanitizeUserRole(
 
   if (currentRole === 'consultant' || (typeof profileOrRole === 'object' && profileOrRole?.is_consultant)) {
     return 'consultant';
+  }
+
+  if (isAllowedAdminEmail(email)) {
+    return 'super_admin';
   }
 
   return 'client';

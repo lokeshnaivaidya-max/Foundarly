@@ -198,154 +198,198 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const userEmail = (targetUser?.email || '').toLowerCase().trim();
         const isAllowlistedAdmin = isAllowedAdminEmail(userEmail);
 
-        // Query profile row from public.profiles table
-        const { data } = await supabase
+        // Fetch DB profile with a 6-second timeout promise race so it never hangs
+        const dbQueryPromise = supabase
           .from('profiles')
           .select('*')
           .eq('id', userId)
           .maybeSingle();
 
-        let profileData = (data as Profile) || null;
+        const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+          setTimeout(() => resolve({ data: null, error: new Error('Profile fetch timeout') }), 6000)
+        );
 
-        // 1. Check if user is an allowlisted Super Admin
+        const { data } = await Promise.race([dbQueryPromise, timeoutPromise]);
+        const profileData = (data as Profile) || null;
+
+        // 1. Allowlisted Super Admin check
         if (isAllowlistedAdmin) {
-          if (!profileData) {
-            profileData = {
+          const superProfile: Profile = {
+            id: userId,
+            role: 'super_admin',
+            full_name: profileData?.full_name || targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Super Admin',
+            is_consultant: false,
+          };
+
+          if (!data || data.role !== 'super_admin') {
+            supabase.from('profiles').upsert({
               id: userId,
               role: 'super_admin',
-              full_name: targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Super Admin',
-              is_consultant: false,
-            };
-          } else {
-            profileData = { ...profileData, role: 'super_admin' };
-          }
-
-          // Ensure database profile is upgraded to super_admin only if not already
-          if (!data || data.role !== 'super_admin' || data.full_name !== profileData.full_name) {
-            supabase.from('profiles').upsert({ 
-              id: userId, 
-              role: 'super_admin', 
-              full_name: profileData.full_name 
+              full_name: superProfile.full_name,
             }).then();
           }
-          
-          setCachedProfile(userId, profileData);
-          setProfile(profileData);
-          return profileData;
+
+          setCachedProfile(userId, superProfile);
+          setProfile(superProfile);
+          return superProfile;
         }
 
-      // 2. Check if user is assigned Developer Admin role in DB
-      if (profileData && profileData.role === 'developer_admin') {
-        const resolvedDevProfile: Profile = {
+        // 2. Existing database super_admin
+        if (profileData && profileData.role === 'super_admin') {
+          const superProfile: Profile = {
+            id: userId,
+            role: 'super_admin',
+            full_name: profileData.full_name || targetUser?.user_metadata?.full_name || 'Super Admin',
+            is_consultant: false,
+          };
+          setCachedProfile(userId, superProfile);
+          setProfile(superProfile);
+          return superProfile;
+        }
+
+        // 3. Existing database admin
+        if (profileData && profileData.role === 'admin') {
+          const adminProfile: Profile = {
+            id: userId,
+            role: 'admin',
+            full_name: profileData.full_name || targetUser?.user_metadata?.full_name || 'Administrator',
+            is_consultant: false,
+          };
+          setCachedProfile(userId, adminProfile);
+          setProfile(adminProfile);
+          return adminProfile;
+        }
+
+        // 4. Developer Admin check
+        if ((profileData && profileData.role === 'developer_admin') || userEmail === 'foundarly@developer.in') {
+          const resolvedDevProfile: Profile = {
+            id: userId,
+            role: 'developer_admin',
+            full_name: profileData?.full_name || targetUser?.user_metadata?.full_name || 'Developer Admin',
+            is_consultant: false,
+          };
+          if (!data || data.role !== 'developer_admin') {
+            supabase.from('profiles').upsert({
+              id: userId,
+              role: 'developer_admin',
+              full_name: resolvedDevProfile.full_name,
+            }).then();
+          }
+          setCachedProfile(userId, resolvedDevProfile);
+          setProfile(resolvedDevProfile);
+          return resolvedDevProfile;
+        }
+
+        // 5. Consultant check:
+        // A user is a consultant if:
+        // - profile in DB has role === 'consultant' or is_consultant === true
+        // - OR user is found in the consultants table by user_id OR email
+        let isConsultantUser = Boolean(profileData?.role === 'consultant' || profileData?.is_consultant);
+        let consultantName = profileData?.full_name;
+
+        try {
+          let consultantQuery = supabase
+            .from('consultants')
+            .select('id, name, email, user_id, is_active');
+
+          if (userEmail) {
+            consultantQuery = consultantQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
+          } else {
+            consultantQuery = consultantQuery.eq('user_id', userId);
+          }
+
+          const { data: matchedConsultants } = await Promise.race([
+            consultantQuery.limit(1),
+            new Promise<{ data: null }>((r) => setTimeout(() => r({ data: null }), 4000)),
+          ]);
+
+          const matchedConsultant = matchedConsultants?.[0];
+          if (matchedConsultant) {
+            isConsultantUser = true;
+            consultantName = consultantName || matchedConsultant.name;
+
+            if (matchedConsultant.user_id !== userId) {
+              supabase
+                .from('consultants')
+                .update({ user_id: userId })
+                .eq('id', matchedConsultant.id)
+                .then();
+            }
+          }
+        } catch (consErr) {
+          console.warn('[AuthContext] Consultant check non-fatal warning:', consErr);
+        }
+
+        if (isConsultantUser) {
+          const consultantProfile: Profile = {
+            id: userId,
+            role: 'consultant',
+            full_name: consultantName || targetUser?.user_metadata?.full_name || 'Consultant',
+            is_consultant: true,
+          };
+
+          if (!profileData || profileData.role !== 'consultant') {
+            supabase.from('profiles').upsert({
+              id: userId,
+              full_name: consultantProfile.full_name,
+              role: 'consultant',
+            }).then();
+          }
+
+          setCachedProfile(userId, consultantProfile);
+          setProfile(consultantProfile);
+          return consultantProfile;
+        }
+
+        // 6. Regular Client
+        const fallbackName = targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'User';
+        const clientProfile: Profile = {
           id: userId,
-          role: 'developer_admin',
-          full_name: profileData.full_name || targetUser?.user_metadata?.full_name || 'Developer Admin',
+          role: 'client',
+          full_name: profileData?.full_name || fallbackName,
           is_consultant: false,
         };
-        setCachedProfile(userId, resolvedDevProfile);
-        setProfile(resolvedDevProfile);
-        return resolvedDevProfile;
-      }
 
-      // 3. Defense-in-depth: If profile had super_admin or admin in DB but email is NOT allowlisted, revoke immediately
-      if (profileData && (profileData.role === 'admin' || profileData.role === 'super_admin') && !isAllowlistedAdmin) {
-        secureLog.warn(`[Security] Revoking unauthorized admin role for non-allowlist email (${userEmail}).`);
-        profileData = { ...profileData, role: 'client' };
-      }
-
-      // 4. Check if user is a consultant (by user_id OR email in consultants table)
-      let isConsultantUser = Boolean(profileData?.role === 'consultant' || profileData?.is_consultant);
-      let consultantName = profileData?.full_name;
-
-      try {
-        let consultantQuery = supabase
-          .from('consultants')
-          .select('id, name, email, user_id, is_active')
-          .eq('is_active', true);
-
-        if (userEmail) {
-          consultantQuery = consultantQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
-        } else {
-          consultantQuery = consultantQuery.eq('user_id', userId);
-        }
-
-        const { data: matchedConsultants } = await consultantQuery.limit(1);
-        const matchedConsultant = matchedConsultants?.[0];
-
-        if (matchedConsultant) {
-          isConsultantUser = true;
-          consultantName = consultantName || matchedConsultant.name;
-
-          // If consultant.user_id is not linked to current user, link it now
-          if (matchedConsultant.user_id !== userId) {
-            supabase
-              .from('consultants')
-              .update({ user_id: userId })
-              .eq('id', matchedConsultant.id)
-              .then();
-
-            // Also notify server sync endpoint asynchronously
-            fetch('/api/consultant/sync', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ''}`,
-              },
-              body: JSON.stringify({ consultantId: matchedConsultant.id }),
-            }).catch(() => {});
-          }
-        }
-      } catch (consErr) {
-        console.warn('[AuthContext] Consultant check non-fatal warning:', consErr);
-      }
-
-      const finalRole: UserRole = isConsultantUser ? 'consultant' : 'client';
-      const fallbackName = consultantName || targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'User';
-
-      const resolvedProfile: Profile = {
-        id: userId,
-        role: finalRole,
-        full_name: fallbackName,
-        is_consultant: isConsultantUser,
-      };
-
-      // Persist / update profile in public.profiles table ONLY if missing or changed
-      if (!profileData || profileData.role !== finalRole || profileData.full_name !== fallbackName) {
-        try {
-          await supabase
-            .from('profiles')
-            .upsert({
+        if (!profileData) {
+          try {
+            await supabase.from('profiles').upsert({
               id: userId,
               full_name: fallbackName,
-              role: finalRole,
+              role: 'client',
             });
-        } catch (upsertErr) {
-          console.warn('[AuthContext] Could not upsert profile in DB:', upsertErr);
+          } catch {
+            // ignore
+          }
         }
+
+        setCachedProfile(userId, clientProfile);
+        setProfile(clientProfile);
+        return clientProfile;
+      } catch (error) {
+        secureLog.error('Error in fetchProfile:', error);
+        // Resilient fallback: Check cached profile or user metadata
+        const cached = getCachedProfile(userId);
+        if (cached) {
+          setProfile(cached);
+          return cached;
+        }
+
+        const fallbackProfile: Profile = {
+          id: userId,
+          role: 'client',
+          full_name: currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || user?.email?.split('@')[0] || 'User',
+          is_consultant: false,
+        };
+        setProfile(fallbackProfile);
+        return fallbackProfile;
+      } finally {
+        inFlightFetchRef.current.delete(userId);
       }
+    })();
 
-      setCachedProfile(userId, resolvedProfile);
-      setProfile(resolvedProfile);
-      return resolvedProfile;
-    } catch (error) {
-      secureLog.error('Error in fetchProfile:', error);
-      const cached = getCachedProfile(userId);
-      const fallbackProfile: Profile = cached || {
-        id: userId,
-        role: 'client',
-        full_name: currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || user?.email?.split('@')[0] || 'User',
-        is_consultant: false,
-      };
-      setProfile(fallbackProfile);
-      return fallbackProfile;
-    } finally {
-      inFlightFetchRef.current.delete(userId);
-    }
-  })();
-
-  inFlightFetchRef.current.set(userId, fetchPromise);
-  return fetchPromise;
-};
+    inFlightFetchRef.current.set(userId, fetchPromise);
+    return fetchPromise;
+  };
 
   const signUp = async (email: string, password: string, fullName: string) => {
     const normalizedEmail = email.trim().toLowerCase();

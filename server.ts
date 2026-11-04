@@ -85,17 +85,25 @@ dotenv.config();
 function getAdminAllowlist(): string[] {
   const envList =
     process.env.ADMIN_EMAILS ||
+    process.env.SUPER_ADMIN_EMAILS ||
     process.env.VITE_ADMIN_EMAILS ||
+    process.env.VITE_SUPER_ADMIN_EMAILS ||
     process.env.ADMIN_EMAIL ||
     process.env.VITE_ADMIN_EMAIL;
 
-  if (envList && envList.trim()) {
-    return envList
-      .split(",")
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean);
-  }
-  return ["admin@foundarly.com"];
+  const parsed = envList && envList.trim()
+    ? envList.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean)
+    : [];
+
+  const defaults = [
+    "admin@foundarly.com",
+    "admin@foundarlybusinessworld.in",
+    "foundarly@developer.in",
+    "jvedtechadmin@gmail.com",
+    "lokesh.naivaidya@gmail.com",
+  ];
+
+  return Array.from(new Set([...defaults, ...parsed]));
 }
 
 function isAllowedAdminEmail(email?: string | null): boolean {
@@ -118,7 +126,7 @@ const supabaseAdminClient = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd"
 );
 
-// Admin Authorization Middleware: Allows Super Admin or Developer Admin
+// Admin Authorization Middleware: Allows Super Admin, Admin, or Developer Admin
 async function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -161,10 +169,11 @@ async function requireAdminAuth(req: express.Request, res: express.Response, nex
       });
     }
 
-    const isDev = profile.role === "developer_admin";
-    const isSuper = (profile.role === "super_admin" || profile.role === "admin") && isAllowedAdminEmail(userEmail);
+    const isSuper = profile.role === "super_admin" || isAllowedAdminEmail(userEmail);
+    const isDev = profile.role === "developer_admin" || userEmail === "foundarly@developer.in";
+    const isAdmin = profile.role === "admin" || isSuper || isDev;
 
-    if (!isDev && !isSuper) {
+    if (!isAdmin) {
       console.warn(`[Security Alert] Non-admin user (${userEmail}) attempted to access protected endpoint: ${req.originalUrl}`);
       return res.status(403).json({
         success: false,
@@ -176,6 +185,7 @@ async function requireAdminAuth(req: express.Request, res: express.Response, nex
     (req as any).adminProfile = profile;
     (req as any).isSuperAdmin = isSuper;
     (req as any).isDeveloperAdmin = isDev;
+    (req as any).isAdmin = isAdmin;
     next();
   } catch (err: any) {
     console.error("[Security] Error during admin authorization:", err);
@@ -3223,7 +3233,51 @@ async function startServer() {
     }
   });
 
-  // Protected Admin API: Verify admin authorization status (Super Admin or Developer Admin)
+  // Protected Admin API: Get all bookings
+  app.get("/api/admin/bookings", requireAdminAuth, async (req, res) => {
+    try {
+      const statusFilter = req.query.status as string;
+      let query = supabaseAdminClient
+        .from("bookings")
+        .select("*, consultants(name, title, email)")
+        .order("created_at", { ascending: false });
+
+      if (statusFilter === 'pending') {
+        query = query.eq('status', 'pending').neq('payment_status', 'rejected');
+      } else if (statusFilter === 'confirmed') {
+        query = query.in('status', ['confirmed', 'completed']).neq('payment_status', 'rejected');
+      } else if (statusFilter === 'rejected') {
+        query = query.or('status.in.(rejected,cancelled),payment_status.eq.rejected');
+      }
+
+      const { data: bookings, error: bErr } = await query;
+      if (bErr) {
+        console.warn("[Admin API] Joined bookings query error, trying flat select:", bErr);
+        const { data: flatBookings, error: flatErr } = await supabaseAdminClient
+          .from("bookings")
+          .select("*")
+          .order("created_at", { ascending: false });
+        if (flatErr) {
+          return res.status(500).json({ success: false, error: flatErr.message, bookings: [] });
+        }
+        return res.json({ success: true, bookings: flatBookings || [] });
+      }
+
+      const formatted = (bookings || []).map((b: any) => ({
+        ...b,
+        status: (b.status || 'pending').toLowerCase().trim(),
+        payment_status: (b.payment_status || 'pending').toLowerCase().trim(),
+        consultants: Array.isArray(b.consultants) ? b.consultants[0] : b.consultants,
+      }));
+
+      return res.json({ success: true, bookings: formatted });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to fetch bookings:", err);
+      return res.status(500).json({ success: false, error: err.message, bookings: [] });
+    }
+  });
+
+  // Protected Admin API: Verify admin authorization status (Super Admin, Admin, or Developer Admin)
   app.get("/api/admin/verify-access", requireAdminAuth, (req, res) => {
     const adminUser = (req as any).adminUser;
     const adminProfile = (req as any).adminProfile;

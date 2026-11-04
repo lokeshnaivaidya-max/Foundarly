@@ -102,36 +102,41 @@ export default function ConsultantDashboard() {
       setLoading(true);
       const userParam = { id: user.id, email: user.email };
 
-      // 1. Resolve consultant profile (checks both user_id and email, and auto-links)
-      const consultant = await consultantDashboardService.getConsultantProfile(userParam);
+      // 1. Resolve consultant profile with timeout protection
+      const consultantPromise = consultantDashboardService.getConsultantProfile(userParam);
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 7000));
+      const consultant = await Promise.race([consultantPromise, timeoutPromise]);
 
-      if (!consultant) {
+      if (!consultant && profile?.role !== "consultant") {
         console.log("User is not linked to an active consultant record");
         setAccessDenied(true);
         setLoading(false);
         return;
       }
 
-      // 2. Ensure profile role is consultant
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .maybeSingle();
+      setAccessDenied(false);
 
-      if (!profile || profile.role !== "consultant") {
+      // 2. Ensure profile role is consultant in profiles table
+      if (consultant && (!profile || profile.role !== "consultant")) {
         console.log("Syncing user role to consultant in profiles table");
-        await supabase
+        supabase
           .from("profiles")
-          .upsert({ id: user.id, role: "consultant", full_name: consultant.name });
+          .upsert({ id: user.id, role: "consultant", full_name: consultant.name })
+          .then(() => {})
+          .catch((err) => console.warn("Could not sync consultant role:", err));
       }
 
       // User has verified consultant access, load dashboard data
-      loadDashboardData();
+      await loadDashboardData();
     } catch (error) {
       console.error("Error checking consultant access:", error);
-      setAccessDenied(true);
-      setLoading(false);
+      if (profile?.role === "consultant") {
+        setAccessDenied(false);
+        await loadDashboardData();
+      } else {
+        setAccessDenied(true);
+        setLoading(false);
+      }
     }
   };
 
@@ -141,18 +146,32 @@ export default function ConsultantDashboard() {
     if (!silent) setLoading(true);
     try {
       const userParam = { id: user.id, email: user.email };
-      const [statsData, bookingsData, payoutsData, followUpsRes] = await Promise.all([
-        consultantDashboardService.getDashboardStats(userParam),
-        consultantDashboardService.getConsultantBookings(userParam),
-        consultantDashboardService.getPayoutRequests(userParam),
-        followUpService.listConsultantFollowUps(),
+
+      const safeTimeout = <T,>(p: Promise<T>, fallback: T, ms = 7000): Promise<T> => {
+        return Promise.race([
+          p,
+          new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
+        ]).catch(() => fallback);
+      };
+
+      const [statsRes, bookingsRes, payoutsRes, followUpsRes] = await Promise.allSettled([
+        safeTimeout(consultantDashboardService.getDashboardStats(userParam), null),
+        safeTimeout(consultantDashboardService.getConsultantBookings(userParam), []),
+        safeTimeout(consultantDashboardService.getPayoutRequests(userParam), []),
+        safeTimeout(followUpService.listConsultantFollowUps(), { success: false, followUps: [] }),
       ]);
 
-      setStats(statsData);
-      setBookings(bookingsData);
-      setPayoutRequests(payoutsData);
-      if (followUpsRes.success && followUpsRes.followUps) {
-        setFollowUps(followUpsRes.followUps);
+      if (statsRes.status === "fulfilled" && statsRes.value) {
+        setStats(statsRes.value);
+      }
+      if (bookingsRes.status === "fulfilled" && bookingsRes.value) {
+        setBookings(bookingsRes.value);
+      }
+      if (payoutsRes.status === "fulfilled" && payoutsRes.value) {
+        setPayoutRequests(payoutsRes.value);
+      }
+      if (followUpsRes.status === "fulfilled" && followUpsRes.value?.success && followUpsRes.value?.followUps) {
+        setFollowUps(followUpsRes.value.followUps);
       }
     } catch (error) {
       console.error("Error loading dashboard:", error);

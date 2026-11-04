@@ -25,7 +25,7 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
+  LayoutGrid,
   Layers,
   X
 } from "lucide-react";
@@ -447,7 +447,7 @@ export default function ConsultantsPage() {
                                   : "bg-secondary text-muted-foreground group-hover:text-foreground"
                               }`}
                             >
-                              <Sparkles className="w-6 h-6 mb-1" />
+                              <LayoutGrid className="w-6 h-6 mb-1" />
                               <span className="text-[11px] sm:text-xs font-bold tracking-wider">ALL</span>
                             </div>
                           ) : imageUrl ? (

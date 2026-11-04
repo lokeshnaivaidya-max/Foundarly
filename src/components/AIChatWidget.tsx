@@ -6,7 +6,7 @@ import {
   Loader2,
   Bot,
   RotateCcw,
-  Sparkles,
+  Users,
   ArrowUpRight,
   ShieldCheck,
   Calendar,
@@ -26,7 +26,7 @@ const STORAGE_KEY = 'foundarly_knowledge_chat_history';
 const QUICK_CATEGORIES = [
   { label: 'Booking', query: 'How do I book a consultation?', icon: Calendar },
   { label: 'Pricing', query: 'What are the consultation fees?', icon: CreditCard },
-  { label: 'Consultants', query: 'Which consultants are available?', icon: Sparkles },
+  { label: 'Consultants', query: 'Which consultants are available?', icon: Users },
   { label: 'Payments', query: 'How do payments & UPI work?', icon: CreditCard },
   { label: 'Meetings', query: 'Meeting access & 7-day rejoin', icon: Video },
   { label: 'Reschedule', query: 'How do I reschedule a booking?', icon: Clock },
@@ -358,7 +358,7 @@ export default function AIChatWidget() {
                     <div className="w-full pt-1 space-y-1.5">
                       <div className="flex items-center justify-between text-[11px] text-muted-foreground uppercase tracking-wider font-semibold px-1">
                         <span>Popular Inquiries</span>
-                        <Sparkles className="w-3 h-3 text-primary" />
+                        <Bot className="w-3.5 h-3.5 text-primary" />
                       </div>
                       <div className="grid grid-cols-1 gap-1.5">
                         {QUICK_CATEGORIES.map((cat, i) => {

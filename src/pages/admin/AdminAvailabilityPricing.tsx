@@ -11,7 +11,6 @@ import {
   AlertTriangle,
   Eye,
   Calendar as CalendarIcon,
-  Sparkles,
   ShieldCheck,
   Check,
   Coffee,
@@ -518,7 +517,7 @@ export default function AdminAvailabilityPricing() {
           {/* Quick Preset Templates */}
           <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-border/80 bg-secondary/20">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Sparkles className="w-4 h-4 text-primary" />
+              <CalendarClock className="w-4 h-4 text-primary" />
               <span className="font-medium text-foreground">Schedule Presets:</span>
               <span>Quickly apply common consultation working routines</span>
             </div>

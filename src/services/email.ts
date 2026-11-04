@@ -152,10 +152,10 @@ export const emailService = {
         return { success: false, error: `Invalid applicant email address: ${data.applicantEmail}` };
       }
 
-      const siteUrl = typeof window !== 'undefined' ? window.location.origin : (import.meta.env.VITE_SITE_URL || 'https://foundarly.com');
+      const siteUrl = typeof window !== 'undefined' ? window.location.origin : (import.meta.env.VITE_SITE_URL || 'https://www.foundarlybusinessworld.in');
       const payload: EmailApplicationApprovedData = {
         ...data,
-        dashboardUrl: data.dashboardUrl || siteUrl,
+        dashboardUrl: data.dashboardUrl || `${siteUrl}/consultant/dashboard`,
       };
 
       let lastServerError: string | undefined;

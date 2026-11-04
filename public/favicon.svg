@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFC043"/>
+      <stop offset="100%" stop-color="#F5A623"/>
+    </linearGradient>
+  </defs>
+  <!-- Background Tile -->
+  <rect width="512" height="512" rx="100" fill="#0B0F19"/>
+  <!-- Subtle Gold Border -->
+  <rect x="8" y="8" width="496" height="496" rx="92" fill="none" stroke="#F5A623" stroke-width="16" stroke-opacity="0.35"/>
+  <!-- Bold Uppercase 'F' Brand Mark -->
+  <path d="M 140 108 H 375 V 192 H 234 V 242 H 336 V 316 H 234 V 404 H 140 Z" fill="url(#goldGrad)"/>
+</svg>

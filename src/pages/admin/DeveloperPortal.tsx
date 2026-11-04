@@ -14,7 +14,7 @@ import {
   Clock, 
   Mail, 
   CreditCard, 
-  Sparkles,
+  Bot,
   Lock,
   Download,
   KeyRound,
@@ -538,7 +538,7 @@ export default function DeveloperPortal({ defaultTab = "overview" }: { defaultTa
               <CardHeader className="p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Sparkles className="w-5 h-5 text-purple-400" />
+                    <Bot className="w-5 h-5 text-purple-400" />
                     <CardTitle className="text-base">Gemini AI Assistant</CardTitle>
                   </div>
                   <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">

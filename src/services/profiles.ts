@@ -28,16 +28,22 @@ export const profilesService = {
   },
 
   async getByEmail(email: string) {
+    if (!email) return null;
+    const cleanEmail = email.toLowerCase().trim();
     try {
-      const { data } = await (supabase as any)
-        .from('profiles')
-        .select('*')
-        .ilike('full_name', `%${email.split('@')[0]}%`)
-        .maybeSingle();
-      return data ? { id: data.id } : null;
+      const { data: cons } = await supabase
+        .from('consultants')
+        .select('user_id')
+        .ilike('email', cleanEmail)
+        .not('user_id', 'is', null)
+        .limit(1);
+      if (cons && cons.length > 0 && cons[0].user_id) {
+        return { id: cons[0].user_id };
+      }
     } catch {
-      return null;
+      // ignore
     }
+    return null;
   },
 
   async update(id: string, updates: ProfileUpdate) {

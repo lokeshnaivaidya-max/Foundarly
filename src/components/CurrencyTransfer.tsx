@@ -9,7 +9,6 @@ import {
   Video,
   ExternalLink,
   RotateCcw,
-  Sparkles,
   ShieldCheck,
   Building2,
   User,

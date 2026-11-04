@@ -10,7 +10,6 @@ import {
   Briefcase,
   Settings,
   ChevronDown,
-  Sparkles,
   Youtube,
   Instagram,
   PlayCircle

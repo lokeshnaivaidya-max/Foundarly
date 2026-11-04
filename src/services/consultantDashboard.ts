@@ -118,6 +118,29 @@ async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; n
     console.error("[consultantDashboardService] Error looking up consultant in Supabase:", dbErr);
   }
 
+  // 3. Check approved consultant application fallback
+  try {
+    if (userEmail) {
+      const { data: apps } = await supabase
+        .from("consultant_applications")
+        .select("id, name, email, status")
+        .ilike("email", userEmail)
+        .eq("status", "approved")
+        .limit(1);
+
+      if (apps && apps.length > 0) {
+        return {
+          id: apps[0].id,
+          name: apps[0].name,
+          email: apps[0].email,
+          user_id: userId,
+        };
+      }
+    }
+  } catch {
+    // ignore
+  }
+
   return null;
 }
 

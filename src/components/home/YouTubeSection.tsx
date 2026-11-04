@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Youtube, ExternalLink, Sparkles, X } from "lucide-react";
+import { Play, Youtube, ExternalLink, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export const YOUTUBE_CHANNEL_URL = "https://youtube.com/@foundarly?si=ZHlc2Swj3Rtm37Kn";
@@ -100,7 +100,7 @@ export default function YouTubeSection() {
               <div className="lg:col-span-5 flex flex-col justify-center gap-5">
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-primary text-xs font-semibold uppercase tracking-wider">
-                    <Sparkles size={14} />
+                    <Play size={14} className="fill-current" />
                     <span>Featured Video</span>
                   </div>
                   <h3 className="font-display text-2xl font-bold leading-tight">

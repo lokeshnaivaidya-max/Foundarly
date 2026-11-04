@@ -32,7 +32,7 @@ import {
   Globe,
   Tag,
   Zap,
-  Sparkles
+  Award
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -308,7 +308,7 @@ export default function ConsultantProfile() {
                 className="bg-gradient-card border border-border rounded-3xl p-6 sm:p-8 space-y-4"
               >
                 <div className="flex items-center gap-2 pb-3 border-b border-border/80">
-                  <Sparkles className="w-5 h-5 text-primary" />
+                  <Award className="w-5 h-5 text-primary" />
                   <h2 className="font-display text-xl font-bold text-foreground">About {consultant.name}</h2>
                 </div>
                 <p className="text-sm sm:text-base text-muted-foreground leading-relaxed whitespace-pre-line">

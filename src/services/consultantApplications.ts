@@ -146,6 +146,112 @@ export const consultantApplicationsService = {
     return data as ConsultantApplication;
   },
 
+  async approve(applicationId: string, adminNotes?: string, pricing30?: number, pricing60?: number) {
+    // 1. Try authoritative serverless endpoint first
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const res = await fetch('/api/admin/approve-consultant-application', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          applicationId,
+          adminNotes,
+          pricing30,
+          pricing60,
+        }),
+      });
+
+      if (res.ok) {
+        const json = await res.json().catch(() => null);
+        if (json?.success) {
+          return json;
+        }
+      } else {
+        const errJson = await res.json().catch(() => null);
+        if (errJson?.error) {
+          throw new Error(errJson.error);
+        }
+      }
+    } catch (apiErr: any) {
+      if (apiErr?.message && !apiErr.message.includes('fetch') && !apiErr.message.includes('Failed to fetch')) {
+        throw apiErr;
+      }
+      console.warn('[consultantApplicationsService] Server API error on approve, using resilient fallback:', apiErr?.message);
+    }
+
+    // 2. Client-side fallback if server API is unreachable
+    const app = await this.getById(applicationId);
+    if (!app) throw new Error('Application not found');
+
+    const cleanEmail = (app.email || '').toLowerCase().trim();
+
+    // Check if consultant already exists to ensure idempotency
+    let existingConsultant = null;
+    try {
+      const { data: matched } = await supabase
+        .from('consultants')
+        .select('*')
+        .ilike('email', cleanEmail)
+        .limit(1);
+      existingConsultant = matched?.[0] || null;
+    } catch (e) {
+      console.warn('Consultant lookup error:', e);
+    }
+
+    const genderValue = (app.gender?.toLowerCase() === 'female' ? 'female' : 'male') as 'male' | 'female';
+    let consultant = existingConsultant;
+
+    if (consultant) {
+      const { data: updated } = await (supabase as any)
+        .from('consultants')
+        .update({
+          name: app.name,
+          title: app.current_job || consultant.title || 'Consultant',
+          bio: app.experience || consultant.bio || '',
+          gender: genderValue,
+          is_active: true,
+          email: cleanEmail,
+          preferred_time: app.preferred_session_timing || consultant.preferred_time,
+        })
+        .eq('id', consultant.id)
+        .select()
+        .single();
+      consultant = updated || consultant;
+    } else {
+      const { data: created, error: cErr } = await (supabase as any)
+        .from('consultants')
+        .insert({
+          name: app.name,
+          title: app.current_job || 'Consultant',
+          bio: app.experience || '',
+          expertise: ['Consulting', app.qualification || 'Advisory'].filter(Boolean),
+          pricing_30: pricing30 || 1000,
+          pricing_60: pricing60 || 1800,
+          gender: genderValue,
+          is_active: true,
+          email: cleanEmail,
+          preferred_time: app.preferred_session_timing || 'Morning (8 AM – 12 PM)',
+        })
+        .select()
+        .single();
+      if (cErr) throw cErr;
+      consultant = created;
+    }
+
+    // Update application status
+    await this.update(applicationId, {
+      status: 'approved',
+      admin_notes: adminNotes || app.admin_notes || null,
+    });
+
+    return { success: true, consultant };
+  },
+
   async delete(id: string) {
     const { error } = await supabase
       .from('consultant_applications')

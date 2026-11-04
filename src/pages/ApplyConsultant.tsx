@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
@@ -11,16 +11,20 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { consultantApplicationsService } from '@/services/consultantApplications';
-import { Briefcase, CheckCircle } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Briefcase, CheckCircle, ArrowRight, UserCheck } from 'lucide-react';
 
 export default function ApplyConsultant() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, profile, isConsultant } = useAuth();
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
+  const isAlreadyConsultant = Boolean(isConsultant || profile?.role === 'consultant' || profile?.is_consultant);
+
   const [formData, setFormData] = useState({
-    name: '',
+    name: user?.user_metadata?.full_name || '',
     age: '',
     gender: 'male' as 'male' | 'female',
     qualification: '',
@@ -28,11 +32,21 @@ export default function ApplyConsultant() {
     location: '',
     experience: '',
     preferred_session_timing: 'Morning (8 AM – 12 PM)',
-    email: '',
+    email: user?.email || '',
     phone: '',
     whatsapp: '',
     linkedin_url: ''
   });
+
+  useEffect(() => {
+    if (user) {
+      setFormData(prev => ({
+        ...prev,
+        email: prev.email || user.email || '',
+        name: prev.name || user.user_metadata?.full_name || '',
+      }));
+    }
+  }, [user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,6 +113,38 @@ export default function ApplyConsultant() {
       setLoading(false);
     }
   };
+
+  if (isAlreadyConsultant) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="pt-28 pb-24">
+          <div className="container mx-auto px-6 max-w-2xl">
+            <AnimatedSection className="text-center bg-card border border-primary/20 rounded-2xl p-10 shadow-xl">
+              <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-6">
+                <UserCheck className="h-10 w-10 text-primary" />
+              </div>
+              <h1 className="font-display text-3xl md:text-4xl font-bold mb-4">
+                You Are an Approved Consultant
+              </h1>
+              <p className="text-muted-foreground mb-8 text-base leading-relaxed">
+                Your consultant account is active! You do not need to submit another application. You can manage your hourly pricing, availability slots, and view client bookings directly from your Consultant Dashboard.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                <Button onClick={() => navigate('/consultant/dashboard')} className="glow-gold-sm bg-primary text-primary-foreground font-semibold">
+                  Go to Consultant Dashboard <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+                <Button variant="outline" onClick={() => navigate('/')}>
+                  Back to Home
+                </Button>
+              </div>
+            </AnimatedSection>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
 
   if (submitted) {
     return (

@@ -10,7 +10,6 @@ import {
   AlertTriangle,
   Eye,
   Calendar as CalendarIcon,
-  Sparkles,
   Info,
   ShieldCheck,
   Check,
@@ -492,7 +491,7 @@ export default function ConsultantAvailabilityEditor({
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5">
               <div className="px-3.5 py-2 rounded-xl bg-background/80 border border-primary/30 backdrop-blur-sm">
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                  <Clock className="h-3.5 w-3.5 text-primary" />
                   Original Application Preference
                 </div>
                 <div className="text-sm font-bold text-foreground">

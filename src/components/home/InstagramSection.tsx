@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Instagram, QrCode, ExternalLink, Sparkles, CheckCircle } from "lucide-react";
+import { Instagram, QrCode, ExternalLink, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -110,7 +110,7 @@ export default function InstagramSection() {
 
                 <div className="pt-2">
                   <span className="inline-flex items-center gap-1.5 text-[11px] font-mono text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20">
-                    <Sparkles size={12} /> Official Account
+                    <CheckCircle size={12} /> Official Account
                   </span>
                 </div>
               </motion.div>

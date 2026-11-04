@@ -26,7 +26,6 @@ import {
   Briefcase,
   ShieldCheck,
   Clock,
-  Sparkles,
   Users,
 } from "lucide-react";
 import {

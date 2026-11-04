@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { Youtube, Instagram, PlayCircle, Sparkles } from "lucide-react";
+import { Youtube, Instagram, PlayCircle } from "lucide-react";
 
 export default function Footer() {
   const { profile, isAdmin } = useAuth();
@@ -157,7 +157,6 @@ export default function Footer() {
             © {new Date().getFullYear()} Foundarly. All rights reserved.
           </p>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Sparkles className="w-3.5 h-3.5 text-primary" />
             <span>By Founders • For Founders</span>
           </div>
         </div>

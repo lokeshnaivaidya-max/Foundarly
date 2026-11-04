@@ -63,112 +63,26 @@ export default function AdminConsultantApplications() {
     if (!selectedApp) return;
 
     setProcessing(true);
-    let createdConsultantId: string | null = null;
     try {
-      // Step 1: Check if a user account exists with this applicant's email
-      let linkedUserId: string | null = null;
-      try {
-        const userMatch = await profilesService.getByEmail(selectedApp.email);
-        if (userMatch?.id) {
-          linkedUserId = userMatch.id;
-          // Step 2: Update user profile role to 'consultant'
-          await profilesService.updateRole(linkedUserId, 'consultant');
-        }
-      } catch (userErr) {
-        console.warn('Could not query or update user profile role:', userErr);
-      }
+      const res = await consultantApplicationsService.approve(selectedApp.id, adminNotes);
 
-      // Step 3: Insert consultant record in 'consultants' table
-      const genderValue = (selectedApp.gender?.toLowerCase() === 'female' ? 'female' : 'male') as 'male' | 'female';
-      const newConsultant = await consultantsService.create({
-        name: selectedApp.name,
-        title: selectedApp.current_job || 'Consultant',
-        bio: selectedApp.experience || '',
-        expertise: ['Consulting', selectedApp.qualification || 'Advisory'].filter(Boolean),
-        pricing_30: 1000,
-        pricing_60: 1800,
-        gender: genderValue,
-        is_active: true,
-        image_url: null,
-        email: selectedApp.email,
-        preferred_time: selectedApp.preferred_session_timing || 'Morning (8 AM – 12 PM)',
-        user_id: linkedUserId
-      } as any);
+      const emailMsg = res?.emailSent
+        ? `Welcome email sent to ${selectedApp.email}.`
+        : (res?.emailNotice ? `(Email: ${res.emailNotice})` : '');
 
-      if (newConsultant?.id) {
-        createdConsultantId = newConsultant.id;
-      }
-
-      // Step 4: Update application status in 'consultant_applications' table
-      await consultantApplicationsService.update(selectedApp.id, {
-        status: 'approved',
-        admin_notes: adminNotes
+      toast({
+        title: 'Application Approved & Consultant Activated',
+        description: `${selectedApp.name} is now an active consultant! ${emailMsg}`,
       });
-
-      // Step 5: Send Application Approval Email Notification to the applicant
-      try {
-        console.log(`[AdminApplications] Sending approval email to ${maskEmail(selectedApp.email)}...`);
-        const emailResult = await emailService.sendApplicationApproval({
-          applicantName: selectedApp.name,
-          applicantEmail: selectedApp.email,
-          qualification: selectedApp.qualification,
-          currentJob: selectedApp.current_job,
-          preferredTiming: selectedApp.preferred_session_timing,
-          adminNotes: adminNotes || null,
-        });
-
-        if (emailResult.success) {
-          toast({
-            title: 'Application Approved & Email Sent',
-            description: `${selectedApp.name} has been approved and a welcome email was sent to ${selectedApp.email}.`
-          });
-        } else {
-          toast({
-            title: 'Approved (Email Notice)',
-            description: `${selectedApp.name} was approved, but email delivery noted: ${emailResult.error || 'Check SMTP configuration'}`
-          });
-        }
-      } catch (emailErr) {
-        console.warn('[AdminApplications] Non-fatal email error on approval:', emailErr);
-        toast({
-          title: 'Application Approved',
-          description: `${selectedApp.name} has been approved and added as a consultant!`
-        });
-      }
 
       setViewDialogOpen(false);
       loadApplications();
     } catch (error: any) {
-      const logData = {
-        action: 'Approve & Create Consultant',
-        applicationId: selectedApp.id,
-        applicantEmail: selectedApp.email,
-        supabaseErrorObject: {
-          message: error?.message || 'Unknown error during approval flow',
-          code: error?.code || 'UNKNOWN_CODE',
-          details: error?.details || null,
-          hint: error?.hint || null,
-          status: error?.status || null,
-          statusText: error?.statusText || null,
-          error
-        }
-      };
-      console.error('[Supabase Consultant Approval Failure Log]: Complete Supabase Error Object:', JSON.stringify(logData, null, 2));
-
-      // Rollback created consultant if step 4 failed to prevent duplicate consultants
-      if (createdConsultantId) {
-        try {
-          await consultantsService.delete(createdConsultantId);
-          console.info('Rolled back created consultant due to application update failure');
-        } catch (rollbackErr) {
-          console.error('Failed to rollback created consultant:', rollbackErr);
-        }
-      }
-
+      console.error('[AdminApplications] Error approving application:', error);
       toast({
-        title: 'Error',
-        description: error?.message ? `Failed to approve application: ${error.message}` : 'Failed to approve application',
-        variant: 'destructive'
+        title: 'Approval Error',
+        description: error?.message || 'Failed to approve application.',
+        variant: 'destructive',
       });
     } finally {
       setProcessing(false);

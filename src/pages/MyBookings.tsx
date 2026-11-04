@@ -5,7 +5,7 @@ import Footer from "@/components/Footer";
 import { SEO } from "@/components/SEO";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, User, MessageSquare, CreditCard, Video, Star, AlertCircle, Trash2, LogIn, CheckCircle, RefreshCw, RotateCcw, Sparkles, UserX, ShieldAlert } from "lucide-react";
+import { Calendar, Clock, User, MessageSquare, CreditCard, Video, Star, AlertCircle, Trash2, LogIn, CheckCircle, RefreshCw, RotateCcw, UserX, ShieldAlert } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { isUserAdmin } from "@/lib/authorization";
 import { supabase } from "@/lib/supabase";
@@ -882,7 +882,7 @@ export default function MyBookingsPage() {
               >
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-                    <Sparkles className="w-5 h-5" />
+                    <Calendar className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="font-display text-lg font-bold">Welcome to Foundarly</h3>
@@ -1166,7 +1166,7 @@ export default function MyBookingsPage() {
                   </p>
                 )}
                 <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/40">
-                  ⚡ Direct consultant confirmation • No secondary admin approval required
+                  • Direct consultant confirmation • No secondary admin approval required
                 </p>
               </div>
             )}

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Shield, CheckCircle, CreditCard, Lock, Clock, Calendar, Tag, Check, Sparkles } from "lucide-react";
+import { Shield, CheckCircle, CreditCard, Lock, Clock, Calendar, Tag, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -730,7 +730,7 @@ der-primary/50"
                       <span>Order Summary</span>
                       {appliedReferral && (
                         <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                          <Sparkles size={10} /> Discount Applied
+                          <Check size={10} /> Discount Applied
                         </span>
                       )}
                     </p>

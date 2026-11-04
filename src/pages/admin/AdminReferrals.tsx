@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, Trash2, Tag, Check, X, ToggleLeft, ToggleRight, History, Sparkles } from "lucide-react";
+import { Plus, Trash2, Tag, Check, X, ToggleLeft, ToggleRight, History } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function AdminReferrals() {

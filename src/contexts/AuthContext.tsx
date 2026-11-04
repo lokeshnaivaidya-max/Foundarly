@@ -402,6 +402,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        // Check approved application in consultant_applications if not yet confirmed
+        if (!isConsultantUser && userEmail) {
+          try {
+            const { data: approvedApps } = await supabase
+              .from('consultant_applications')
+              .select('id, name, status, email')
+              .ilike('email', userEmail)
+              .eq('status', 'approved')
+              .limit(1);
+
+            if (approvedApps && approvedApps.length > 0) {
+              isConsultantUser = true;
+              consultantName = consultantName || approvedApps[0].name;
+            }
+          } catch (appErr) {
+            console.warn('[AuthContext] Approved application check notice:', appErr);
+          }
+        }
+
         if (isConsultantUser) {
           const consultantProfile: Profile = {
             id: userId,

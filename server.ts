@@ -2287,7 +2287,45 @@ async function startServer() {
       }
 
       const { data: consultants, error } = await query.limit(1);
-      const consultant = consultants?.[0];
+      let consultant = consultants?.[0];
+
+      // Auto-activate consultant record from approved application if not found in consultants table
+      if (!consultant && userEmail) {
+        const { data: apps } = await supabaseAdminClient
+          .from("consultant_applications")
+          .select("*")
+          .ilike("email", userEmail)
+          .eq("status", "approved")
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        const approvedApp = apps?.[0];
+        if (approvedApp) {
+          console.log(`[Consultant Me] Auto-activating consultant record from approved application for ${userEmail}`);
+          const genderValue = approvedApp.gender?.toLowerCase() === "female" ? "female" : "male";
+          const { data: newConsultant } = await supabaseAdminClient
+            .from("consultants")
+            .insert({
+              name: approvedApp.name,
+              title: approvedApp.current_job || "Consultant",
+              bio: approvedApp.experience || "",
+              expertise: ["Consulting", approvedApp.qualification || "Advisory"].filter(Boolean),
+              pricing_30: 1000,
+              pricing_60: 1800,
+              gender: genderValue,
+              is_active: true,
+              email: userEmail,
+              preferred_time: approvedApp.preferred_session_timing || "Morning (8 AM – 12 PM)",
+              user_id: user.id,
+            })
+            .select()
+            .single();
+
+          if (newConsultant) {
+            consultant = newConsultant;
+          }
+        }
+      }
 
       if (!consultant) {
         return res.json({ success: true, isConsultant: false, consultant: null });
@@ -2322,6 +2360,215 @@ async function startServer() {
     } catch (err: any) {
       console.error("[Consultant API] Error fetching consultant profile:", err);
       return res.status(500).json({ success: false, error: "Failed to resolve consultant profile." });
+    }
+  });
+
+  // Admin: Approve consultant application and activate consultant profile
+  app.post("/api/admin/approve-consultant-application", async (req, res) => {
+    const auth = await authenticateSessionUser(req);
+    if (!auth.user) {
+      return res.status(auth.status || 401).json({ success: false, error: "Authentication required." });
+    }
+
+    const adminEmail = (auth.user.email || "").toLowerCase().trim();
+    const isAllowlisted = isAllowedAdminEmail(adminEmail);
+
+    const { data: adminProfile } = await supabaseAdminClient
+      .from("profiles")
+      .select("role")
+      .eq("id", auth.user.id)
+      .maybeSingle();
+
+    const isAdmin =
+      isAllowlisted ||
+      adminProfile?.role === "super_admin" ||
+      adminProfile?.role === "admin" ||
+      adminProfile?.role === "developer_admin";
+
+    if (!isAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden. Admin privileges required.",
+      });
+    }
+
+    try {
+      const { applicationId, adminNotes, pricing30, pricing60 } = req.body || {};
+      if (!applicationId) {
+        return res.status(400).json({ success: false, error: "applicationId is required." });
+      }
+
+      const { data: app, error: appError } = await supabaseAdminClient
+        .from("consultant_applications")
+        .select("*")
+        .eq("id", applicationId)
+        .single();
+
+      if (appError || !app) {
+        return res.status(404).json({ success: false, error: "Application not found." });
+      }
+
+      const cleanEmail = (app.email || "").toLowerCase().trim();
+
+      // Identity Mapping: check existing auth user
+      let linkedUserId: string | null = null;
+      try {
+        const { data: usersData } = await supabaseAdminClient.auth.admin.listUsers({ page: 1, perPage: 1000 });
+        const matched = usersData?.users?.find((u) => (u.email || "").toLowerCase().trim() === cleanEmail);
+        if (matched?.id) {
+          linkedUserId = matched.id;
+          const { data: existingProfile } = await supabaseAdminClient
+            .from("profiles")
+            .select("role")
+            .eq("id", linkedUserId)
+            .maybeSingle();
+
+          const isApplicantAdmin =
+            existingProfile?.role === "super_admin" ||
+            existingProfile?.role === "admin" ||
+            existingProfile?.role === "developer_admin" ||
+            isAllowedAdminEmail(cleanEmail);
+
+          if (!isApplicantAdmin) {
+            await supabaseAdminClient
+              .from("profiles")
+              .upsert({
+                id: linkedUserId,
+                role: "consultant",
+                full_name: app.name,
+                is_consultant: true,
+              });
+          }
+        }
+      } catch (authLookupErr) {
+        console.warn("[Approve Consultant] Auth user lookup notice:", authLookupErr);
+      }
+
+      // Idempotent consultant record handling
+      let consultantQuery = supabaseAdminClient.from("consultants").select("*");
+      if (linkedUserId) {
+        consultantQuery = consultantQuery.or(`user_id.eq.${linkedUserId},email.ilike.${cleanEmail}`);
+      } else {
+        consultantQuery = consultantQuery.ilike("email", cleanEmail);
+      }
+
+      const { data: existingConsultants } = await consultantQuery.limit(1);
+      let consultant = existingConsultants?.[0] || null;
+
+      const genderValue = (app.gender?.toLowerCase() === "female" ? "female" : "male") as "male" | "female";
+      const parsedPricing30 = Number(pricing30) || 1000;
+      const parsedPricing60 = Number(pricing60) || 1800;
+
+      if (consultant) {
+        const updateData: Record<string, any> = {
+          name: app.name,
+          title: app.current_job || consultant.title || "Consultant",
+          bio: app.experience || consultant.bio || "",
+          gender: genderValue,
+          is_active: true,
+          email: cleanEmail,
+          preferred_time: app.preferred_session_timing || consultant.preferred_time || "Morning (8 AM – 12 PM)",
+        };
+        if (linkedUserId) updateData.user_id = linkedUserId;
+
+        const { data: updatedCons } = await supabaseAdminClient
+          .from("consultants")
+          .update(updateData)
+          .eq("id", consultant.id)
+          .select()
+          .single();
+
+        consultant = updatedCons || consultant;
+      } else {
+        const { data: newCons, error: insertErr } = await supabaseAdminClient
+          .from("consultants")
+          .insert({
+            name: app.name,
+            title: app.current_job || "Consultant",
+            bio: app.experience || "",
+            expertise: ["Consulting", app.qualification || "Advisory"].filter(Boolean),
+            pricing_30: parsedPricing30,
+            pricing_60: parsedPricing60,
+            gender: genderValue,
+            is_active: true,
+            email: cleanEmail,
+            preferred_time: app.preferred_session_timing || "Morning (8 AM – 12 PM)",
+            user_id: linkedUserId || null,
+          })
+          .select()
+          .single();
+
+        if (insertErr) {
+          return res.status(500).json({ success: false, error: insertErr.message });
+        }
+        consultant = newCons;
+      }
+
+      // Update application record
+      await supabaseAdminClient
+        .from("consultant_applications")
+        .update({
+          status: "approved",
+          admin_notes: adminNotes || app.admin_notes || null,
+        })
+        .eq("id", applicationId);
+
+      // Send approval notification email
+      const siteUrl = process.env.SITE_URL || process.env.APP_URL || "https://www.foundarlybusinessworld.in";
+      const fromEmail = process.env.FROM_EMAIL || process.env.SMTP_USER || "hello@foundarlybusinessworld.in";
+      const replyTo = process.env.EMAIL_REPLY_TO || "hello@foundarlybusinessworld.in";
+      const consultantPortalUrl = `${siteUrl}/consultant/dashboard`;
+
+      let emailSent = false;
+      let emailNotice: string | null = null;
+
+      try {
+        const emailHtml = generateApplicationApprovedEmailHTML({
+          applicantName: app.name,
+          applicantEmail: cleanEmail,
+          qualification: app.qualification,
+          currentJob: app.current_job,
+          preferredTiming: app.preferred_session_timing,
+          adminNotes: adminNotes || null,
+          dashboardUrl: consultantPortalUrl,
+        });
+
+        const emailText = generateApplicationApprovedEmailText({
+          applicantName: app.name,
+          applicantEmail: cleanEmail,
+          qualification: app.qualification,
+          currentJob: app.current_job,
+          preferredTiming: app.preferred_session_timing,
+          adminNotes: adminNotes || null,
+          dashboardUrl: consultantPortalUrl,
+        });
+
+        const mailResult = await sendEmail({
+          from: fromEmail,
+          to: cleanEmail,
+          replyTo,
+          subject: "Foundarly Consultant Application Approved",
+          html: emailHtml,
+          text: emailText,
+        });
+
+        emailSent = mailResult.success;
+        if (!mailResult.success) emailNotice = mailResult.error || "Email delivery failed";
+      } catch (mErr: any) {
+        emailNotice = mErr?.message || "Email error";
+      }
+
+      return res.json({
+        success: true,
+        message: `${app.name} has been approved as an active consultant.`,
+        consultant,
+        linkedUserId,
+        emailSent,
+        emailNotice,
+      });
+    } catch (err: any) {
+      console.error("[Approve Consultant] Server error:", err);
+      return res.status(500).json({ success: false, error: err?.message || "Internal server error." });
     }
   });
 

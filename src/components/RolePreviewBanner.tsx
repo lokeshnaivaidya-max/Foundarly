@@ -10,7 +10,6 @@ import {
   X, 
   ArrowRight, 
   ChevronDown, 
-  Sparkles,
   Terminal,
   ShieldCheck,
   Check

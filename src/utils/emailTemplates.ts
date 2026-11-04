@@ -597,7 +597,7 @@ export function generateUserEmailHTML(data: EmailBookingData): string {
 
     <!-- 7-Day Follow-Up Policy Assurance -->
     <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 24px 0;">
-      <p style="margin: 0 0 6px; color: #0f172a; font-size: 13px; font-weight: 700;">✨ Foundarly 7-Day Post-Meeting Rejoin Guarantee</p>
+      <p style="margin: 0 0 6px; color: #0f172a; font-size: 13px; font-weight: 700;">Foundarly 7-Day Post-Meeting Rejoin Guarantee</p>
       <p style="margin: 0; color: #475569; font-size: 12px; line-height: 1.5;">
         After your session completes, you can rejoin this exact meeting room for up to 7 days for quick follow-up questions and clarifications directly with your consultant.
       </p>
@@ -1802,8 +1802,7 @@ export function generateSessionCompletedEmailHTML(data: EmailSessionCompletedDat
 
     <!-- 7-Day Follow-Up Policy Box -->
     <div style="background-color: #fef3c7; border: 1px solid #fcd34d; border-radius: 12px; padding: 22px; margin-bottom: 28px;">
-      <div style="display: flex; align-items: center; margin-bottom: 8px;">
-        <span style="font-size: 20px; margin-right: 8px;">✨</span>
+      <div style="margin-bottom: 8px;">
         <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #92400e;">7-Day Follow-Up Clarification Policy</h3>
       </div>
       <p style="margin: 0 0 14px 0; font-size: 14px; line-height: 22px; color: #78350f;">

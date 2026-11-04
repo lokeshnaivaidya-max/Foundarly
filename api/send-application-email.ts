@@ -93,14 +93,15 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     let emailSubject = '';
 
     if (type === 'approved') {
+      const consultantDashboardUrl = applicationData.dashboardUrl || `${siteUrl}/consultant/dashboard`;
       emailSubject = 'Foundarly Consultant Application Approved';
       emailHtml = generateApplicationApprovedEmailHTML({
         ...applicationData,
-        dashboardUrl: applicationData.dashboardUrl || siteUrl,
+        dashboardUrl: consultantDashboardUrl,
       });
       emailText = generateApplicationApprovedEmailText({
         ...applicationData,
-        dashboardUrl: applicationData.dashboardUrl || siteUrl,
+        dashboardUrl: consultantDashboardUrl,
       });
     } else if (type === 'rejected') {
       emailSubject = 'Update regarding your Foundarly Consultant Application';

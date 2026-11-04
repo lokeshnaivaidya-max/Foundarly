@@ -65,7 +65,7 @@ export const COLLABORATION_TAGS = [
   { value: 'seeking-investors', label: 'Seeking Investors', icon: '💰' },
   { value: 'partnership', label: 'Partnership', icon: '🤜🤛' },
   { value: 'mentorship', label: 'Mentorship', icon: '🎓' },
-  { value: 'open-to-collaborate', label: 'Open to Collaborate', icon: '✨' },
+  { value: 'open-to-collaborate', label: 'Open to Collaborate', icon: '🌐' },
 ];
 
 export const OFFICIAL_29_CATEGORIES = [

@@ -130,28 +130,41 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
       const approvedApp = applications?.[0];
       if (approvedApp) {
-        console.log(`[Consultant Me] Auto-activating consultant record from approved application for ${userEmail}`);
-        const genderValue = approvedApp.gender?.toLowerCase() === 'female' ? 'female' : 'male';
+        // ACCOUNT ACTIVATION vs PUBLIC PUBLICATION: an approved application
+        // activates the consultant ACCOUNT (profiles.role). It must NEVER
+        // auto-publish application free-text (qualification, current_job,
+        // experience) as a public consultant profile. Create an identity-only
+        // DRAFT (is_active: false) with neutral empty professional fields —
+        // title/bio/expertise/pricing are filled in by the consultant or admin
+        // and the profile is published explicitly via the Manage Consultants
+        // toggle. Nothing here becomes publicly visible until is_active=true.
+        console.log(`[Consultant Me] Approved application found; creating NON-PUBLIC draft consultant record for ${userEmail}`);
         const { data: newConsultant, error: createErr } = await activeDbClient
           .from('consultants')
           .insert({
             name: approvedApp.name,
-            title: approvedApp.current_job || 'Consultant',
-            bio: approvedApp.experience || '',
-            expertise: ['Consulting', approvedApp.qualification || 'Advisory'].filter(Boolean),
-            pricing_30: 1000,
-            pricing_60: 1800,
-            gender: genderValue,
-            is_active: true,
             email: userEmail,
-            preferred_time: approvedApp.preferred_session_timing || 'Morning (8 AM – 12 PM)',
             user_id: userId,
+            is_active: false,
+            title: '',
+            bio: '',
+            expertise: [],
+            pricing_30: 0,
+            pricing_60: 0,
           })
           .select()
           .single();
 
         if (!createErr && newConsultant) {
           consultant = newConsultant;
+        } else if (createErr) {
+          // Likely RLS (non-admin tokens cannot insert consultants rows).
+          // Account activation is unaffected — the draft can be created later
+          // by admin-side sync. Never fatal for role resolution.
+          secureLog.warn(
+            '[Consultant Me] Could not create draft consultant record (RLS or write error):',
+            { userId, error: createErr?.message || String(createErr) }
+          );
         }
       }
     }

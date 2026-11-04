@@ -118,29 +118,13 @@ async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; n
     console.error("[consultantDashboardService] Error looking up consultant in Supabase:", dbErr);
   }
 
-  // 3. Check approved consultant application fallback
-  try {
-    if (userEmail) {
-      const { data: apps } = await supabase
-        .from("consultant_applications")
-        .select("id, name, email, status")
-        .ilike("email", userEmail)
-        .eq("status", "approved")
-        .limit(1);
-
-      if (apps && apps.length > 0) {
-        return {
-          id: apps[0].id,
-          name: apps[0].name,
-          email: apps[0].email,
-          user_id: userId,
-        };
-      }
-    }
-  } catch {
-    // ignore
-  }
-
+  // 3. No consultant listing record: return null. Account activation
+  // (profiles.role = consultant) independently grants dashboard access —
+  // an approved consultant_application must NEVER be presented as a
+  // consultant record: its id is an application id, and writes keyed by
+  // consultant_id (availability, pricing) would silently orphan. A
+  // non-public draft consultants row is created by /api/consultant/me
+  // when an approved application exists.
   return null;
 }
 

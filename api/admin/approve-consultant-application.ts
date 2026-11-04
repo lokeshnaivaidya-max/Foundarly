@@ -94,7 +94,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       }
     }
 
-    const { applicationId, adminNotes, pricing30, pricing60, application: passedApp } = body || {};
+    const { applicationId, adminNotes, application: passedApp } = body || {};
     if (!applicationId) {
       return res.status(400).json({ success: false, error: 'applicationId is required.' });
     }
@@ -246,21 +246,15 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     const { data: existingConsultants } = await consultantQuery.limit(1);
     let consultant = existingConsultants?.[0] || null;
 
-    const genderValue = (app.gender?.toLowerCase() === 'female' ? 'female' : 'male') as 'male' | 'female';
-    const parsedPricing30 = Number(pricing30) || 1000;
-    const parsedPricing60 = Number(pricing60) || 1800;
-
     if (consultant) {
-      // Re-activate and update existing consultant record
-      console.log(`[Approve Consultant] Updating existing consultant record ${consultant.id} for ${cleanEmail}`);
+      // Re-approval / renewal: IDENTITY ONLY. Never overwrite reviewed
+      // professional content (title/bio/expertise/pricing) with raw
+      // application text, and never change publication state — public
+      // profile content and is_active are managed explicitly via
+      // Manage Consultants.
+      console.log(`[Approve Consultant] Updating existing consultant record ${consultant.id} for ${cleanEmail} (identity fields only)`);
       const updateData: Record<string, any> = {
-        name: app.name,
-        title: app.current_job || consultant.title || 'Consultant',
-        bio: app.experience || consultant.bio || '',
-        gender: genderValue,
-        is_active: true,
         email: cleanEmail,
-        preferred_time: app.preferred_session_timing || consultant.preferred_time || 'Morning (8 AM – 12 PM)',
       };
 
       if (linkedUserId) {
@@ -285,22 +279,24 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       }
       consultant = updatedCons;
     } else {
-      // Insert new consultant record
-      console.log(`[Approve Consultant] Inserting new consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
+      // First approval: create a NON-PUBLIC DRAFT record. Approval activates
+      // the applicant's ACCOUNT (profiles.role = consultant) but does NOT
+      // publish application free-text as a public consultant profile. The
+      // draft (is_active: false) is reviewed, completed and published
+      // explicitly via the Manage Consultants toggle.
+      console.log(`[Approve Consultant] Inserting NON-PUBLIC draft consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
       const { data: newCons, error: insertErr } = await activeDbClient
         .from('consultants')
         .insert({
           name: app.name,
-          title: app.current_job || 'Consultant',
-          bio: app.experience || '',
-          expertise: ['Consulting', app.qualification || 'Advisory'].filter(Boolean),
-          pricing_30: parsedPricing30,
-          pricing_60: parsedPricing60,
-          gender: genderValue,
-          is_active: true,
           email: cleanEmail,
-          preferred_time: app.preferred_session_timing || 'Morning (8 AM – 12 PM)',
           user_id: linkedUserId || null,
+          is_active: false,
+          title: '',
+          bio: '',
+          expertise: [],
+          pricing_30: 0,
+          pricing_60: 0,
         })
         .select()
         .single();
@@ -380,7 +376,10 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
     return res.status(200).json({
       success: true,
-      message: `${app.name} has been approved as an active consultant.`,
+      // Approval = ACCOUNT ACTIVATION (profiles.role). The consultant LISTING is
+      // created as a non-public draft (is_active: false) and must be reviewed,
+      // completed and published explicitly via Manage Consultants.
+      message: `${app.name} has been approved. Account activated; consultant listing created as a draft for review and publication.`,
       consultant,
       linkedUserId,
       profileUpdated,

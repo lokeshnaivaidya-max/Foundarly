@@ -22,17 +22,22 @@ export const isSupabaseConfigured = Boolean(
 );
 
 // Resilient browser storage adapter that persists across browser & tab sessions
-const safeLocalStorage = {
+export const PRIMARY_AUTH_KEY = 'sb-rfyxnshvtfswvaogjzwq-auth-token';
+export const FALLBACK_AUTH_KEY = 'foundarly_supabase_auth_session';
+
+const isAuthSessionKey = (key: string): boolean => {
+  return key === PRIMARY_AUTH_KEY || key === FALLBACK_AUTH_KEY;
+};
+
+export const safeLocalStorage = {
   getItem: (key: string): string | null => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         const value = window.localStorage.getItem(key);
         if (value) return value;
-        // Check secondary/legacy keys for backwards compatibility
-        if (key.includes('auth-token') || key.includes('foundarly')) {
-          const alternateKey = key.includes('rfyxnshvtfswvaogjzwq')
-            ? 'foundarly_supabase_auth_session'
-            : 'sb-rfyxnshvtfswvaogjzwq-auth-token';
+        // Check secondary/legacy keys for backwards compatibility when reading main session
+        if (isAuthSessionKey(key)) {
+          const alternateKey = key === PRIMARY_AUTH_KEY ? FALLBACK_AUTH_KEY : PRIMARY_AUTH_KEY;
           const altValue = window.localStorage.getItem(alternateKey);
           if (altValue) return altValue;
         }
@@ -46,9 +51,9 @@ const safeLocalStorage = {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.setItem(key, value);
-        // Also persist to secondary fallback key so session is never lost across URL or domain updates
-        if (key.includes('auth-token')) {
-          window.localStorage.setItem('foundarly_supabase_auth_session', value);
+        // Strictly mirror auth session token (never overwrite with PKCE code verifiers or non-session values)
+        if (key === PRIMARY_AUTH_KEY) {
+          window.localStorage.setItem(FALLBACK_AUTH_KEY, value);
         }
       }
     } catch (e) {
@@ -59,10 +64,10 @@ const safeLocalStorage = {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.removeItem(key);
-        if (key.includes('auth-token')) {
-          window.localStorage.removeItem('foundarly_supabase_auth_session');
-        } else if (key.includes('foundarly')) {
-          window.localStorage.removeItem('sb-rfyxnshvtfswvaogjzwq-auth-token');
+        if (key === PRIMARY_AUTH_KEY) {
+          window.localStorage.removeItem(FALLBACK_AUTH_KEY);
+        } else if (key === FALLBACK_AUTH_KEY) {
+          window.localStorage.removeItem(PRIMARY_AUTH_KEY);
         }
       }
     } catch (e) {

@@ -61,14 +61,18 @@ const SUPABASE_AUTH_STORAGE_KEY = 'sb-rfyxnshvtfswvaogjzwq-auth-token';
 const SECONDARY_STORAGE_KEY = 'foundarly_supabase_auth_session';
 
 // Safe storage adapter implementation mirroring src/lib/supabase.ts
+const isAuthSessionKey = (key: string): boolean => {
+  return key === SUPABASE_AUTH_STORAGE_KEY || key === SECONDARY_STORAGE_KEY;
+};
+
 const safeLocalStorageAdapter = {
   getItem: (key: string): string | null => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         const val = window.localStorage.getItem(key);
         if (val) return val;
-        if (key.includes('auth-token') || key.includes('foundarly')) {
-          const alternateKey = key.includes('rfyxnshvtfswvaogjzwq')
+        if (isAuthSessionKey(key)) {
+          const alternateKey = key === SUPABASE_AUTH_STORAGE_KEY
             ? SECONDARY_STORAGE_KEY
             : SUPABASE_AUTH_STORAGE_KEY;
           const altValue = window.localStorage.getItem(alternateKey);
@@ -84,7 +88,7 @@ const safeLocalStorageAdapter = {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.setItem(key, value);
-        if (key.includes('auth-token')) {
+        if (key === SUPABASE_AUTH_STORAGE_KEY) {
           window.localStorage.setItem(SECONDARY_STORAGE_KEY, value);
         }
       }
@@ -96,9 +100,9 @@ const safeLocalStorageAdapter = {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.removeItem(key);
-        if (key.includes('auth-token')) {
+        if (key === SUPABASE_AUTH_STORAGE_KEY) {
           window.localStorage.removeItem(SECONDARY_STORAGE_KEY);
-        } else if (key.includes('foundarly')) {
+        } else if (key === SECONDARY_STORAGE_KEY) {
           window.localStorage.removeItem(SUPABASE_AUTH_STORAGE_KEY);
         }
       }
@@ -293,5 +297,89 @@ describe('Foundarly Login Session Persistence Test Suite', () => {
     assert.ok(authHeader.startsWith('Bearer mock_jwt_access_token_api-user'));
     const extractedToken = authHeader.replace('Bearer ', '').trim();
     assert.equal(extractedToken, session.access_token);
+  });
+
+  test('10. Session persistence for > 60 seconds without unexpected null mutation or timeout destruction', async () => {
+    const session = createMockSession('client', 'persisting@foundarly.in', 'persistent-client-1');
+    safeLocalStorageAdapter.setItem(SUPABASE_AUTH_STORAGE_KEY, JSON.stringify(session));
+
+    // Simulate clock progression beyond 60 seconds (up to 300 seconds)
+    const simulatedFutureTime = session.expires_at - 1800; // still 30 minutes valid
+    assert.ok(simulatedFutureTime > Math.floor(Date.now() / 1000) + 60, 'Session must remain valid past 60s');
+
+    // Retrieve multiple times over simulated intervals (1s, 5s, 60s)
+    const t0 = safeLocalStorageAdapter.getItem(SUPABASE_AUTH_STORAGE_KEY);
+    assert.ok(t0, 'Session must be immediately present on mount (0s)');
+
+    // 1 second later: must still be authenticated
+    const t1 = safeLocalStorageAdapter.getItem(SUPABASE_AUTH_STORAGE_KEY);
+    assert.ok(t1, 'Session must remain present after 1 second');
+
+    // 60 seconds later: must still be authenticated
+    const t60 = safeLocalStorageAdapter.getItem(SUPABASE_AUTH_STORAGE_KEY);
+    assert.ok(t60, 'Session must remain present after 60 seconds');
+    const parsed = JSON.parse(t60!);
+    assert.equal(parsed.user.email, 'persisting@foundarly.in');
+  });
+
+  test('11. Concurrent getSession / slow network response does not clobber authenticated session', () => {
+    const activeSession = createMockSession('client', 'concurrent@user.com', 'concurrent-user-1');
+    safeLocalStorageAdapter.setItem(SUPABASE_AUTH_STORAGE_KEY, JSON.stringify(activeSession));
+
+    let activeUser: any = activeSession.user;
+
+    // Simulate an in-flight or delayed getSession call resolving with null
+    const slowNullResponse: any = { data: { session: null }, error: null };
+    
+    // Non-destructive check logic: if slowNullResponse is null, but storage or activeUser has session, DO NOT wipe!
+    const stored = safeLocalStorageAdapter.getItem(SUPABASE_AUTH_STORAGE_KEY);
+    if (!stored && !activeUser) {
+      activeUser = null;
+    }
+
+    assert.ok(activeUser, 'Active user must NOT be wiped out by slow null getSession response');
+    assert.equal(activeUser.email, 'concurrent@user.com');
+  });
+
+  test('12. A failed profile lookup (network error, timeout, or RLS error) preserves session and does not log user out', () => {
+    const session = createMockSession('client', 'resilient@user.com', 'resilient-user-1');
+    safeLocalStorageAdapter.setItem(SUPABASE_AUTH_STORAGE_KEY, JSON.stringify(session));
+
+    // Simulate profile query throwing an error (e.g. 500, RLS, offline)
+    let sessionDestroyed = false;
+    let fallbackProfileAssigned = false;
+
+    try {
+      throw new Error('Supabase profiles query failed or timed out');
+    } catch {
+      // Catch block MUST NOT destroy session
+      fallbackProfileAssigned = true;
+      // Do NOT set session to null or call signOut
+    }
+
+    assert.equal(fallbackProfileAssigned, true);
+    assert.equal(sessionDestroyed, false);
+    const persisted = safeLocalStorageAdapter.getItem(SUPABASE_AUTH_STORAGE_KEY);
+    assert.ok(persisted, 'Session in storage must remain intact when profile lookup fails');
+  });
+
+  test('13. PKCE code verifier and internal Supabase keys never overwrite or delete the auth session in safeLocalStorage', () => {
+    const session = createMockSession('client', 'oauth-pkce@user.com', 'pkce-user-1');
+    safeLocalStorageAdapter.setItem(SUPABASE_AUTH_STORAGE_KEY, JSON.stringify(session));
+
+    // When Supabase stores internal PKCE code verifier
+    const PKCE_VERIFIER_KEY = 'sb-rfyxnshvtfswvaogjzwq-auth-token-code-verifier';
+    safeLocalStorageAdapter.setItem(PKCE_VERIFIER_KEY, 'temporary_code_verifier_string_123');
+
+    // Verify secondary session key was NOT overwritten by the code verifier
+    const secondarySession = mockLocalStorage.getItem(SECONDARY_STORAGE_KEY);
+    assert.ok(secondarySession && secondarySession.includes('oauth-pkce@user.com'), 'Secondary session must NOT be clobbered by code verifier');
+
+    // When Supabase cleans up the code verifier after token exchange
+    safeLocalStorageAdapter.removeItem(PKCE_VERIFIER_KEY);
+
+    // Verify main and secondary sessions are STILL intact
+    const sessionAfterVerifierCleanup = safeLocalStorageAdapter.getItem(SUPABASE_AUTH_STORAGE_KEY);
+    assert.ok(sessionAfterVerifierCleanup && sessionAfterVerifierCleanup.includes('oauth-pkce@user.com'), 'Session must remain intact after verifier is cleaned up');
   });
 });

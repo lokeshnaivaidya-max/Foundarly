@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
+import { supabase, PRIMARY_AUTH_KEY, FALLBACK_AUTH_KEY } from '@/lib/supabase';
 import { secureLog } from '@/utils/security';
 import { 
   isAllowedAdminEmail, 
@@ -48,45 +48,91 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-  const inFlightFetchRef = useRef<Map<string, Promise<Profile | null>>>(new Map());
-  const isMountedRef = useRef(true);
-  const initialResolvedRef = useRef(false);
-
-  // Synchronously retrieve cached profile from localStorage to prevent role flicker/kicking
-  const getCachedProfile = (userId: string): Profile | null => {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        const raw = window.localStorage.getItem(`foundarly_profile_${userId}`);
-        if (raw) return JSON.parse(raw);
-      }
-    } catch {
-      // ignore
+// Synchronously retrieve cached profile from localStorage to prevent role flicker/kicking
+const getCachedProfile = (userId: string): Profile | null => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(`foundarly_profile_${userId}`);
+      if (raw) return JSON.parse(raw);
     }
-    return null;
-  };
+  } catch {
+    // ignore
+  }
+  return null;
+};
 
-  const setCachedProfile = (userId: string, p: Profile | null) => {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        if (p) {
-          window.localStorage.setItem(`foundarly_profile_${userId}`, JSON.stringify(p));
-        } else {
-          window.localStorage.removeItem(`foundarly_profile_${userId}`);
+const setCachedProfile = (userId: string, p: Profile | null) => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (p) {
+        window.localStorage.setItem(`foundarly_profile_${userId}`, JSON.stringify(p));
+      } else {
+        window.localStorage.removeItem(`foundarly_profile_${userId}`);
+      }
+    }
+  } catch {
+    // ignore
+  }
+};
+
+// Safely retrieve persistent Supabase session from localStorage synchronously on mount
+export const getStoredSession = (): Session | null => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const primary = window.localStorage.getItem(PRIMARY_AUTH_KEY);
+      const fallback = window.localStorage.getItem(FALLBACK_AUTH_KEY);
+      const raw = primary || fallback;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const candidate = parsed?.currentSession || parsed;
+        if (candidate && candidate.user && (candidate.access_token || candidate.token)) {
+          return candidate as Session;
         }
       }
-    } catch {
-      // ignore
     }
+  } catch {
+    // ignore parse errors
+  }
+  return null;
+};
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const initialSession = getStoredSession();
+  const [session, setSession] = useState<Session | null>(initialSession);
+  const [user, setUser] = useState<User | null>(initialSession?.user || null);
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    if (initialSession?.user?.id) {
+      const cached = getCachedProfile(initialSession.user.id);
+      if (cached) return cached;
+      const uEmail = (initialSession.user.email || '').toLowerCase().trim();
+      if (isAllowedAdminEmail(uEmail)) {
+        return {
+          id: initialSession.user.id,
+          role: 'super_admin',
+          full_name: initialSession.user.user_metadata?.full_name || 'Super Admin',
+          is_consultant: false,
+        };
+      }
+    }
+    return null;
+  });
+  const [loading, setLoading] = useState<boolean>(!initialSession);
+
+  // Active references to prevent stale asynchronous operations from clobbering state
+  const activeUserRef = useRef<User | null>(initialSession?.user || null);
+  const activeSessionRef = useRef<Session | null>(initialSession);
+  const inFlightFetchRef = useRef<Map<string, Promise<Profile | null>>>(new Map());
+  const isMountedRef = useRef(true);
+
+  const applyAuth = (newSession: Session | null, newUser: User | null) => {
+    activeSessionRef.current = newSession;
+    activeUserRef.current = newUser;
+    setSession(newSession);
+    setUser(newUser);
   };
 
   useEffect(() => {
     isMountedRef.current = true;
-    initialResolvedRef.current = false;
 
     // Clean up any legacy localStorage admin sessions
     try {
@@ -96,90 +142,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // ignore
     }
 
-    // Hard safety timeout: Auth loading can never block the app for more than 1800ms
-    const safetyTimer = setTimeout(() => {
-      if (isMountedRef.current && !initialResolvedRef.current) {
-        initialResolvedRef.current = true;
-        setLoading(false);
-      }
-    }, 1800);
+    // Refresh profile in background if session was immediately restored from storage
+    if (activeUserRef.current) {
+      fetchProfile(activeUserRef.current.id, activeUserRef.current).catch((err) => {
+        console.warn('[AuthContext] Initial profile fetch notice:', err);
+      });
+    }
 
-    // Step 1: Authoritative initial session retrieval with fast timeout protection
-    const initializeAuth = async () => {
-      try {
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise<{ data: { session: null }; error: null }>((resolve) =>
-          setTimeout(() => resolve({ data: { session: null }, error: null }), 1400)
-        );
-
-        const { data, error } = await Promise.race([sessionPromise, timeoutPromise]);
-        if (error) {
-          console.warn('[AuthContext] getSession notice:', (error as any)?.message);
-        }
-
-        if (!isMountedRef.current) return;
-
-        const initialSession = data?.session;
-        if (initialSession?.user) {
-          setSession(initialSession);
-          setUser(initialSession.user);
-
-          // Immediately hydrate cached profile to guarantee smooth authorization on first render
-          const cached = getCachedProfile(initialSession.user.id);
-          if (cached) {
-            setProfile(cached);
-          } else {
-            // Immediate allowlist grant for admins
-            const uEmail = (initialSession.user.email || '').toLowerCase().trim();
-            if (isAllowedAdminEmail(uEmail)) {
-              const instantAdminProfile: Profile = {
-                id: initialSession.user.id,
-                role: 'super_admin',
-                full_name: initialSession.user.user_metadata?.full_name || 'Super Admin',
-                is_consultant: false,
-              };
-              setProfile(instantAdminProfile);
-            }
-          }
-
-          // Unblock loading state IMMEDIATELY so /admin and routes render instantly without waiting on network queries
-          initialResolvedRef.current = true;
-          setLoading(false);
-
-          // Authoritatively refresh fresh profile in background
-          fetchProfile(initialSession.user.id, initialSession.user).then();
-          return;
-        } else {
-          setSession(null);
-          setUser(null);
-          setProfile(null);
-        }
-      } catch (err) {
-        console.warn('[AuthContext] Auth initialization error:', err);
-        if (isMountedRef.current) {
-          setSession(null);
-          setUser(null);
-          setProfile(null);
-        }
-      } finally {
-        initialResolvedRef.current = true;
-        if (isMountedRef.current) {
-          setLoading(false);
-        }
-      }
-    };
-
-    initializeAuth();
-
-    // Step 2: Listen for persistent auth state changes
+    // Step 1: Listen for persistent auth state changes from Supabase
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
       if (!isMountedRef.current) return;
 
+      console.log(`[AuthContext] onAuthStateChange event: ${event}`, {
+        hasSession: Boolean(currentSession),
+        userId: currentSession?.user?.id,
+      });
+
       if (event === 'SIGNED_OUT') {
-        setSession(null);
-        setUser(null);
+        applyAuth(null, null);
         setProfile(null);
         setLoading(false);
         return;
@@ -187,34 +169,71 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
         if (currentSession?.user) {
-          setSession(currentSession);
-          setUser(currentSession.user);
+          applyAuth(currentSession, currentSession.user);
           const cached = getCachedProfile(currentSession.user.id);
           if (cached) {
             setProfile(cached);
           }
-          await fetchProfile(currentSession.user.id, currentSession.user);
+          setLoading(false);
+          await fetchProfile(currentSession.user.id, currentSession.user).catch(() => {});
         }
         return;
       }
 
       if (event === 'INITIAL_SESSION') {
         if (currentSession?.user) {
-          setSession(currentSession);
-          setUser(currentSession.user);
+          applyAuth(currentSession, currentSession.user);
           const cached = getCachedProfile(currentSession.user.id);
           if (cached) {
             setProfile(cached);
           }
-          await fetchProfile(currentSession.user.id, currentSession.user);
-        } else if (initialResolvedRef.current) {
-          setSession(null);
-          setUser(null);
-          setProfile(null);
+          setLoading(false);
+          await fetchProfile(currentSession.user.id, currentSession.user).catch(() => {});
+        } else {
+          // Non-destructive fallback: Only clear if no stored session or active user exists
+          const stored = getStoredSession();
+          if (stored?.user) {
+            applyAuth(stored, stored.user);
+          } else if (!activeUserRef.current) {
+            applyAuth(null, null);
+            setProfile(null);
+          }
           setLoading(false);
         }
       }
     });
+
+    // Step 2: Authoritative session check via getSession without destructive racing
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!isMountedRef.current) return;
+      if (error) {
+        console.warn('[AuthContext] getSession notice:', error.message);
+      }
+      if (data?.session?.user) {
+        applyAuth(data.session, data.session.user);
+        const cached = getCachedProfile(data.session.user.id);
+        if (cached) setProfile(cached);
+        fetchProfile(data.session.user.id, data.session.user).catch(() => {});
+      } else {
+        // Non-destructive: check storage and active ref before clearing
+        const stored = getStoredSession();
+        if (!stored && !activeUserRef.current) {
+          applyAuth(null, null);
+          setProfile(null);
+        }
+      }
+      setLoading(false);
+    }).catch((err) => {
+      console.warn('[AuthContext] getSession error:', err);
+      setLoading(false);
+    });
+
+    // Safety timeout: loading will never block the UI past 1200ms
+    const safetyTimer = setTimeout(() => {
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
+    }, 1200);
 
     return () => {
       isMountedRef.current = false;
@@ -470,9 +489,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const emailConfirmationRequired = Boolean(!error && data.user && !data.session);
 
     if (!error && data.user) {
-      if (data.session) setSession(data.session);
-      setUser(data.user);
-      await fetchProfile(data.user.id, data.user);
+      applyAuth(data.session || null, data.user);
+      await fetchProfile(data.user.id, data.user).catch(() => null);
     }
 
     return { error, user: data?.user || null, session: data?.session || null, emailConfirmationRequired };
@@ -493,9 +511,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (data?.user) {
-      if (data.session) setSession(data.session);
-      setUser(data.user);
-      const userProfile = await fetchProfile(data.user.id, data.user);
+      applyAuth(data.session || null, data.user);
+      const userProfile = await fetchProfile(data.user.id, data.user).catch(() => null);
       return { error: null, user: data.user, session: data.session || null, profile: userProfile };
     }
 
@@ -570,17 +587,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.removeItem('foundarly_admin_active_session');
       localStorage.removeItem('foundarly_admin_auth');
-      if (user?.id) {
-        setCachedProfile(user.id, null);
+      if (activeUserRef.current?.id) {
+        setCachedProfile(activeUserRef.current.id, null);
+      }
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem(PRIMARY_AUTH_KEY);
+        window.localStorage.removeItem(FALLBACK_AUTH_KEY);
       }
     } catch {
       // ignore
     }
-    await supabase.auth.signOut();
-    setUser(null);
+    applyAuth(null, null);
     setProfile(null);
-    setSession(null);
     setLoading(false);
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn('[AuthContext] Supabase signOut notice:', e);
+    }
   };
 
   const isCurrentSuperAdmin = isSuperAdmin(user, profile);

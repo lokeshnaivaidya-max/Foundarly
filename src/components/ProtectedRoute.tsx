@@ -23,16 +23,7 @@ export default function ProtectedRoute({
   const { user, profile, isAdmin, isSuperAdmin: authIsSuperAdmin, loading } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [authTimedOut, setAuthTimedOut] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setAuthTimedOut(true);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (loading && !authTimedOut) {
+  if (loading) {
     return <PageLoader text="Authenticating..." />;
   }
 

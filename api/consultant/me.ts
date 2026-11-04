@@ -60,8 +60,25 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     const userId = user.id;
     const userEmail = (user.email || '').toLowerCase().trim();
 
+    const hasServiceRoleKey = Boolean(
+      process.env.SUPABASE_SERVICE_ROLE_KEY &&
+      process.env.SUPABASE_SERVICE_ROLE_KEY.trim().length > 20 &&
+      !process.env.SUPABASE_SERVICE_ROLE_KEY.includes('publishable')
+    );
+
+    const authenticatedClient = createClient(supabaseUrl, process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd', {
+      global: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const activeDbClient = hasServiceRoleKey ? supabaseAdminClient : authenticatedClient;
+
     // Check existing profile role so we never demote super admins or developer admins
-    const { data: userProfile } = await supabaseAdminClient
+    const { data: userProfile } = await activeDbClient
       .from('profiles')
       .select('role')
       .eq('id', userId)
@@ -71,7 +88,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     const isDev = userProfile?.role === 'developer_admin';
 
     // 1. Search existing consultant record
-    let consultantQuery = supabaseAdminClient
+    let consultantQuery = activeDbClient
       .from('consultants')
       .select('*');
 
@@ -86,7 +103,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
     // 2. If not found in consultants, check if user has an APPROVED application in consultant_applications
     if (!consultant && userEmail) {
-      const { data: applications } = await supabaseAdminClient
+      const { data: applications } = await activeDbClient
         .from('consultant_applications')
         .select('*')
         .ilike('email', userEmail)
@@ -98,7 +115,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       if (approvedApp) {
         console.log(`[Consultant Me] Auto-activating consultant record from approved application for ${userEmail}`);
         const genderValue = approvedApp.gender?.toLowerCase() === 'female' ? 'female' : 'male';
-        const { data: newConsultant, error: createErr } = await supabaseAdminClient
+        const { data: newConsultant, error: createErr } = await activeDbClient
           .from('consultants')
           .insert({
             name: approvedApp.name,
@@ -133,7 +150,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     // 3. Reconcile user_id link on consultant record
     if (consultant.user_id !== userId) {
       console.log(`[Consultant Me] Linking consultant ${consultant.id} to user_id ${userId}`);
-      await supabaseAdminClient
+      await activeDbClient
         .from('consultants')
         .update({ user_id: userId, is_active: true })
         .eq('id', consultant.id);
@@ -143,7 +160,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
     // 4. Reconcile email if missing
     if (!consultant.email && userEmail) {
-      await supabaseAdminClient
+      await activeDbClient
         .from('consultants')
         .update({ email: userEmail })
         .eq('id', consultant.id);
@@ -152,7 +169,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
     // 5. Authoritatively update user profile role in profiles table (unless admin)
     if (!isSuper && !isDev) {
-      await supabaseAdminClient
+      await activeDbClient
         .from('profiles')
         .upsert({
           id: userId,

@@ -64,7 +64,13 @@ export default function AdminConsultantApplications() {
 
     setProcessing(true);
     try {
-      const res = await consultantApplicationsService.approve(selectedApp.id, adminNotes);
+      const res = await consultantApplicationsService.approve(
+        selectedApp.id,
+        adminNotes,
+        undefined,
+        undefined,
+        selectedApp
+      );
 
       const emailMsg = res?.emailSent
         ? `Welcome email sent to ${selectedApp.email}.`

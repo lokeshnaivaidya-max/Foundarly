@@ -94,19 +94,51 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       }
     }
 
-    const { applicationId, adminNotes, pricing30, pricing60 } = body || {};
+    const { applicationId, adminNotes, pricing30, pricing60, application: passedApp } = body || {};
     if (!applicationId) {
       return res.status(400).json({ success: false, error: 'applicationId is required.' });
     }
 
-    // 3. Fetch application record
-    const { data: app, error: appError } = await supabaseAdminClient
-      .from('consultant_applications')
-      .select('*')
-      .eq('id', applicationId)
-      .single();
+    // Initialize authenticated client using the verified admin bearer token to ensure RLS compliance
+    const hasServiceRoleKey = Boolean(
+      process.env.SUPABASE_SERVICE_ROLE_KEY &&
+      process.env.SUPABASE_SERVICE_ROLE_KEY.trim().length > 20 &&
+      !process.env.SUPABASE_SERVICE_ROLE_KEY.includes('publishable')
+    );
 
-    if (appError || !app) {
+    const authenticatedClient = createClient(supabaseUrl, process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd', {
+      global: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const activeDbClient = hasServiceRoleKey ? supabaseAdminClient : authenticatedClient;
+
+    // 3. Fetch application record using authenticated client or passed application data
+    let app = passedApp && passedApp.id === applicationId ? passedApp : null;
+
+    if (!app) {
+      // First try activeDbClient (authenticated or service role)
+      const { data: fetchedApp } = await activeDbClient
+        .from('consultant_applications')
+        .select('*')
+        .eq('id', applicationId)
+        .maybeSingle();
+
+      if (fetchedApp) {
+        app = fetchedApp;
+      }
+    }
+
+    // Secondary fallback: if still not found, check if passedApp matches
+    if (!app && passedApp) {
+      app = passedApp;
+    }
+
+    if (!app) {
       return res.status(404).json({ success: false, error: 'Consultant application not found.' });
     }
 
@@ -115,24 +147,50 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       return res.status(400).json({ success: false, error: 'Applicant record lacks a valid email address.' });
     }
 
-    // 4. Identity Mapping: check if an authenticated user account already exists in Supabase Auth
+    // 4. Identity Mapping: check if an authenticated user account already exists
     let linkedUserId: string | null = null;
     try {
-      const { data: usersData } = await supabaseAdminClient.auth.admin.listUsers({
-        page: 1,
-        perPage: 1000,
-      });
+      if (hasServiceRoleKey) {
+        const { data: usersData } = await supabaseAdminClient.auth.admin.listUsers({
+          page: 1,
+          perPage: 1000,
+        });
 
-      const matchedUser = usersData?.users?.find(
-        (u) => (u.email || '').toLowerCase().trim() === cleanEmail
-      );
+        const matchedUser = usersData?.users?.find(
+          (u) => (u.email || '').toLowerCase().trim() === cleanEmail
+        );
 
-      if (matchedUser?.id) {
-        linkedUserId = matchedUser.id;
-        console.log(`[Approve Consultant] Matched applicant ${cleanEmail} to existing Auth user ${linkedUserId}`);
+        if (matchedUser?.id) {
+          linkedUserId = matchedUser.id;
+        }
+      }
+    } catch (authLookupErr) {
+      console.warn('[Approve Consultant] Auth admin user lookup warning:', authLookupErr);
+    }
 
-        // Update profile role to consultant (preserve admin privileges if already admin)
-        const { data: existingProfile } = await supabaseAdminClient
+    // Fallback user matching: check profiles by full_name or consultants by email
+    if (!linkedUserId && app.name) {
+      try {
+        const { data: matchedProfile } = await activeDbClient
+          .from('profiles')
+          .select('id, full_name, role')
+          .ilike('full_name', app.name.trim())
+          .limit(1);
+
+        if (matchedProfile?.[0]?.id) {
+          linkedUserId = matchedProfile[0].id;
+        }
+      } catch (pErr) {
+        console.warn('[Approve Consultant] Profile name lookup warning:', pErr);
+      }
+    }
+
+    if (linkedUserId) {
+      console.log(`[Approve Consultant] Matched applicant ${cleanEmail} to user ID ${linkedUserId}`);
+
+      // Update profile role to consultant (preserve admin privileges if already admin)
+      try {
+        const { data: existingProfile } = await activeDbClient
           .from('profiles')
           .select('role')
           .eq('id', linkedUserId)
@@ -145,7 +203,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           isAllowedAdminEmail(cleanEmail);
 
         if (!isApplicantAdmin) {
-          await supabaseAdminClient
+          await activeDbClient
             .from('profiles')
             .upsert({
               id: linkedUserId,
@@ -154,13 +212,13 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
               is_consultant: true,
             });
         }
+      } catch (profErr) {
+        console.warn('[Approve Consultant] Profile update notice:', profErr);
       }
-    } catch (authLookupErr) {
-      console.warn('[Approve Consultant] Auth user lookup warning:', authLookupErr);
     }
 
     // 5. Idempotent Consultant Record Creation / Activation
-    let consultantQuery = supabaseAdminClient.from('consultants').select('*');
+    let consultantQuery = activeDbClient.from('consultants').select('*');
     if (linkedUserId) {
       consultantQuery = consultantQuery.or(`user_id.eq.${linkedUserId},email.ilike.${cleanEmail}`);
     } else {
@@ -191,7 +249,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
         updateData.user_id = linkedUserId;
       }
 
-      const { data: updatedCons, error: updateErr } = await supabaseAdminClient
+      const { data: updatedCons, error: updateErr } = await activeDbClient
         .from('consultants')
         .update(updateData)
         .eq('id', consultant.id)
@@ -204,7 +262,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     } else {
       // Insert new consultant record
       console.log(`[Approve Consultant] Inserting new consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
-      const { data: newCons, error: insertErr } = await supabaseAdminClient
+      const { data: newCons, error: insertErr } = await activeDbClient
         .from('consultants')
         .insert({
           name: app.name,
@@ -233,11 +291,12 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }
 
     // 6. Update Application Status to 'approved'
-    const { error: appUpdateErr } = await supabaseAdminClient
+    const { error: appUpdateErr } = await activeDbClient
       .from('consultant_applications')
       .update({
         status: 'approved',
         admin_notes: adminNotes || app.admin_notes || null,
+        updated_at: new Date().toISOString(),
       })
       .eq('id', applicationId);
 

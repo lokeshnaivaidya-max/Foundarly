@@ -2265,8 +2265,28 @@ async function startServer() {
     const userEmail = (user.email || "").toLowerCase().trim();
 
     try {
+      const authHeader = req.headers.authorization;
+      const token = typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7).trim()
+        : null;
+
+      const hasServiceRoleKey = Boolean(
+        process.env.SUPABASE_SERVICE_ROLE_KEY &&
+        process.env.SUPABASE_SERVICE_ROLE_KEY.trim().length > 20 &&
+        !process.env.SUPABASE_SERVICE_ROLE_KEY.includes("publishable")
+      );
+
+      const authenticatedClient = token
+        ? createClient(process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co", process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd", {
+            global: { headers: { Authorization: `Bearer ${token}` } },
+            auth: { persistSession: false, autoRefreshToken: false },
+          })
+        : supabaseAdminClient;
+
+      const activeDbClient = hasServiceRoleKey ? supabaseAdminClient : authenticatedClient;
+
       // Check existing profile role to avoid demoting administrators
-      const { data: userProfile } = await supabaseAdminClient
+      const { data: userProfile } = await activeDbClient
         .from("profiles")
         .select("role")
         .eq("id", user.id)
@@ -2275,7 +2295,7 @@ async function startServer() {
       const isSuper = (userProfile?.role === "super_admin" || userProfile?.role === "admin") && isAllowedAdminEmail(userEmail);
       const isDev = userProfile?.role === "developer_admin";
 
-      let query = supabaseAdminClient
+      let query = activeDbClient
         .from("consultants")
         .select("*")
         .eq("is_active", true);
@@ -2291,7 +2311,7 @@ async function startServer() {
 
       // Auto-activate consultant record from approved application if not found in consultants table
       if (!consultant && userEmail) {
-        const { data: apps } = await supabaseAdminClient
+        const { data: apps } = await activeDbClient
           .from("consultant_applications")
           .select("*")
           .ilike("email", userEmail)
@@ -2303,7 +2323,7 @@ async function startServer() {
         if (approvedApp) {
           console.log(`[Consultant Me] Auto-activating consultant record from approved application for ${userEmail}`);
           const genderValue = approvedApp.gender?.toLowerCase() === "female" ? "female" : "male";
-          const { data: newConsultant } = await supabaseAdminClient
+          const { data: newConsultant } = await activeDbClient
             .from("consultants")
             .insert({
               name: approvedApp.name,
@@ -2333,7 +2353,7 @@ async function startServer() {
 
       // Self-heal linking user_id if null or mismatched
       if (consultant.user_id !== user.id) {
-        await supabaseAdminClient
+        await activeDbClient
           .from("consultants")
           .update({ user_id: user.id })
           .eq("id", consultant.id);
@@ -2342,7 +2362,7 @@ async function startServer() {
 
       // Self-heal profile role ONLY for non-administrator accounts
       if (!isSuper && !isDev) {
-        await supabaseAdminClient
+        await activeDbClient
           .from("profiles")
           .upsert({
             id: user.id,
@@ -2393,19 +2413,48 @@ async function startServer() {
     }
 
     try {
-      const { applicationId, adminNotes, pricing30, pricing60 } = req.body || {};
+      const { applicationId, adminNotes, pricing30, pricing60, application: passedApp } = req.body || {};
       if (!applicationId) {
         return res.status(400).json({ success: false, error: "applicationId is required." });
       }
 
-      const { data: app, error: appError } = await supabaseAdminClient
-        .from("consultant_applications")
-        .select("*")
-        .eq("id", applicationId)
-        .single();
+      const authHeader = req.headers.authorization;
+      const token = typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7).trim()
+        : null;
 
-      if (appError || !app) {
-        return res.status(404).json({ success: false, error: "Application not found." });
+      const hasServiceRoleKey = Boolean(
+        process.env.SUPABASE_SERVICE_ROLE_KEY &&
+        process.env.SUPABASE_SERVICE_ROLE_KEY.trim().length > 20 &&
+        !process.env.SUPABASE_SERVICE_ROLE_KEY.includes("publishable")
+      );
+
+      const authenticatedClient = token
+        ? createClient(process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co", process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd", {
+            global: { headers: { Authorization: `Bearer ${token}` } },
+            auth: { persistSession: false, autoRefreshToken: false },
+          })
+        : supabaseAdminClient;
+
+      const activeDbClient = hasServiceRoleKey ? supabaseAdminClient : authenticatedClient;
+
+      let app = passedApp && passedApp.id === applicationId ? passedApp : null;
+      if (!app) {
+        const { data: fetchedApp } = await activeDbClient
+          .from("consultant_applications")
+          .select("*")
+          .eq("id", applicationId)
+          .maybeSingle();
+
+        if (fetchedApp) {
+          app = fetchedApp;
+        } else if (passedApp) {
+          app = passedApp;
+        }
+      }
+
+      if (!app) {
+        return res.status(404).json({ success: false, error: "Consultant application not found." });
       }
 
       const cleanEmail = (app.email || "").toLowerCase().trim();
@@ -2445,7 +2494,7 @@ async function startServer() {
       }
 
       // Idempotent consultant record handling
-      let consultantQuery = supabaseAdminClient.from("consultants").select("*");
+      let consultantQuery = activeDbClient.from("consultants").select("*");
       if (linkedUserId) {
         consultantQuery = consultantQuery.or(`user_id.eq.${linkedUserId},email.ilike.${cleanEmail}`);
       } else {
@@ -2471,7 +2520,7 @@ async function startServer() {
         };
         if (linkedUserId) updateData.user_id = linkedUserId;
 
-        const { data: updatedCons } = await supabaseAdminClient
+        const { data: updatedCons } = await activeDbClient
           .from("consultants")
           .update(updateData)
           .eq("id", consultant.id)
@@ -2480,7 +2529,7 @@ async function startServer() {
 
         consultant = updatedCons || consultant;
       } else {
-        const { data: newCons, error: insertErr } = await supabaseAdminClient
+        const { data: newCons, error: insertErr } = await activeDbClient
           .from("consultants")
           .insert({
             name: app.name,
@@ -2505,11 +2554,12 @@ async function startServer() {
       }
 
       // Update application record
-      await supabaseAdminClient
+      await activeDbClient
         .from("consultant_applications")
         .update({
           status: "approved",
           admin_notes: adminNotes || app.admin_notes || null,
+          updated_at: new Date().toISOString(),
         })
         .eq("id", applicationId);
 

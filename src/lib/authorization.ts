@@ -81,12 +81,10 @@ export function isSuperAdmin(
   profile?: Profile | null
 ): boolean {
   if (profile?.role === 'developer_admin') return false;
-  if (user?.email) {
-    const email = user.email.toLowerCase().trim();
-    if (email === 'foundarly@developer.in') return false;
-    if (isAllowedAdminEmail(email)) return true;
-  }
-  return profile?.role === 'super_admin';
+  if (!user?.email) return false;
+  const email = user.email.toLowerCase().trim();
+  if (email === 'foundarly@developer.in') return false;
+  return isAllowedAdminEmail(email);
 }
 
 /**
@@ -113,8 +111,8 @@ export function isUserAdmin(
 ): boolean {
   return (
     isSuperAdmin(user, profile) ||
-    profile?.role === 'admin' ||
-    isDeveloperAdmin(user, profile)
+    isDeveloperAdmin(user, profile) ||
+    (profile?.role === 'admin' && Boolean(user?.email && isAllowedAdminEmail(user.email)))
   );
 }
 
@@ -128,11 +126,11 @@ export function getUserEffectiveRole(
   if (isSuperAdmin(user, profile)) {
     return 'super_admin';
   }
-  if (profile?.role === 'admin') {
-    return 'admin';
-  }
   if (isDeveloperAdmin(user, profile)) {
     return 'developer_admin';
+  }
+  if (profile?.role === 'admin' && user?.email && isAllowedAdminEmail(user.email)) {
+    return 'admin';
   }
   if (profile?.role === 'consultant' || profile?.is_consultant) {
     return 'consultant';

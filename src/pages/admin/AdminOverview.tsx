@@ -19,13 +19,16 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { isUserAdmin } from "@/lib/authorization";
 
 export default function AdminOverview() {
   const { formatPrice } = useCurrency();
   const navigate = useNavigate();
-  const { isSuperAdmin, isDeveloperAdmin } = useAuth();
+  const { isSuperAdmin, isDeveloperAdmin, loading: authLoading } = useAuth();
+  const isAdmin = isSuperAdmin || isDeveloperAdmin;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const [stats, setStats] = useState({
     totalBookings: 0,
@@ -43,7 +46,8 @@ export default function AdminOverview() {
 
   const fetchDashboardData = async () => {
     try {
-      const safeQuery = <T,>(p: Promise<T>, fallback: T, ms = 4000): Promise<T> => {
+      setError(null);
+      const safeQuery = <T,>(p: Promise<T>, fallback: T, ms = 8000): Promise<T> => {
         return Promise.race([
           p,
           new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
@@ -106,6 +110,7 @@ export default function AdminOverview() {
       setRecentPayments(paymentsList.slice(0, 5));
     } catch (error) {
       console.error("Failed to load admin dashboard data:", error);
+      setError(error instanceof Error ? error.message : "Failed to load dashboard data");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -113,27 +118,36 @@ export default function AdminOverview() {
   };
 
   useEffect(() => {
-    console.log("[AdminOverview] useEffect fired");
-    fetchDashboardData();
+    console.log("[AdminOverview] useEffect fired", { authLoading, isAdmin });
+    // Only fetch when auth is resolved and user has admin privileges.
+    // Prevents RLS-blocked queries when profile role isn't resolved yet.
+    if (!authLoading && isAdmin) {
+      fetchDashboardData();
+    } else if (authLoading) {
+      setLoading(true);
+      setError(null);
+    }
 
     // Subscribe to realtime changes in bookings and upi_payments
     const bookingsChannel = supabase
       .channel('admin-dashboard-bookings')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
-        fetchDashboardData();
+        if (isAdmin) fetchDashboardData();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'upi_payments' }, () => {
-        fetchDashboardData();
+        if (isAdmin) fetchDashboardData();
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(bookingsChannel);
     };
-  }, []);
+  }, [authLoading, isAdmin]);
 
   const handleRefresh = () => {
+    if (!isAdmin) return;
     setRefreshing(true);
+    setError(null);
     fetchDashboardData();
   };
 
@@ -202,13 +216,19 @@ export default function AdminOverview() {
           variant="outline" 
           size="sm" 
           onClick={handleRefresh} 
-          disabled={refreshing}
+          disabled={refreshing || !isAdmin}
           className="flex items-center gap-2"
         >
           <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
           <span>Refresh Data</span>
         </Button>
       </div>
+
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 rounded-lg p-4 text-sm text-rose-800">
+          {error}
+        </div>
+      )}
 
       {/* Main Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

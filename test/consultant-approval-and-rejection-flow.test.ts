@@ -14,8 +14,18 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import approveHandler from '../api/admin/approve-consultant-application.js';
 import consultantMeHandler from '../api/consultant/me.js';
+import {
+  getUserEffectiveRole,
+  isUserAdmin,
+  isSuperAdmin,
+  isDeveloperAdmin,
+  sanitizeUserRole,
+  canAccessSection,
+} from '../src/lib/authorization.js';
 
 describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
   // Test pending application object
@@ -302,20 +312,188 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       assert.ok(data.error.includes('Invalid or expired session token'));
     });
 
-    test('Returns 200 with isConsultant=true when consultant record exists (even if user_id UPDATE fails due to RLS)', async () => {
-      // This test verifies the regression fix: Supabase .update() errors on
-      // consultants.user_id (RLS denial for non-admin users) are caught via
-      // the { data, error } object and do NOT cause the endpoint to return 500.
-      // The endpoint still returns isConsultant=true because the consultant
-      // record was found and verified.
-      //
-      // Note: A real user token is required to reach the consultant-record
-      // lookup path. Without one, the handler returns 401 at auth validation.
-      // The { data, error } checking on all three UPDATEs (user_id, email,
-      // profiles upsert) is verified by code review: each now destructures
-      // { error } and logs via secureLog.warn instead of being silently
-      // swallowed or allowed to crash the endpoint.
-      assert.ok(true, 'Placeholder: RLS error-path verified via code review; requires real user token for integration test');
+    test('Source code explicitly destructures { error } from all three Supabase write operations', () => {
+      // Regression test for Issue 5: Supabase JS v2 returns database errors
+      // (including RLS denials) in the { data, error } object rather than
+      // throwing exceptions. The handler must explicitly check the error field
+      // on all three write operations: user_id link, email update, and profile upsert.
+      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+
+      // Each write operation must destructure { error } and check it
+      const userIdErrorCheck = source.includes('const { error: linkErr } = await activeDbClient') ||
+        source.includes('const { error: linkErr } = await');
+      const emailErrorCheck = source.includes('const { error: emailErr } = await activeDbClient') ||
+        source.includes('const { error: emailErr } = await');
+      const profileErrorCheck = source.includes('const { error: profileErr } = await activeDbClient') ||
+        source.includes('const { error: profileErr } = await');
+
+      assert.ok(userIdErrorCheck, 'user_id UPDATE must destructure { error }');
+      assert.ok(emailErrorCheck, 'email UPDATE must destructure { error }');
+      assert.ok(profileErrorCheck, 'profiles upsert must destructure { error }');
+
+      // Each error check must log via secureLog.warn (never silently swallow)
+      const secureLogWarnCount = (source.match(/secureLog\.warn/g) || []).length;
+      assert.ok(secureLogWarnCount >= 3, 'All three write failures must be logged via secureLog.warn');
+
+      // The endpoint must still return isConsultant=true even when writes fail
+      const isConsultantTrueCheck = source.includes('isConsultant: true');
+      assert.ok(isConsultantTrueCheck, 'Endpoint must return isConsultant=true when consultant record is verified');
+    });
+
+    test('Endpoint does not return 500 when Supabase writes fail with RLS errors (verified by code structure)', () => {
+      // The handler wraps all three write operations in error-field checks
+      // rather than try-catch. RLS errors are returned as { error } objects
+      // by Supabase JS v2, not thrown as exceptions. The handler logs them
+      // via secureLog.warn and continues, returning isConsultant=true.
+      const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant', 'me.ts'), 'utf8');
+
+      // Verify all three write operations have error field checking
+      // (user_id link, email update, profile upsert)
+      assert.ok(
+        source.includes('const { error: linkErr } = await activeDbClient'),
+        'user_id UPDATE must destructure { error }'
+      );
+      assert.ok(
+        source.includes('const { error: emailErr } = await activeDbClient'),
+        'email UPDATE must destructure { error }'
+      );
+      assert.ok(
+        source.includes('const { error: profileErr } = await activeDbClient'),
+        'profiles upsert must destructure { error }'
+      );
+
+      // Verify each error is checked with if (err) pattern
+      assert.ok(source.includes('if (linkErr)'), 'user_id link error must be checked');
+      assert.ok(source.includes('if (emailErr)'), 'email update error must be checked');
+      assert.ok(source.includes('if (profileErr)'), 'profile upsert error must be checked');
+
+      // Verify errors are logged via secureLog.warn (never silently swallowed)
+      const secureLogWarnCount = (source.match(/secureLog\.warn/g) || []).length;
+      assert.ok(secureLogWarnCount >= 3, 'All three write failures must be logged via secureLog.warn');
+
+      // Verify endpoint returns isConsultant=true even when writes fail
+      assert.ok(source.includes('isConsultant: true'), 'Endpoint must return isConsultant=true when consultant record is verified');
+
+      // Verify no uncaught await on these writes that would crash to outer catch → 500
+      // Each write must be followed by error checking on subsequent lines
+      const writes = [
+        { name: 'user_id', pattern: 'if (linkErr)' },
+        { name: 'email', pattern: 'if (emailErr)' },
+        { name: 'profile', pattern: 'if (profileErr)' },
+      ];
+      for (const w of writes) {
+        const writeIdx = source.indexOf(w.name === 'profile' ? '.from(\'profiles\')' : w.name === 'user_id' ? '.from(\'consultants\')' : '.from(\'consultants\')');
+        const errIdx = source.indexOf(w.pattern);
+        assert.ok(errIdx > writeIdx, `${w.name} write must be followed by error check`);
+      }
+    });
+  });
+
+  describe('6. Authorization Role Resolution (getUserEffectiveRole)', () => {
+    const mockUser = (email: string) => ({ id: 'user-123', email });
+
+    test('Returns super_admin for allowlisted admin email', () => {
+      const user = mockUser('admin@foundarly.com');
+      assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'client' }), 'super_admin');
+    });
+
+    test('Returns super_admin when profile role is super_admin AND email is allowlisted', () => {
+      // isSuperAdmin requires BOTH profile.role === 'super_admin' AND isAllowedAdminEmail(email)
+      const user = mockUser('admin@foundarly.com'); // allowlisted
+      assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'super_admin' }), 'super_admin');
+    });
+
+    test('Does NOT return super_admin for non-allowlisted email even with super_admin profile', () => {
+      // Profile role alone is insufficient; email must be allowlisted
+      const user = mockUser('anyone@example.com'); // NOT allowlisted
+      assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'super_admin' }), 'client');
+    });
+
+    test('Returns admin when profile role is admin AND email is allowlisted (returns super_admin due to allowlist)', () => {
+      // isSuperAdmin takes priority: allowlisted email → super_admin regardless of profile role
+      const user = mockUser('admin@foundarly.com'); // allowlisted
+      assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'admin' }), 'super_admin');
+    });
+
+    test('Returns developer_admin for foundarly@developer.in profile role', () => {
+      const user = mockUser('foundarly@developer.in');
+      assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'developer_admin' }), 'developer_admin');
+    });
+
+    test('Returns consultant when profile role is consultant', () => {
+      const user = mockUser('consultant@example.com');
+      assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'consultant', is_consultant: true }), 'consultant');
+    });
+
+    test('Returns consultant when profile is_consultant is true', () => {
+      const user = mockUser('consultant@example.com');
+      assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'client', is_consultant: true }), 'consultant');
+    });
+
+    test('Returns client for ordinary users', () => {
+      const user = mockUser('client@example.com');
+      assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'client' }), 'client');
+      assert.equal(getUserEffectiveRole(user, null), 'client');
+    });
+
+    test('Does NOT treat developer_admin as super_admin', () => {
+      const user = mockUser('foundarly@developer.in');
+      assert.equal(isSuperAdmin(user, { id: 'user-123', role: 'developer_admin' }), false);
+      assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'developer_admin' }), 'developer_admin');
+    });
+  });
+
+  describe('7. Authorization Permission Checks', () => {
+    const adminUser = { id: 'admin-1', email: 'admin@foundarly.com' };
+    const devUser = { id: 'dev-1', email: 'foundarly@developer.in' };
+    const consultantUser = { id: 'consultant-1', email: 'consultant@example.com' };
+    const clientUser = { id: 'client-1', email: 'client@example.com' };
+
+    test('isUserAdmin returns true for super_admin', () => {
+      assert.equal(isUserAdmin(adminUser, { id: 'admin-1', role: 'super_admin' }), true);
+    });
+
+    test('isUserAdmin returns true for developer_admin', () => {
+      assert.equal(isUserAdmin(devUser, { id: 'dev-1', role: 'developer_admin' }), true);
+    });
+
+    test('isUserAdmin returns true for admin with allowlisted email', () => {
+      assert.equal(isUserAdmin(adminUser, { id: 'admin-1', role: 'admin' }), true);
+    });
+
+    test('isUserAdmin returns false for consultant', () => {
+      assert.equal(isUserAdmin(consultantUser, { id: 'consultant-1', role: 'consultant' }), false);
+    });
+
+    test('isUserAdmin returns false for client', () => {
+      assert.equal(isUserAdmin(clientUser, { id: 'client-1', role: 'client' }), false);
+    });
+
+    test('canAccessSection allows super_admin and admin for all sections', () => {
+      assert.equal(canAccessSection('super_admin', 'administrators'), true);
+      assert.equal(canAccessSection('admin', 'administrators'), true);
+      assert.equal(canAccessSection('super_admin', 'consultants'), true);
+    });
+
+    test('canAccessSection allows developer_admin except administrators', () => {
+      assert.equal(canAccessSection('developer_admin', 'consultants'), true);
+      assert.equal(canAccessSection('developer_admin', 'administrators'), false);
+    });
+
+    test('canAccessSection denies consultant and client', () => {
+      assert.equal(canAccessSection('consultant', 'consultants'), false);
+      assert.equal(canAccessSection('client', 'consultants'), false);
+    });
+
+    test('sanitizeUserRole neutralizes forged admin roles for non-allowlisted emails', () => {
+      assert.equal(sanitizeUserRole('hacker@example.com', 'super_admin'), 'client');
+      assert.equal(sanitizeUserRole('hacker@example.com', 'admin'), 'client');
+    });
+
+    test('sanitizeUserRole preserves legitimate roles', () => {
+      assert.equal(sanitizeUserRole('admin@foundarly.com', 'super_admin'), 'super_admin');
+      assert.equal(sanitizeUserRole('consultant@example.com', 'consultant'), 'consultant');
+      assert.equal(sanitizeUserRole('client@example.com', 'client'), 'client');
     });
   });
 });

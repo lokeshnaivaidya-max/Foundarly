@@ -107,6 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // The profile is resolved asynchronously in the mount effect below.
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Active references to prevent stale asynchronous operations from clobbering state
   const activeUserRef = useRef<User | null>(initialSession?.user || null);
@@ -118,6 +119,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // chance to deliver INITIAL_SESSION. This prevents a logged-in user from being
   // briefly routed to /login during a page refresh.
   const initialAuthProcessedRef = useRef(false);
+  // Tracks whether the profile has been authoritatively resolved, so TOKEN_REFRESHED
+  // events don't unnecessarily reset loading and re-fetch the same role.
+  const profileResolvedRef = useRef<{ userId: string; role: string } | null>(null);
 
   const applyAuth = (newSession: Session | null, newUser: User | null) => {
     activeSessionRef.current = newSession;
@@ -144,9 +148,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Client profile while the Consultant role is still being resolved.
     const resolveProfile = async (userId: string, currentUser: User | null) => {
       try {
-        // fetchProfile writes the resolved profile into React state + cache internally.
+        // Skip re-resolution if profile already resolved for this user/role
+        const existing = profileResolvedRef.current;
+        if (existing && existing.userId === userId) {
+          // Role already resolved; no need to re-fetch on TOKEN_REFRESHED
+          return;
+        }
         secureLog.info('[AuthContext] resolveProfile: starting authoritative role resolution');
         const resolved = await fetchProfile(userId, currentUser);
+        profileResolvedRef.current = { userId, role: resolved?.role ?? 'null' };
         secureLog.info(
           '[AuthContext] resolveProfile: role resolution complete',
           { role: resolved?.role ?? 'null', isConsultant: resolved?.is_consultant ?? false }
@@ -173,6 +183,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         applyAuth(null, null);
         setProfile(null);
         setLoading(false);
+        setAuthError(null);
+        profileResolvedRef.current = null;
         return;
       }
 
@@ -180,6 +192,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (currentSession?.user) {
           applyAuth(currentSession, currentSession.user);
           setLoading(true);
+          setAuthError(null);
           await resolveProfile(currentSession.user.id, currentSession.user);
         }
         initialAuthProcessedRef.current = true;
@@ -193,6 +206,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (currentSession?.user) {
           applyAuth(currentSession, currentSession.user);
           setLoading(true);
+          setAuthError(null);
           await resolveProfile(currentSession.user.id, currentSession.user);
         } else {
           // Non-destructive fallback: Only clear if no stored session or active user exists
@@ -200,6 +214,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (stored?.user) {
             applyAuth(stored, stored.user);
             setLoading(true);
+            setAuthError(null);
             await resolveProfile(stored.user.id, stored.user);
           } else if (!activeUserRef.current) {
             applyAuth(null, null);
@@ -218,10 +233,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!isMountedRef.current) return;
       if (error) {
         console.warn('[AuthContext] getSession notice:', error.message);
+        setAuthError(error.message);
       }
       if (data?.session?.user) {
         applyAuth(data.session, data.session.user);
         setLoading(true);
+        setAuthError(null);
         await resolveProfile(data.session.user.id, data.session.user);
       } else {
         // Non-destructive: check storage and active ref before clearing.
@@ -235,6 +252,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (stored?.user && !activeUserRef.current) {
             applyAuth(stored, stored.user);
             setLoading(true);
+            setAuthError(null);
             await resolveProfile(stored.user.id, stored.user);
           }
         } else if (!stored && !activeUserRef.current) {
@@ -248,20 +266,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }).catch((err) => {
       console.warn('[AuthContext] getSession error:', err);
+      setAuthError(err?.message || 'Session check failed');
       initialAuthProcessedRef.current = true;
       if (inFlightFetchRef.current.size === 0) {
         setLoading(false);
       }
     });
 
-    // Safety timeout: loading will never block the UI past 1200ms, but only when no
-    // authoritative profile fetch is in flight so we never render with a stale /
-    // unresolved role.
+    // Safety timeout: loading will never block the UI past 2000ms, even if an
+    // authoritative profile fetch is still in flight. The profile will continue
+    // resolving in the background and update state when complete.
     const safetyTimer = setTimeout(() => {
-      if (isMountedRef.current && inFlightFetchRef.current.size === 0) {
+      if (isMountedRef.current) {
         setLoading(false);
       }
-    }, 1200);
+    }, 2000);
 
     return () => {
       isMountedRef.current = false;
@@ -281,6 +300,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const userEmail = (targetUser?.email || '').toLowerCase().trim();
         const isAllowlistedAdmin = isAllowedAdminEmail(userEmail);
 
+        // 1. Allowlisted Super Admin check — return immediately without waiting
+        // for the DB query. Admins never need consultant role resolution.
+        if (isAllowlistedAdmin) {
+          const superProfile: Profile = {
+            id: userId,
+            role: 'super_admin',
+            full_name: targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Super Admin',
+            is_consultant: false,
+          };
+          setCachedProfile(userId, superProfile);
+          setProfile(superProfile);
+          profileResolvedRef.current = { userId, role: 'super_admin' };
+          secureLog.info('[AuthContext] fetchProfile: resolved role=super_admin (allowlisted)');
+          return superProfile;
+        }
+
         // Fetch DB profile with a 6-second timeout promise race so it never hangs
         const dbQueryPromise = supabase
           .from('profiles')
@@ -295,29 +330,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const { data } = await Promise.race([dbQueryPromise, timeoutPromise]);
         const profileData = (data as Profile) || null;
 
-        // 1. Allowlisted Super Admin check
-        if (isAllowlistedAdmin) {
-          const superProfile: Profile = {
-            id: userId,
-            role: 'super_admin',
-            full_name: profileData?.full_name || targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Super Admin',
-            is_consultant: false,
-          };
-
-          if (!data || data.role !== 'super_admin') {
-            supabase.from('profiles').upsert({
-              id: userId,
-              role: 'super_admin',
-              full_name: superProfile.full_name,
-            }).then();
-          }
-
-          setCachedProfile(userId, superProfile);
-          setProfile(superProfile);
-          secureLog.info('[AuthContext] fetchProfile: resolved role=super_admin');
-          return superProfile;
-        }
-
         // 2. Existing database super_admin
         if (profileData && profileData.role === 'super_admin') {
           const superProfile: Profile = {
@@ -328,6 +340,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
           setCachedProfile(userId, superProfile);
           setProfile(superProfile);
+          profileResolvedRef.current = { userId, role: 'super_admin' };
           secureLog.info('[AuthContext] fetchProfile: resolved role=super_admin');
           return superProfile;
         }
@@ -342,6 +355,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
           setCachedProfile(userId, adminProfile);
           setProfile(adminProfile);
+          profileResolvedRef.current = { userId, role: 'admin' };
           secureLog.info('[AuthContext] fetchProfile: resolved role=admin');
           return adminProfile;
         }
@@ -363,6 +377,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           setCachedProfile(userId, resolvedDevProfile);
           setProfile(resolvedDevProfile);
+          profileResolvedRef.current = { userId, role: 'developer_admin' };
           secureLog.info('[AuthContext] fetchProfile: resolved role=developer_admin');
           return resolvedDevProfile;
         }
@@ -491,6 +506,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           setCachedProfile(userId, consultantProfile);
           setProfile(consultantProfile);
+          profileResolvedRef.current = { userId, role: 'consultant' };
           secureLog.info('[AuthContext] fetchProfile: resolved role=consultant');
           return consultantProfile;
         }
@@ -523,6 +539,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setCachedProfile(userId, clientProfile);
         setProfile(clientProfile);
+        profileResolvedRef.current = { userId, role: 'client' };
         secureLog.info('[AuthContext] fetchProfile: resolved role=client');
         return clientProfile;
       } catch (error) {

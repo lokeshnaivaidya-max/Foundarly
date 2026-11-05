@@ -733,29 +733,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // 5. Consultant check:
         // A user is a consultant if:
-        // - They have an active consultant record matching their user_id or verified email
+        // - They have a linked consultant record matching their user_id or verified email (active or draft)
         // - OR they have an approved application in consultant_applications
+        // Publication state (is_active) controls public directory listing on the Experts page,
+        // NOT private dashboard access or account authorization.
         // If consultant record was deleted and no approved application exists, they are strictly client.
         const isMatchedConsultant = Boolean(
           consultantOut?.matched &&
           (consultantOut.matched.user_id === userId ||
-            (userEmail && emailVerified && consultantOut.matched.email?.toLowerCase().trim() === userEmail.toLowerCase().trim())) &&
-          (consultantOut.matched as any).is_active === true
+            (userEmail && emailVerified && consultantOut.matched.email?.toLowerCase().trim() === userEmail.toLowerCase().trim()))
         );
 
-        let hasActiveConsultantRecord = Boolean(
+        let hasLinkedConsultantRecord = Boolean(
           isMatchedConsultant || (approvedApp && emailVerified)
         );
 
         let isConsultantUser = Boolean(
-          (profileData?.role === 'consultant' && hasActiveConsultantRecord) ||
-          (hasActiveConsultantRecord && (consultantOut?.matched?.user_id === userId || emailVerified))
+          (profileData?.role === 'consultant' && hasLinkedConsultantRecord) ||
+          (hasLinkedConsultantRecord && (consultantOut?.matched?.user_id === userId || emailVerified))
         );
 
         if (consultantOut?.matched && consultantOut.matched.user_id !== userId && userEmail && emailVerified) {
+          // Self-heal link without mutating public publication state (is_active)
           supabase
             .from('consultants')
-            .update({ user_id: userId, is_active: true })
+            .update({ user_id: userId })
             .eq('id', consultantOut.matched.id)
             .then();
         }
@@ -780,9 +782,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 clearTimeout(timeoutId);
                 if (meRes?.ok) {
                   const meData = await meRes.json().catch(() => null);
-                  if (meData?.success && meData?.isConsultant && meData?.consultant?.is_active === true) {
+                  if (meData?.success && meData?.isConsultant && meData?.consultant) {
                     isConsultantUser = true;
-                    hasActiveConsultantRecord = true;
+                    hasLinkedConsultantRecord = true;
                     consultantOut = { matched: meData.consultant, definitivelyEmpty: false };
                   }
                 }
@@ -795,8 +797,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const consultantName = consultantOut?.matched?.name || approvedApp?.name || profileData?.full_name;
 
-        // Demote unlinked/orphan consultant profiles in memory/session so they are strictly treated as client
-        if (profileData?.role === 'consultant' && !hasActiveConsultantRecord) {
+        // Demote unlinked/orphan consultant profiles in memory/session so they are strictly treated as client.
+        // ONLY demote if the consultant lookup was definitively empty (record deleted) and no approved application exists.
+        if (profileData?.role === 'consultant' && !hasLinkedConsultantRecord && consultantOut?.definitivelyEmpty && !approvedApp) {
           secureLog.warn('[AuthContext] Unlinked consultant profile role detected; treating as client in session', {
             userId,
             fullName: profileData.full_name,
@@ -807,7 +810,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         secureLog.info('[AuthContext] fetchProfile: consultant check status', {
           userId,
           profileRole: profileData?.role ?? 'null',
-          hasActiveConsultantRecord,
+          hasLinkedConsultantRecord,
           isConsultantUser,
         });
 

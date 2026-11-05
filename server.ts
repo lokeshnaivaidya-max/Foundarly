@@ -2295,8 +2295,7 @@ async function startServer() {
 
       let query = activeDbClient
         .from("consultants")
-        .select("*")
-        .eq("is_active", true);
+        .select("*");
 
       if (userEmail) {
         query = query.or(`user_id.eq.${user.id},email.ilike.${userEmail}`);
@@ -2307,7 +2306,7 @@ async function startServer() {
       const { data: consultants, error } = await query.limit(1);
       let consultant = consultants?.[0];
 
-      // Auto-activate consultant record from approved application if not found in consultants table
+      // Create draft consultant record from approved application if not found in consultants table
       if (!consultant && userEmail) {
         const { data: apps } = await activeDbClient
           .from("consultant_applications")
@@ -2319,22 +2318,19 @@ async function startServer() {
 
         const approvedApp = apps?.[0];
         if (approvedApp) {
-          console.log(`[Consultant Me] Auto-activating consultant record from approved application for ${userEmail}`);
-          const genderValue = approvedApp.gender?.toLowerCase() === "female" ? "female" : "male";
+          console.log(`[Consultant Me] Creating draft consultant record from approved application for ${userEmail}`);
           const { data: newConsultant } = await activeDbClient
             .from("consultants")
             .insert({
               name: approvedApp.name,
-              title: approvedApp.current_job || "Consultant",
-              bio: approvedApp.experience || "",
-              expertise: ["Consulting", approvedApp.qualification || "Advisory"].filter(Boolean),
-              pricing_30: 1000,
-              pricing_60: 1800,
-              gender: genderValue,
-              is_active: true,
               email: userEmail,
-              preferred_time: approvedApp.preferred_session_timing || "Morning (8 AM – 12 PM)",
               user_id: user.id,
+              is_active: false,
+              title: "",
+              bio: "",
+              expertise: [],
+              pricing_30: 0,
+              pricing_60: 0,
             })
             .select()
             .single();
@@ -2370,11 +2366,14 @@ async function startServer() {
           });
       }
 
-      const isActiveConsultant = Boolean(consultant.user_id === user.id && consultant.is_active === true);
+      const isLinkedConsultant = Boolean(
+        consultant.user_id === user.id ||
+        (userEmail && consultant.email && consultant.email.toLowerCase().trim() === userEmail)
+      );
 
       return res.json({
         success: true,
-        isConsultant: isActiveConsultant,
+        isConsultant: isLinkedConsultant,
         isDraft: Boolean(consultant.is_active !== true),
         consultant,
       });

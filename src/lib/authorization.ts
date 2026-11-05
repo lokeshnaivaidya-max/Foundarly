@@ -167,7 +167,7 @@ export function sanitizeUserRole(
     return 'developer_admin';
   }
 
-  if (currentRole === 'consultant' || (typeof profileOrRole === 'object' && (profileOrRole as any)?.is_consultant)) {
+  if (currentRole === 'consultant') {
     return 'consultant';
   }
 

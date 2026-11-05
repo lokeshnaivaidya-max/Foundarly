@@ -405,8 +405,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Step 2: Authoritative session check via getSession without destructive racing
-    supabase.auth.getSession().then(async ({ data, error }) => {
+    // Step 2: Authoritative session check via getSession raced with timeout
+    withDbTimeout(
+      supabase.auth.getSession(),
+      'auth session lookup',
+      3000
+    ).then(async ({ data, error }) => {
       if (!isMountedRef.current) return;
       if (error) {
         console.warn('[AuthContext] getSession notice:', error.message);
@@ -723,28 +727,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // 5. Consultant check:
-        // A user is a consultant if:
+        // A user is a consultant if and ONLY if:
         // - profile in DB has role === 'consultant'
-        // - AND user has a consultant record linked to their authenticated user ID
-        // - AND the consultant is active/explicitly approved per the application workflow
-        // Email matching alone must NEVER grant consultant access.
-        let isConsultantUser = Boolean(profileData?.role === 'consultant');
-        let consultantName = profileData?.full_name;
-        // Live consultants lookup outcome — a definitive 200-empty response
-        // positively disconfirms a cached consultant role (fail-closed).
-        let consultantLookupDefinitivelyEmpty = false;
+        // - AND exact consultants.user_id === userId
+        // - AND consultant is active (is_active === true)
+        // Never grant consultant access based on email, localStorage, user metadata, or profile role alone.
+        const hasActiveConsultantRecord = Boolean(
+          consultantOut?.matched &&
+          consultantOut.matched.user_id === userId &&
+          (consultantOut.matched as any).is_active !== false
+        );
 
-        secureLog.info('[AuthContext] fetchProfile: consultant check initial state', {
+        const isConsultantUser = Boolean(
+          profileData?.role === 'consultant' && hasActiveConsultantRecord
+        );
+        const consultantName = consultantOut?.matched?.name || profileData?.full_name;
+
+        // Auto-demote accounts with orphaned or unlinked consultant profile role to client
+        if (profileData?.role === 'consultant' && !hasActiveConsultantRecord) {
+          secureLog.warn('[AuthContext] Unlinked consultant profile role detected; demoting to client', {
+            userId,
+            fullName: profileData.full_name,
+          });
+          // Asynchronously self-heal the profiles table
+          void withDbTimeout(
+            supabase.from('profiles').update({ role: 'client' }).eq('id', userId),
+            'demote unlinked consultant profile to client',
+            3000
+          ).catch(() => null);
+        }
+
+        secureLog.info('[AuthContext] fetchProfile: consultant check status', {
           userId,
           profileRole: profileData?.role ?? 'null',
-          isConsultantUser: isConsultantUser,
+          hasActiveConsultantRecord,
+          isConsultantUser,
         });
 
-        // IMMEDIATE consultant resolution: if profiles DB already confirms consultant role,
-        // set profile immediately without waiting for /api/consultant/me or other lookups.
-        // This prevents an approved Consultant from being treated as a Client due to
-        // delayed or failed API calls.
-        if (isConsultantUser) {
+        if (isConsultantUser && consultantOut?.matched) {
           const consultantProfile: Profile = {
             id: userId,
             role: 'consultant',
@@ -752,96 +772,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           };
 
           if (!profileData || profileData.role !== 'consultant') {
-            supabase.from('profiles').upsert({
-              id: userId,
-              full_name: consultantProfile.full_name,
-              role: 'consultant',
-            }).then();
-          }
-
-          setCachedProfile(userId, consultantProfile);
-          setProfile(consultantProfile);
-          profileResolvedRef.current = { userId, role: 'consultant', resolvedAt: Date.now() };
-          secureLog.info('[AuthContext] fetchProfile: resolved role=consultant (from profiles DB)', { correlationId, userId });
-          return consultantProfile;
-        }
-
-        // 5b. Both consultant rescues (consultants table + approved application)
-        // already ran CONCURRENTLY with the profiles query — use their results.
-        // The consultants rescue found the row (matched by verified email or
-        // user_id). If it found nothing, its 200-empty response disconfirms a
-        // cached consultant role (fail-closed).
-        if (!isConsultantUser && consultantOut) {
-          // Consultant record matched by user_id. Only elevate if the
-          // profiles DB already confirmed consultant role earlier in this
-          // resolution. A consultant record alone cannot promote a client:
-          // consultant status requires profiles.role = 'consultant' AND
-          // explicit approval per the existing workflow.
-          if (profileData?.role === 'consultant') {
-            isConsultantUser = true;
-            consultantName = consultantName || consultantOut.name;
-            consultantLookupDefinitivelyEmpty = false;
-          }
-          // No longer update user_id on the consultant record — that was the
-          // source of cross-user contamination. The link was established at
-          // admin approval time; preserve the existing relationship.
-          secureLog.info('[AuthContext] fetchProfile: consultant rescue check', {
-            correlationId, userId, consultantId: consultantOut.id,
-            profileRole: profileData?.role ?? 'null',
-            promoted: profileData?.role === 'consultant',
-          });
-        } else if (!isConsultantUser) {
-          consultantLookupDefinitivelyEmpty = true;
-        }
-
-        // The approved-application rescue also ran concurrently. It only awaits
-        // here if the consultant account wasn't already resolved — healthy DBs
-        // answer in <300ms; a degraded applications table costs at most 4s.
-        if (!isConsultantUser) {
-          const appOut = await applicationRescuePromise;
-          if (appOut && appOut.status === 'approved') {
-            isConsultantUser = true;
-            consultantName = consultantName || appOut.name;
-            // Best-effort self-heal: link the consultant record at sign-in.
-            if (!profilesLookupFailed) {
-              try {
-                const sessionResult = await withDbTimeout(
-                  supabase.auth.getSession(),
-                  'auth session lookup',
-                  3000
-                ).catch(() => null);
-                const session = sessionResult?.data?.session ?? null;
-                if (session?.access_token) {
-                  const controller = new AbortController();
-                  const timeoutId = setTimeout(() => controller.abort(), 3500);
-                  await fetch('/api/consultant/me', {
-                    headers: { Authorization: `Bearer ${session.access_token}` },
-                    signal: controller.signal,
-                  }).catch(() => null);
-                  clearTimeout(timeoutId);
-                }
-              } catch (healErr) {
-                console.warn('[AuthContext] Consultant self-heal notice:', healErr);
-              }
-            }
-          }
-        }
-
-        if (isConsultantUser) {
-          const consultantProfile: Profile = {
-            id: userId,
-            role: 'consultant',
-            full_name: consultantName || targetUser?.user_metadata?.full_name || 'Consultant',
-          };
-
-          if (!profileData || profileData.role !== 'consultant') {
-            // BEST-EFFORT PROFILE SYNC: the consultant role was already
-            // established above (profiles DB read OR consultants-table match OR
-            // verified application). A hung or RLS-blocked upsert must NEVER
-            // discard this successful resolution — withDbTimeout REJECTS on
-            // timeout, so a bare await would throw into the outer catch and
-            // convert a known consultant into an unresolved profile (the
-            // "briefly visible then back to verification" production loop).
             try {
               const { error: upsertErr } = await withDbTimeout(
                 supabase.from('profiles').upsert({
@@ -867,6 +797,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   error: upsertFailure instanceof Error ? upsertFailure.message : String(upsertFailure),
                 }
               );
+            }
+          }
+
+          if (!profilesLookupFailed) {
+            try {
+              const sessionResult = await withDbTimeout(
+                supabase.auth.getSession(),
+                'auth session lookup',
+                3000
+              ).catch(() => null);
+              const session = sessionResult?.data?.session ?? null;
+              if (session?.access_token) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3500);
+                await fetch('/api/consultant/me', {
+                  headers: { Authorization: `Bearer ${session.access_token}` },
+                  signal: controller.signal,
+                }).catch(() => null);
+                clearTimeout(timeoutId);
+              }
+            } catch (healErr) {
+              console.warn('[AuthContext] Consultant self-heal notice:', healErr);
             }
           }
 

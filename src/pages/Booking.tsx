@@ -68,7 +68,7 @@ export default function BookingPage() {
   const [isValidatingReferral, setIsValidatingReferral] = useState(false);
   const [discountAmount, setDiscountAmount] = useState(0);
 
-  const { user, profile, isAdmin, loading: authLoading } = useAuth();
+  const { user, profile, isAdmin, isConsultant, loading: authLoading } = useAuth();
   const { formatPrice } = useCurrency();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -88,11 +88,11 @@ export default function BookingPage() {
 
   useEffect(() => {
     if (!authLoading && user) {
-      if (isUserAdmin(user, profile)) {
+      if (isUserAdmin(user, profile) || isAdmin) {
         navigate("/admin", { replace: true });
         return;
       }
-      if (profile?.role === "consultant" || profile?.is_consultant) {
+      if (isConsultant) {
         navigate("/consultant/dashboard", { replace: true });
         return;
       }
@@ -100,7 +100,7 @@ export default function BookingPage() {
       toast.error("Please login to book a session");
       navigate("/login");
     }
-  }, [user, profile, authLoading, navigate]);
+  }, [user, profile, isAdmin, isConsultant, authLoading, navigate]);
 
   const { data: consultants, isLoading, error: consultantsError, refetch: refetchConsultants } = useQuery({
     queryKey: ["consultants", "active"],
@@ -459,7 +459,7 @@ export default function BookingPage() {
                   <span className="text-foreground font-medium">{formData.email}</span>
                 </p>
                 <div className="flex gap-3 justify-center">
-                  <Button onClick={() => navigate(isAdmin ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings')} className="glow-gold-sm">View My Bookings</Button>
+                  <Button onClick={() => navigate(isAdmin ? '/admin' : isConsultant ? '/consultant/dashboard' : '/my-bookings')} className="glow-gold-sm">View My Bookings</Button>
                   <Button variant="outline" onClick={() => { setSubmitted(false); setFormData({ name: "", email: "", consultant_id: "", date: "", message: "", session_duration: 60 }); }}>
                     Book Another
                   </Button>
@@ -506,9 +506,12 @@ export default function BookingPage() {
                       </Button>
                     </div>
                   ) : isLoading ? (
-                    <div className="bg-secondary border border-border rounded-lg p-3 text-sm text-muted-foreground">Loading consultants...</div>
+                    <div className="bg-secondary border border-border rounded-lg p-3 text-sm text-muted-foreground flex items-center gap-2">
+                      <div className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin shrink-0" />
+                      <span>Loading verified consultants...</span>
+                    </div>
                   ) : consultants && consultants.length === 0 ? (
-                    <div className="bg-secondary border border-border rounded-lg p-3 text-sm text-muted-foreground">No consultants available</div>
+                    <div className="bg-secondary border border-border rounded-lg p-3 text-sm text-muted-foreground">No active consultants currently available</div>
                   ) : (
                     <Select value={formData.consultant_id} onValueChange={(v) => handleChange("consultant_id", v)}>
                       <SelectTrigger className="bg-secondary border-border focus:border-primary/50">

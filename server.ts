@@ -2414,7 +2414,65 @@ async function startServer() {
     }
 
     try {
-      const { applicationId, adminNotes, pricing30, pricing60, application: passedApp } = req.body || {};
+      let body = req.body;
+      if (typeof body === "string") {
+        try {
+          body = JSON.parse(body);
+        } catch {
+          body = {};
+        }
+      }
+
+      const action = body?.action;
+      if (action) {
+        if (action === "toggle-active") {
+          const consultantId = body?.consultantId;
+          const active = body?.active;
+
+          if (typeof active !== "boolean") {
+            return res.status(400).json({ success: false, error: "Request body must contain explicit boolean `active` value." });
+          }
+
+          if (!consultantId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(consultantId)) {
+            return res.status(400).json({ success: false, error: "Valid consultantId (UUID) is required." });
+          }
+
+          const { data: consultant, error: fetchError } = await supabaseAdminClient
+            .from("consultants")
+            .select("id, is_active")
+            .eq("id", consultantId)
+            .single();
+
+          if (fetchError || !consultant) {
+            return res.status(404).json({ success: false, error: "Consultant record not found." });
+          }
+
+          const { error: updateError } = await supabaseAdminClient
+            .from("consultants")
+            .update({ is_active: active })
+            .eq("id", consultantId);
+
+          if (updateError) {
+            return res.status(500).json({ success: false, error: "Database error: " + updateError.message });
+          }
+
+          const { data: verified } = await supabaseAdminClient
+            .from("consultants")
+            .select("is_active")
+            .eq("id", consultantId)
+            .single();
+
+          if (!verified || verified.is_active !== active) {
+            return res.status(500).json({ success: false, error: "Verification failed: persisted value mismatch." });
+          }
+
+          return res.json({ success: true, is_active: active, consultantId, previousState: consultant.is_active });
+        }
+
+        return res.status(400).json({ success: false, error: `Unsupported action: ${action}.` });
+      }
+
+      const { applicationId, adminNotes, pricing30, pricing60, application: passedApp } = body || {};
       if (!applicationId) {
         return res.status(400).json({ success: false, error: "applicationId is required." });
       }

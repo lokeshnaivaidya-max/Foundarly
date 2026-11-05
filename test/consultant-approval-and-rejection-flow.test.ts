@@ -1613,4 +1613,152 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       assert.equal(getDegradedCachedRole(null, false), null);
     });
   });
+
+  describe('18. Action Parameter Handling and Approval Route Parity', () => {
+    const readApprovalSource = () =>
+      fs.readFileSync(path.join(process.cwd(), 'api', 'admin', 'approve-consultant-application.ts'), 'utf8');
+    const readServerSource = () =>
+      fs.readFileSync(path.join(process.cwd(), 'server.ts'), 'utf8');
+
+    test('api/admin/approve-consultant-application.ts does NOT require action unconditionally', () => {
+      const source = readApprovalSource();
+      assert.ok(
+        !source.includes('if (!action)'),
+        "api/admin/approve-consultant-application.ts must not contain 'if (!action)'"
+      );
+      assert.ok(
+        !source.includes("error: 'Action is required.'"),
+        "api/admin/approve-consultant-application.ts must not require 'Action is required.'"
+      );
+    });
+
+    test('server.ts does NOT require action unconditionally', () => {
+      const source = readServerSource();
+      assert.ok(
+        !source.includes("error: 'Action is required.'") &&
+        !source.includes('error: "Action is required."'),
+        "server.ts must not require 'Action is required.'"
+      );
+    });
+
+    test('Approval flow proceeds directly when action is absent', () => {
+      const approvalSrc = readApprovalSource();
+      const serverSrc = readServerSource();
+      assert.ok(
+        approvalSrc.includes("if (!applicationId) {\n      return res.status(400).json({ success: false, error: 'applicationId is required.' });"),
+        'Handler must validate applicationId when action is absent'
+      );
+      assert.ok(
+        serverSrc.includes('if (!applicationId) {\n        return res.status(400).json({ success: false, error: "applicationId is required." });'),
+        'server.ts must validate applicationId when action is absent'
+      );
+    });
+
+    test('Pure router simulation: action omitted routes to approve-application', () => {
+      function routeAction(body: any) {
+        const action = body?.action;
+        if (action) {
+          if (action === 'toggle-active') {
+            const consultantId = body?.consultantId;
+            const active = body?.active;
+            if (typeof active !== 'boolean') {
+              return { status: 400, error: 'Request body must contain explicit boolean `active` value.' };
+            }
+            if (!consultantId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(consultantId)) {
+              return { status: 400, error: 'Valid consultantId (UUID) is required.' };
+            }
+            return { status: 200, route: 'toggle-active', consultantId, active };
+          }
+          return { status: 400, error: `Unsupported action: ${action}.` };
+        }
+        const { applicationId } = body || {};
+        if (!applicationId) {
+          return { status: 400, error: 'applicationId is required.' };
+        }
+        return { status: 200, route: 'approve-application', applicationId };
+      }
+
+      // No action
+      const approveRes = routeAction({ applicationId: mockApplication.id, adminNotes: 'Approved' });
+      assert.equal(approveRes.status, 200);
+      assert.equal(approveRes.route, 'approve-application');
+
+      // Valid toggle-active
+      const toggleRes = routeAction({
+        action: 'toggle-active',
+        consultantId: '3dc127b8-7334-4960-a3b5-8627923d40f1',
+        active: true,
+      });
+      assert.equal(toggleRes.status, 200);
+      assert.equal(toggleRes.route, 'toggle-active');
+      assert.equal(toggleRes.active, true);
+
+      // toggle-active invalid active
+      const invalidActive = routeAction({
+        action: 'toggle-active',
+        consultantId: '3dc127b8-7334-4960-a3b5-8627923d40f1',
+        active: 'true',
+      });
+      assert.equal(invalidActive.status, 400);
+
+      // toggle-active invalid UUID
+      const invalidId = routeAction({
+        action: 'toggle-active',
+        consultantId: 'not-a-uuid',
+        active: false,
+      });
+      assert.equal(invalidId.status, 400);
+
+      // Unsupported action
+      const unsupported = routeAction({ action: 'delete-consultant' });
+      assert.equal(unsupported.status, 400);
+      assert.equal(unsupported.error, 'Unsupported action: delete-consultant.');
+    });
+
+    test('Both endpoints reject unsupported explicit actions with HTTP 400', () => {
+      const approvalSrc = readApprovalSource();
+      const serverSrc = readServerSource();
+      assert.ok(
+        approvalSrc.includes("return res.status(400).json({ success: false, error: `Unsupported action: ${action}.` });"),
+        'api/admin/approve-consultant-application.ts must reject unsupported actions'
+      );
+      assert.ok(
+        serverSrc.includes('return res.status(400).json({ success: false, error: `Unsupported action: ${action}.` });'),
+        'server.ts must reject unsupported actions'
+      );
+    });
+
+    test('Approval creates an inactive draft without publishing free text', () => {
+      const approvalSrc = readApprovalSource();
+      const serverSrc = readServerSource();
+
+      for (const [src, label] of [[approvalSrc, 'api'], [serverSrc, 'server']]) {
+        const draftIdx = src.indexOf('Inserting NON-PUBLIC draft consultant record');
+        assert.ok(draftIdx !== -1, `${label} must contain draft insertion path`);
+        const block = src.slice(draftIdx, draftIdx + 700);
+
+        assert.ok(block.includes('is_active: false'), `${label} draft must be inactive`);
+        assert.ok(block.includes("title: ''"), `${label} title must be blank`);
+        assert.ok(block.includes("bio: ''"), `${label} bio must be blank`);
+        assert.ok(block.includes('expertise: []'), `${label} expertise must be empty array`);
+        assert.ok(!block.includes('current_job'), `${label} must not copy current_job`);
+        assert.ok(!block.includes('experience'), `${label} must not copy experience`);
+      }
+    });
+
+    test('Re-approval preserves existing publication state and does not activate', () => {
+      const approvalSrc = readApprovalSource();
+      const serverSrc = readServerSource();
+
+      for (const [src, label] of [[approvalSrc, 'api'], [serverSrc, 'server']]) {
+        const updateIdx = src.indexOf('Updating existing consultant record');
+        assert.ok(updateIdx !== -1, `${label} must have re-approval identity update path`);
+        const updateBlock = src.slice(updateIdx, updateIdx + 600);
+
+        assert.ok(!updateBlock.includes('is_active'), `${label} re-approval must not touch is_active`);
+        assert.ok(!updateBlock.includes('title'), `${label} re-approval must not touch title`);
+        assert.ok(!updateBlock.includes('bio'), `${label} re-approval must not touch bio`);
+      }
+    });
+  });
 });

@@ -80,71 +80,60 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }
 
     const action = body?.action;
-    const consultantId = body?.consultantId;
-    const active = body?.active;
 
-    // Validate action, consultantId and active value
-    if (!action) {
-      return res.status(400).json({ success: false, error: 'Action is required.' });
+    if (action) {
+      if (action === 'toggle-active') {
+        const consultantId = body?.consultantId;
+        const active = body?.active;
+
+        if (typeof active !== 'boolean') {
+          return res.status(400).json({ success: false, error: 'Request body must contain explicit boolean `active` value.' });
+        }
+
+        if (!consultantId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(consultantId)) {
+          return res.status(400).json({ success: false, error: 'Valid consultantId (UUID) is required.' });
+        }
+
+        // Fetch consultant record to verify existence and current state
+        const { data: consultant, error: fetchError } = await supabaseAdminClient
+          .from('consultants')
+          .select('id, is_active')
+          .eq('id', consultantId)
+          .single();
+
+        if (fetchError || !consultant) {
+          return res.status(404).json({ success: false, error: 'Consultant record not found.' });
+        }
+
+        // Update ONLY is_active field - explicitly set from request, not blindly toggle
+        const { error: updateError } = await supabaseAdminClient
+          .from('consultants')
+          .update({ is_active: active })
+          .eq('id', consultantId);
+
+        if (updateError) {
+          return res.status(500).json({ success: false, error: 'Database error: ' + updateError.message });
+        }
+
+        // Verify the persisted value before reporting success
+        const { data: verified } = await supabaseAdminClient
+          .from('consultants')
+          .select('is_active')
+          .eq('id', consultantId)
+          .single();
+
+        if (!verified || verified.is_active !== active) {
+          return res.status(500).json({ success: false, error: 'Verification failed: persisted value mismatch.' });
+        }
+
+        return res.json({ success: true, is_active: active, consultantId, previousState: consultant.is_active });
+      }
+
+      return res.status(400).json({ success: false, error: `Unsupported action: ${action}.` });
     }
 
-    if (action === 'toggle-active') {
-      if (typeof active !== 'boolean') {
-        return res.status(400).json({ success: false, error: 'Request body must contain explicit boolean `active` value.' });
-      }
-
-      if (!consultantId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(consultantId)) {
-        return res.status(400).json({ success: false, error: 'Valid consultantId (UUID) is required.' });
-      }
-
-      // Fetch consultant record to verify existence and current state
-      const { data: consultant, error: fetchError } = await supabaseAdminClient
-        .from('consultants')
-        .select('id, is_active')
-        .eq('id', consultantId)
-        .single();
-
-      if (fetchError || !consultant) {
-        return res.status(404).json({ success: false, error: 'Consultant record not found.' });
-      }
-
-      // Update ONLY is_active field - explicitly set from request, not blindly toggle
-      const { error: updateError } = await supabaseAdminClient
-        .from('consultants')
-        .update({ is_active: active })
-        .eq('id', consultantId);
-
-      if (updateError) {
-        return res.status(500).json({ success: false, error: 'Database error: ' + updateError.message });
-      }
-
-      // Verify the persisted value before reporting success
-      const { data: verified } = await supabaseAdminClient
-        .from('consultants')
-        .select('is_active')
-        .eq('id', consultantId)
-        .single();
-
-      if (!verified || verified.is_active !== active) {
-        return res.status(500).json({ success: false, error: 'Verification failed: persisted value mismatch.' });
-      }
-
-      return res.json({ success: true, is_active: active, consultantId, previousState: consultant.is_active });
-    }
-
-    // Existing approval logic continues below...
-
-    // 2. Parse request body
-    body = req.body;
-    if (typeof body === 'string') {
-      try {
-        body = JSON.parse(body);
-      } catch {
-        body = {};
-      }
-    }
-
-    const { applicationId, adminNotes, application: passedApp } = body || {};
+    // 2. Parse request body for consultant application approval (when action is absent)
+    const { applicationId, adminNotes, pricing30, pricing60, application: passedApp } = body || {};
     if (!applicationId) {
       return res.status(400).json({ success: false, error: 'applicationId is required.' });
     }

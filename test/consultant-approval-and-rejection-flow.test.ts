@@ -1477,7 +1477,7 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
 
     test('Client→consultant rescue still precedes the degraded fallback', () => {
       const source = authSource();
-      const rescueIdx = source.indexOf('matchedConsultants?.[0]');
+      const rescueIdx = source.indexOf('consultantOut');
       const degradedIdx = source.indexOf('serving DEGRADED cached role');
       assert.ok(
         rescueIdx !== -1 && degradedIdx !== -1 && rescueIdx < degradedIdx,

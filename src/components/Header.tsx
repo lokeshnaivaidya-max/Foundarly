@@ -50,7 +50,7 @@ export default function Header() {
   const [logoUrl, setLogoUrl] = useState<string | null>("/foundarly-logo.png?v=20261104");
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, profile, isAdmin, isSuperAdmin, isDeveloperAdmin, isConsultant, isClient, signOut } = useAuth();
+  const { user, profile, isAdmin, isSuperAdmin, isDeveloperAdmin, isConsultant, isClient, signOut, loading: authLoading } = useAuth();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 15);
@@ -237,8 +237,18 @@ export default function Header() {
             </Link>
           )}
 
-          {/* Primary CTA - Role based */}
-          {isAdminRole ? (
+          {/* Primary CTA - Role based. While the role is still resolving,
+              render a neutral placeholder instead of a misleading
+              "Book a Session" link (a consultant must never see a client CTA). */}
+          {!user ? null : authLoading ? (
+            <span
+              className="h-8 xl:h-9 w-28 rounded-full bg-primary/15 animate-pulse inline-flex items-center justify-center text-[10px] font-semibold text-muted-foreground shrink-0"
+              aria-busy="true"
+              aria-live="polite"
+            >
+              Opening…
+            </span>
+          ) : isAdminRole ? (
             <Link to="/admin" className="shrink-0">
               <Button
                 size="sm"
@@ -278,7 +288,11 @@ export default function Header() {
 
         {/* Mobile Header Right Actions */}
         <div className="flex lg:hidden items-center gap-2">
-          {isAdminRole ? (
+          {!user ? null : authLoading ? (
+            <span className="h-8 w-16 rounded-full bg-primary/15 animate-pulse inline-flex items-center justify-center text-[10px] font-semibold text-muted-foreground" aria-busy="true" aria-label="Loading">
+              Opening…
+            </span>
+          ) : isAdminRole ? (
             <Link to="/admin">
               <Button size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs rounded-full px-3 py-1.5 font-semibold">
                 Admin

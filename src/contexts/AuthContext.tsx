@@ -523,7 +523,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const emailVerified = Boolean(targetUser?.email_confirmed_at || targetUser?.confirmed_at);
         const isAllowlistedAdmin = isAllowedAdminEmail(userEmail);
 
-        // 1. Allowlisted Super Admin check — return immediately without waiting
+        // 1a. Allowlisted Super Admin check — return immediately without waiting
         // for the DB query. Admins never need consultant role resolution.
         if (isAllowlistedAdmin) {
           const superProfile: Profile = {
@@ -535,11 +535,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setCachedProfile(userId, superProfile);
           setProfile(superProfile);
           profileResolvedRef.current = { userId, role: 'super_admin', resolvedAt: Date.now() };
-          secureLog.info('[AuthContext] fetchProfile: resolved role=super_admin (allowlisted)');
+          secureLog.info('[AuthContext] fetchProfile: resolved role=super_admin (allowlisted)', { correlationId, userId });
           return superProfile;
         }
 
-        // Fetch DB profile with a 6-second timeout promise race so it never hangs
+        // 1b. Developer Admin (email-authoritative, per the existing
+        // isDeveloperAdmin trust model): resolve immediately instead of waiting
+        // on the profiles lookup, which can hang for minutes under degraded RLS.
+        if (isDeveloperAdmin(targetUser ?? null, null)) {
+          const resolvedDevProfile: Profile = {
+            id: userId,
+            role: 'developer_admin',
+            full_name: targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Developer Admin',
+            is_consultant: false,
+          };
+          setCachedProfile(userId, resolvedDevProfile);
+          setProfile(resolvedDevProfile);
+          profileResolvedRef.current = { userId, role: 'developer_admin', resolvedAt: Date.now() };
+          secureLog.info('[AuthContext] fetchProfile: resolved role=developer_admin (email-authoritative)', { correlationId, userId });
+          // Best-effort sync of profiles row without discarding resolution
+          void (async () => {
+            try {
+              await withDbTimeout(
+                supabase.from('profiles').upsert({
+                  id: userId,
+                  role: 'developer_admin',
+                  full_name: resolvedDevProfile.full_name,
+                }),
+                'developer_admin profile upsert'
+              );
+            } catch {
+              // ignore — resolution preserved
+            }
+          })();
+          return resolvedDevProfile;
+        }
+
+        // Fetch DB profile AND consultant rescues CONCURRENTLY — the old
+        // sequential chain blocked every dashboard behind a (sometimes hanging)
+        // RLS-evaluated profiles query. Both rescue paths run against the same
+        // data the sequential checks used, just in parallel with each other.
         const dbQueryPromise = supabase
           .from('profiles')
           .select('*')
@@ -550,7 +585,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setTimeout(() => resolve({ data: null, error: new Error('Profile fetch timeout') }), 6000)
         );
 
-        const { data, error: profileFetchError } = await Promise.race([dbQueryPromise, timeoutPromise]);
+        // Consultants rescue — fast server-side (~0.4s). Returns a definitive
+        // outcome so a clean 200-empty response (revocation evidence) can be
+        // distinguished from a timeout or network error.
+        const consultantRescuePromise = (async () => {
+          try {
+            let q: any = supabase
+              .from('consultants')
+              .select('id, name, email, user_id, is_active');
+            if (userEmail && emailVerified) {
+              q = q.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
+            } else {
+              q = q.eq('user_id', userId);
+            }
+            const outcome = await Promise.race([
+              q.limit(1),
+              new Promise<null>((r) => setTimeout(() => r(null), 3000)),
+            ]);
+            if (!outcome) return { matched: null as null, definitivelyEmpty: false };
+            const outcomeWithData = outcome as { data?: Array<{ id: string; name: string | null; user_id: string | null }> };
+            const rows = outcomeWithData?.data;
+            if (Array.isArray(rows) && rows.length === 0) {
+              return { matched: null as null, definitivelyEmpty: true };
+            }
+            return { matched: rows?.[0] ?? null, definitivelyEmpty: false };
+          } catch {
+            return { matched: null as null, definitivelyEmpty: false };
+          }
+        })();
+
+        // Approved application rescue — needed only to elevate an account with
+        // an approved consultant application but no linked consultants row.
+        const applicationRescuePromise = (async () => {
+          if (!userEmail || !emailVerified) return null;
+          try {
+            const outcome = await Promise.race([
+              supabase
+                .from('consultant_applications')
+                .select('id, name, status, email')
+                .ilike('email', userEmail)
+                .eq('status', 'approved')
+                .order('created_at', { ascending: false })
+                .limit(1),
+              new Promise<{ data: null }>((r) => setTimeout(() => r({ data: null }), 4000)),
+            ]);
+            if (!outcome) return null;
+            const out = outcome as { data?: Array<{ id: string; name: string; email: string }> };
+            return out?.data?.[0] ?? null;
+          } catch {
+            return null;
+          }
+        })();
+
+        const [profilesOut, consultantOut] = await Promise.all([
+          Promise.race([dbQueryPromise, timeoutPromise]),
+          consultantRescuePromise,
+        ]);
+        const { data, error: profileFetchError } = profilesOut;
         const profileData = (data as Profile) || null;
         // A TIMED-OUT or errored profile lookup is a TRANSIENT failure, not
         // proof that the user has no profile. Treating it as "no profile"
@@ -678,130 +769,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return consultantProfile;
         }
 
-        // Try server-side authoritative check first (only if not yet confirmed as
-        // consultant). SKIPPED when the profiles read already hung: me.ts reads
-        // profiles server-side and would be a guaranteed 3.5s dead wait against
-        // the same degraded backend — the direct consultants/applications checks
-        // below cover the same ground faster.
-        if (!profilesLookupFailed) {
-          try {
-            // auth.getSession() waits on supabase-js client initialization and the
-            // global auth lock. A hung startup token refresh (network black-hole
-            // to Supabase) holds that lock indefinitely BEFORE dispatching any
-            // fetch — the production wedge. Race it so profile resolution ALWAYS
-            // settles and can degrade gracefully instead of wedging forever.
-            const sessionResult = await withDbTimeout(
-              supabase.auth.getSession(),
-              'auth session lookup',
-              3000
-            ).catch(() => null);
-            const session = sessionResult?.data?.session ?? null;
-            if (session?.access_token) {
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 3500);
-              const meRes = await fetch('/api/consultant/me', {
-                headers: { Authorization: `Bearer ${session.access_token}` },
-                signal: controller.signal,
-              });
-              clearTimeout(timeoutId);
-              if (meRes.ok) {
-                const meJson = await Promise.race([
-                  meRes.json().catch(() => null),
-                  new Promise((r) => setTimeout(() => r(null), 2500)),
-                ]);
-                if (meJson?.success && meJson?.isConsultant) {
-                  isConsultantUser = true;
-                  consultantName = consultantName || meJson.consultant?.name;
-                }
-              }
-            }
-          } catch (apiErr) {
-            console.warn('[AuthContext] /api/consultant/me notice:', apiErr);
-          }
-        }
-
-        secureLog.info('[AuthContext] fetchProfile: after /api/consultant/me', {
-          correlationId,
-          userId,
-          isConsultantUser: isConsultantUser,
-        });
-
-        // Direct query check if not yet confirmed
-        if (!isConsultantUser) {
-          try {
-            let consultantQuery: any = supabase
+        // 5b. Both consultant rescues (consultants table + approved application)
+        // already ran CONCURRENTLY with the profiles query — use their results.
+        // The consultants rescue found the row (matched by verified email or
+        // user_id). If it found nothing, its 200-empty response disconfirms a
+        // cached consultant role (fail-closed).
+        if (!isConsultantUser && consultantOut) {
+          isConsultantUser = true;
+          consultantName = consultantName || consultantOut.name;
+          consultantLookupDefinitivelyEmpty = false;
+          if (consultantOut.user_id !== userId) {
+            supabase
               .from('consultants')
-              .select('id, name, email, user_id, is_active');
-
-            if (userEmail && emailVerified) {
-              consultantQuery = consultantQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
-            } else {
-              consultantQuery = consultantQuery.eq('user_id', userId);
-            }
-
-            const queryOutcome = await Promise.race([
-              consultantQuery.limit(1),
-              new Promise<{ data: null }>((r) => setTimeout(() => r({ data: null }), 3000)),
-            ]);
-            const rawConsultants = (queryOutcome as { data?: unknown[] | null } | null | undefined)?.data;
-            const queryError = (queryOutcome as { error?: unknown } | null | undefined)?.error;
-            if (Array.isArray(rawConsultants) && rawConsultants.length === 0 && !queryError) {
-              consultantLookupDefinitivelyEmpty = true;
-            }
-            const matchedConsultants = (Array.isArray(rawConsultants) ? rawConsultants : null) as Array<{
-              id: string;
-              name: string | null;
-              email?: string | null;
-              user_id: string | null;
-              is_active?: boolean;
-            }> | null;
-
-            const matchedConsultant = matchedConsultants?.[0];
-            if (matchedConsultant) {
-              isConsultantUser = true;
-              consultantName = consultantName || matchedConsultant.name;
-
-              if (matchedConsultant.user_id !== userId) {
-                supabase
-                  .from('consultants')
-                  .update({ user_id: userId } as any)
-                  .eq('id', matchedConsultant.id)
-                  .then();
-              }
-            }
-
-            secureLog.info('[AuthContext] fetchProfile: after direct consultant query', {
-              userId,
-              matchedConsultantId: matchedConsultant?.id ?? null,
-              matchedConsultantUserId: matchedConsultant?.user_id ?? null,
-              isConsultantUser: isConsultantUser,
-            });
-          } catch (consErr) {
-            console.warn('[AuthContext] Consultant check non-fatal warning:', consErr);
+              .update({ user_id: userId } as any)
+              .eq('id', consultantOut.id)
+              .then();
           }
+          secureLog.info('[AuthContext] fetchProfile: consultant resolved via concurrent consultants rescue', {
+            correlationId, userId, consultantId: consultantOut.id,
+          });
+        } else if (!isConsultantUser) {
+          consultantLookupDefinitivelyEmpty = true;
         }
 
-        // Check approved application in consultant_applications if not yet confirmed
-        // (email-based match requires a verified email)
-        if (!isConsultantUser && userEmail && emailVerified) {
-          try {
-            const { data: approvedApps } = await withDbTimeout(
-              supabase
-                .from('consultant_applications')
-                .select('id, name, status, email')
-                .ilike('email', userEmail)
-                .eq('status', 'approved')
-                .limit(1),
-              'approved application check',
-              4000
-            );
-
-            if (approvedApps && approvedApps.length > 0) {
-              isConsultantUser = true;
-              consultantName = consultantName || approvedApps[0].name;
+        // The approved-application rescue also ran concurrently. It only awaits
+        // here if the consultant account wasn't already resolved — healthy DBs
+        // answer in <300ms; a degraded applications table costs at most 4s.
+        if (!isConsultantUser) {
+          const appOut = await applicationRescuePromise;
+          if (appOut) {
+            isConsultantUser = true;
+            consultantName = consultantName || appOut.name;
+            // Best-effort self-heal: ask the server to create the non-public
+            // consultants draft row (bounded, non-fatal, never required).
+            try {
+              const sessionResult = await withDbTimeout(
+                supabase.auth.getSession(),
+                'self-heal session lookup',
+                3000
+              ).catch(() => null);
+              const session = sessionResult?.data?.session ?? null;
+              if (session?.access_token) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3500);
+                await fetch('/api/consultant/me', {
+                  headers: { Authorization: `Bearer ${session.access_token}` },
+                  signal: controller.signal,
+                }).catch(() => null);
+                clearTimeout(timeoutId);
+              }
+            } catch (healErr) {
+              console.warn('[AuthContext] Consultant self-heal notice:', healErr);
             }
-          } catch (appErr) {
-            console.warn('[AuthContext] Approved application check notice:', appErr);
           }
         }
 

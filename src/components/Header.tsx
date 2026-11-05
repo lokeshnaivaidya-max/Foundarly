@@ -99,7 +99,9 @@ export default function Header() {
 
   const getInitials = () => {
     try {
-      const name = profile?.full_name || user?.user_metadata?.full_name;
+      // Use ONLY the authoritatively resolved profile name — never stale
+      // localStorage cache. Falls back to email initials, then to "U".
+      const name = profile?.full_name;
       if (name && typeof name === "string" && name.trim().length > 0) {
         const parts = name.trim().split(/\s+/).filter(Boolean);
         if (parts.length > 0) {

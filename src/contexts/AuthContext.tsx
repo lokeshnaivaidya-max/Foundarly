@@ -327,24 +327,17 @@ const cached = getDegradedCachedRole(userId);
       } catch (err) {
         console.warn('[AuthContext] Authoritative profile resolution failed:', err);
         setRoleResolutionFailed(true);
-// Stale-request protection: only the active resolution operation may release loading
-// or overwrite profile/role state. A resolution ID is tracked in resolveProfileRef; if a
-// different resolution ID is detected, this catch/finally block preserves the currently-
-// active chain's state and returns early so the active operation's setLoading(false) in
-// the finally block can still execute.
-const currentResolutionId = resolveProfileRef.current?.resolutionId;
-if (currentResolutionId && currentResolutionId !== resolutionId) {
-  console.warn('[AuthContext] Stale resolution request detected, preserving current state', { currentResolutionId, resolutionId });
-  return;
-}
-const cached = getDegradedCachedRole(userId);
-        secureLog.warn('[AuthContext] resolveProfile: resolution exception', {
-          correlationId, userId, error: err instanceof Error ? err.message : String(err),
-        });
-        // Fail closed for elevated roles: even the exception fallback serves
-        // only non-elevated cached roles.
-        if (cached) setProfile(cached);
       } finally {
+        // Stale-request protection: only the active resolution operation may release
+        // loading or overwrite profile/role state. A resolution ID is tracked in
+        // resolveProfileRef; if a different resolution ID is detected, this finally
+        // block preserves the currently-active chain's state and returns early so the
+        // operation that originally set loading=true can still execute its setLoading(false).
+        const currentResolutionId = resolveProfileRef.current?.resolutionId;
+        if (currentResolutionId && currentResolutionId !== resolutionId) {
+          console.warn('[AuthContext] Stale resolution request detected in finally, preserving current state', { currentResolutionId, resolutionId });
+          return;
+        }
         resolveInFlightRef.current = false;
       }
     };

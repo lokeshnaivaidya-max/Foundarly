@@ -79,6 +79,7 @@ export interface Database {
           availability_settings?: Json | null
           social_links?: Json | null
         }
+        Relationships: []
       }
       categories: {
         Row: {
@@ -108,6 +109,7 @@ export interface Database {
           image_url?: string | null
           created_at?: string
         }
+        Relationships: []
       }
       referral_codes: {
         Row: {
@@ -143,6 +145,7 @@ export interface Database {
           times_used?: number
           created_at?: string
         }
+        Relationships: []
       }
       referral_usages: {
         Row: {
@@ -184,6 +187,7 @@ export interface Database {
           final_price?: number
           created_at?: string
         }
+        Relationships: []
       }
       bookings: {
         Row: {
@@ -234,6 +238,7 @@ export interface Database {
           meeting_room_id?: string | null
           created_at?: string
         }
+        Relationships: []
       }
       testimonials: {
         Row: {
@@ -275,6 +280,7 @@ export interface Database {
           booking_id?: string | null
           created_at?: string
         }
+        Relationships: []
       }
       blog: {
         Row: {
@@ -307,6 +313,7 @@ export interface Database {
           status?: 'published' | 'draft'
           created_at?: string
         }
+        Relationships: []
       }
       content_sections: {
         Row: {
@@ -336,6 +343,7 @@ export interface Database {
           button_text?: string | null
           updated_at?: string
         }
+        Relationships: []
       }
       site_settings: {
         Row: {
@@ -356,6 +364,7 @@ export interface Database {
           setting_value?: string | null
           updated_at?: string
         }
+        Relationships: []
       }
       profiles: {
         Row: {
@@ -376,6 +385,7 @@ export interface Database {
           full_name?: string | null
           created_at?: string
         }
+        Relationships: []
       }
       consultant_applications: {
         Row: {
@@ -435,6 +445,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       faqs: {
         Row: {
@@ -461,6 +472,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       page_content: {
         Row: {
@@ -487,6 +499,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       pricing_tiers: {
         Row: {
@@ -528,6 +541,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
     }
     Views: {

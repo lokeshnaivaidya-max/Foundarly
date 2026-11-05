@@ -221,6 +221,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Tracks whether the profile has been authoritatively resolved, so TOKEN_REFRESHED
   // events don't unnecessarily reset loading and re-fetch the same role.
   const profileResolvedRef = useRef<{ userId: string; role: string; resolvedAt: number } | null>(null);
+  // Duplicate-resolution guard: concurrent auth events must not stack parallel
+  // resolution loops (fetchProfile itself is de-duplicated; this guards the loop).
+  const resolveInFlightRef = useRef<boolean>(false);
   // Component-scope handle to the effect-scoped resolveProfile so an explicit
   // retry can be offered when authoritative resolution definitively fails.
   const resolveProfileRef = useRef<((userId: string, currentUser: User | null, retryCount?: number) => Promise<void>) | null>(null);
@@ -726,7 +729,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Direct query check if not yet confirmed
         if (!isConsultantUser) {
           try {
-            let consultantQuery = supabase
+            let consultantQuery: any = supabase
               .from('consultants')
               .select('id, name, email, user_id, is_active');
 
@@ -761,7 +764,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               if (matchedConsultant.user_id !== userId) {
                 supabase
                   .from('consultants')
-                  .update({ user_id: userId })
+                  .update({ user_id: userId } as any)
                   .eq('id', matchedConsultant.id)
                   .then();
               }

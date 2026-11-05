@@ -106,7 +106,7 @@ describe('Production Verification Suite: 4 Critical Client Issues', () => {
     });
 
     it('2.3 Simulated 10-second stability check maintains state without reload', async () => {
-      let reloadTriggered = false;
+      const reloadTriggered = false;
       let redirectTarget: string | null = null;
       let simulatedTimeMs = 0;
 
@@ -161,7 +161,7 @@ describe('Production Verification Suite: 4 Critical Client Issues', () => {
         user_id: 'test-user-456',
         name: 'Delete Me Test',
       };
-      let testProfile = {
+      const testProfile = {
         id: 'test-user-456',
         role: 'consultant',
       };

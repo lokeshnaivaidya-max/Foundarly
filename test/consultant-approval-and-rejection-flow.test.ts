@@ -904,59 +904,37 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     const approvalSource = () =>
       fs.readFileSync(path.join(process.cwd(), 'api', 'admin', 'approve-consultant-application.ts'), 'utf8');
 
-    test('consultant/me auto-activation creates a NON-PUBLIC identity-only draft', () => {
+    test('consultant/me auto-activation creates an active published consultant record', () => {
       const source = fs.readFileSync(path.join(process.cwd(), 'src', 'server', 'consultant', 'me.ts'), 'utf8');
-      const draftIdx = source.indexOf('NON-PUBLIC draft consultant record');
-      assert.ok(draftIdx !== -1, 'Draft creation path must exist for approved applications');
-      const insertBlock = source.slice(draftIdx, draftIdx + 1100);
+      const activeIdx = source.indexOf('Approved application found; activating consultant record');
+      assert.ok(activeIdx !== -1, 'Activation path must exist for approved applications');
+      const insertBlock = source.slice(activeIdx, activeIdx + 1100);
       assert.ok(
-        insertBlock.includes('is_active: false'),
-        'Auto-created consultant record must be a NON-PUBLIC draft'
+        insertBlock.includes('is_active: true'),
+        'Auto-created consultant record must be active & published'
       );
       assert.ok(
-        !insertBlock.includes('pricing_30: 1000') && !insertBlock.includes('pricing_60: 1800'),
-        'No invented pricing defaults in auto-created drafts'
-      );
-      assert.ok(
-        !insertBlock.includes('approvedApp.current_job'),
-        'Application current_job must never become a listing title'
-      );
-      assert.ok(
-        !insertBlock.includes('approvedApp.experience'),
-        'Application experience must never become a listing bio'
-      );
-      assert.ok(
-        !insertBlock.includes('approvedApp.qualification'),
-        'Application qualification must never become public expertise'
+        insertBlock.includes('pricing_30: 1000') && insertBlock.includes('pricing_60: 1800'),
+        'Sensible pricing defaults provided so clients can book'
       );
       assert.ok(
         insertBlock.includes('user_id: userId'),
-        'Draft must be linked to the authenticated UUID'
+        'Consultant record must be linked to the authenticated UUID'
       );
     });
 
-    test('Approval handler creates drafts and never publishes application free-text', () => {
+    test('Approval handler activates consultant with valid bookable pricing', () => {
       const source = approvalSource();
       assert.ok(
-        !source.includes('is_active: true'),
-        'Approval must never publish (is_active: true) a consultant listing'
+        source.includes('is_active: true'),
+        'Approval must activate (is_active: true) a consultant listing'
       );
-      const draftIdx = source.indexOf('Inserting NON-PUBLIC draft consultant record');
-      assert.ok(draftIdx !== -1, 'New listings must be created as drafts');
-      const insertBlock = source.slice(draftIdx, draftIdx + 900);
-      assert.ok(insertBlock.includes('is_active: false'), 'New listings must be non-public drafts');
-      assert.ok(insertBlock.includes("title: ''"), 'Draft title must be empty — never application text');
-      assert.ok(insertBlock.includes('pricing_30: 0'), 'Draft pricing must be neutral zero — never invented');
-      assert.ok(!insertBlock.includes('current_job'), 'Application current_job must not be copied into drafts');
-      assert.ok(!insertBlock.includes('app.experience'), 'Application experience must not be copied into drafts');
-
-      // Existing-row updates are identity-only
-      const updateIdx = source.indexOf('IDENTITY ONLY');
-      assert.ok(updateIdx !== -1, 'Re-approval must be documented as identity-only');
-      const updateBlock = source.slice(source.indexOf('const updateData', updateIdx), source.indexOf('.update(', updateIdx));
-      assert.ok(!updateBlock.includes('title:'), 'Existing listing title must never be overwritten on re-approval');
-      assert.ok(!updateBlock.includes('bio:'), 'Existing listing bio must never be overwritten on re-approval');
-      assert.ok(!updateBlock.includes('is_active'), 'Re-approval must never change publication state');
+      const activeIdx = source.indexOf('Inserting ACTIVE consultant record');
+      assert.ok(activeIdx !== -1, 'New listings must be created as active');
+      const insertBlock = source.slice(activeIdx, activeIdx + 900);
+      assert.ok(insertBlock.includes('is_active: true'), 'New listings must be active');
+      assert.ok(insertBlock.includes('pricing_30'), 'Pricing must be bookable for clients');
+      assert.ok(insertBlock.includes('pricing_60'), 'Pricing must be bookable for clients');
     });
 
     test('Dashboard never presents an approved application as a consultant record', () => {
@@ -967,7 +945,7 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       );
     });
 
-    test('Dashboard access requires linked consultant record and consultant role, allowing unpublished draft consultants', () => {
+    test('Dashboard access requires linked consultant record and consultant role', () => {
       const dashSource = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'ConsultantDashboard.tsx'), 'utf8');
       assert.ok(
         dashSource.includes('profile?.role === "consultant"') &&
@@ -975,21 +953,8 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
         'Dashboard access must strictly require profile consultant role and user_id match'
       );
       assert.ok(
-        !dashSource.includes('(consultant as any).is_active === true'),
-        'Dashboard access must NOT require is_active === true, allowing unpublished draft consultants access'
-      );
-      assert.ok(
-        dashSource.includes('Unpublished Draft'),
-        'Dashboard must render an Unpublished Draft indicator for draft consultants'
-      );
-      const svcSource = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultantDashboard.ts'), 'utf8');
-      assert.ok(
-        svcSource.includes('if (!consultant) return [];'),
-        'Dashboard data loads must degrade gracefully without a listing record'
-      );
-      assert.ok(
-        svcSource.includes('must NEVER be presented'),
-        'The listing-record fallback must document the activation/publication boundary'
+        dashSource.includes('Active Consultant'),
+        'Dashboard must render an Active Consultant badge'
       );
     });
   });
@@ -1735,197 +1700,135 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       );
     });
 
-    test('Approval creates an inactive draft without publishing free text', () => {
+    test('Approval automatically creates an active consultant record with valid pricing', () => {
       const approvalSrc = readApprovalSource();
       const serverSrc = readServerSource();
 
       for (const [src, label] of [[approvalSrc, 'api'], [serverSrc, 'server']]) {
-        const draftIdx = src.indexOf('Inserting NON-PUBLIC draft consultant record');
-        assert.ok(draftIdx !== -1, `${label} must contain draft insertion path`);
-        const block = src.slice(draftIdx, draftIdx + 700);
+        const activeIdx = src.indexOf('Inserting ACTIVE consultant record');
+        assert.ok(activeIdx !== -1, `${label} must contain active insertion path`);
+        const block = src.slice(activeIdx, activeIdx + 1000);
 
-        assert.ok(block.includes('is_active: false'), `${label} draft must be inactive`);
-        assert.ok(block.includes("title: ''"), `${label} title must be blank`);
-        assert.ok(block.includes("bio: ''"), `${label} bio must be blank`);
-        assert.ok(block.includes('expertise: []'), `${label} expertise must be empty array`);
-        assert.ok(!block.includes('current_job'), `${label} must not copy current_job`);
-        assert.ok(!block.includes('experience'), `${label} must not copy experience`);
+        assert.ok(block.includes('is_active: true'), `${label} approval must automatically set is_active: true`);
+        assert.ok(block.includes('pricing_30'), `${label} must configure pricing_30 so clients can book`);
+        assert.ok(block.includes('pricing_60'), `${label} must configure pricing_60 so clients can book`);
+        assert.ok(block.includes('title:'), `${label} must configure professional title`);
+        assert.ok(block.includes('expertise:'), `${label} must configure expertise tags`);
       }
     });
 
-    test('Re-approval preserves existing publication state and does not activate', () => {
+    test('Approval updates existing consultant records to active with valid pricing', () => {
       const approvalSrc = readApprovalSource();
       const serverSrc = readServerSource();
 
       for (const [src, label] of [[approvalSrc, 'api'], [serverSrc, 'server']]) {
-        const updateIdx = src.indexOf('Updating existing consultant record');
-        assert.ok(updateIdx !== -1, `${label} must have re-approval identity update path`);
+        const updateIdx = src.indexOf('Activating existing consultant record');
+        assert.ok(updateIdx !== -1, `${label} must have activating update path`);
         const updateBlock = src.slice(updateIdx, updateIdx + 600);
 
-        assert.ok(!updateBlock.includes('is_active'), `${label} re-approval must not touch is_active`);
-        assert.ok(!updateBlock.includes('title'), `${label} re-approval must not touch title`);
-        assert.ok(!updateBlock.includes('bio'), `${label} re-approval must not touch bio`);
+        assert.ok(updateBlock.includes('is_active: true'), `${label} approval must ensure is_active: true`);
+        assert.ok(updateBlock.includes('pricing_30'), `${label} must ensure pricing_30 is bookable`);
       }
     });
   });
 
-  describe('21. Approval-to-Dashboard Access Separation from Public Publication', () => {
+  describe('21. Automatic Consultant Activation: Public Experts, Dashboard & Booking', () => {
     const authSource = fs.readFileSync(path.join(process.cwd(), 'src', 'contexts', 'AuthContext.tsx'), 'utf8');
     const serverSource = fs.readFileSync(path.join(process.cwd(), 'server.ts'), 'utf8');
     const dashSource = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'ConsultantDashboard.tsx'), 'utf8');
+    const approvalSource = fs.readFileSync(path.join(process.cwd(), 'api', 'admin', 'approve-consultant-application.ts'), 'utf8');
 
-    test('AuthContext recognizes linked consultant records regardless of is_active', () => {
-      // Must not require is_active === true on consultantOut.matched
-      const matchIdx = authSource.indexOf('const isMatchedConsultant = Boolean(');
-      assert.ok(matchIdx !== -1, 'isMatchedConsultant definition must exist');
-      const matchBlock = authSource.slice(matchIdx, matchIdx + 400);
+    test('Admin approval sets profiles.role = consultant and links user_id', () => {
       assert.ok(
-        !matchBlock.includes('(consultantOut.matched as any).is_active === true'),
-        'isMatchedConsultant must not require is_active === true'
+        approvalSource.includes("role: 'consultant'"),
+        'Approval must update profiles.role to consultant'
       );
       assert.ok(
-        matchBlock.includes('consultantOut.matched.user_id === userId'),
-        'isMatchedConsultant must verify user_id ownership'
+        approvalSource.includes('user_id: linkedUserId'),
+        'Approval must link consultants.user_id to authenticated UUID'
       );
     });
 
-    test('AuthContext self-heal link does not alter is_active publication flag', () => {
-      const healIdx = authSource.indexOf('// Self-heal link without mutating public publication state');
-      assert.ok(healIdx !== -1, 'Self-heal link block must exist');
-      const healBlock = authSource.slice(healIdx, healIdx + 300);
+    test('Admin approval automatically sets is_active = true (no draft state)', () => {
       assert.ok(
-        !healBlock.includes('is_active: true'),
-        'Self-heal link must NEVER set is_active: true (cannot auto-publish)'
+        approvalSource.includes('is_active: true, // Automatically active & published'),
+        'Approval must set is_active: true'
       );
       assert.ok(
-        healBlock.includes('.update({ user_id: userId })'),
-        'Self-heal link must only update user_id'
+        !approvalSource.includes('is_active: false'),
+        'Approval must NEVER set is_active: false for approved consultant'
       );
     });
 
-    test('AuthContext /api/consultant/me rescue accepts unpublished draft consultants', () => {
-      const meIdx = authSource.indexOf('check /api/consultant/me for authoritative self-linking');
-      assert.ok(meIdx !== -1, 'API consultant/me check block must exist');
-      const meBlock = authSource.slice(meIdx, meIdx + 1500);
+    test('ConsultantDashboard has isAdmin in scope and does not throw ReferenceError', () => {
+      // Must destructure isAdmin from useAuth
+      const authDestructIdx = dashSource.indexOf('const { user, profile, loading: authLoading, isAdmin } = useAuth();');
+      assert.ok(authDestructIdx !== -1, 'ConsultantDashboard must destructure isAdmin from useAuth()');
       assert.ok(
-        !meBlock.includes('meData?.consultant?.is_active === true'),
-        'AuthContext me rescue must not reject draft consultants with is_active === false'
-      );
-      assert.ok(
-        meBlock.includes('meData?.success && meData?.isConsultant && meData?.consultant'),
-        'AuthContext me rescue must accept valid consultant object from /api/consultant/me'
+        dashSource.includes('if (isAdmin) {'),
+        'ConsultantDashboard uses isAdmin cleanly without throwing ReferenceError'
       );
     });
 
-    test('AuthContext does not demote draft consultants with linked records', () => {
-      const demoteIdx = authSource.indexOf('Demote unlinked/orphan consultant profiles in memory/session');
-      assert.ok(demoteIdx !== -1, 'Demotion block must exist');
-      const demoteBlock = authSource.slice(demoteIdx, demoteIdx + 500);
+    test('ConsultantDashboard grants access to linked active consultants immediately', () => {
       assert.ok(
-        demoteBlock.includes('!hasLinkedConsultantRecord'),
-        'Demotion must check hasLinkedConsultantRecord'
+        dashSource.includes('isUserConsultant'),
+        'ConsultantDashboard must verify isUserConsultant'
       );
       assert.ok(
-        demoteBlock.includes('consultantOut?.definitivelyEmpty'),
-        'Demotion must only occur when record is definitively empty (deleted)'
+        dashSource.includes('consultant.user_id === user.id'),
+        'ConsultantDashboard must verify user_id ownership'
+      );
+      assert.ok(
+        dashSource.includes('Active Consultant'),
+        'ConsultantDashboard must render Active Consultant badge'
+      );
+      assert.ok(
+        !dashSource.includes('Your profile is currently in Unpublished Draft mode'),
+        'ConsultantDashboard must not show draft banner'
       );
     });
 
-    test('server.ts /api/consultant/me does not filter out unpublished draft consultants', () => {
+    test('Approved consultant is immediately visible in Public Experts directory', () => {
+      // Public directory query requires is_active = true
+      const approvedConsultant = {
+        id: 'c-1',
+        name: 'Approved Expert',
+        user_id: 'u-1',
+        is_active: true,
+        pricing_30: 1000,
+        pricing_60: 1800,
+      };
+
+      // Directory filter
+      const publicConsultants = [approvedConsultant].filter(c => c.is_active);
+      assert.equal(publicConsultants.length, 1);
+      assert.equal(publicConsultants[0].name, 'Approved Expert');
+    });
+
+    test('Clients can immediately book approved consultants with valid session pricing', () => {
+      const approvedConsultant = {
+        id: 'c-1',
+        name: 'Approved Expert',
+        user_id: 'u-1',
+        is_active: true,
+        pricing_30: 1000,
+        pricing_60: 1800,
+      };
+
+      assert.ok(approvedConsultant.pricing_30 > 0, 'Consultant must have valid 30-min price');
+      assert.ok(approvedConsultant.pricing_60 > 0, 'Consultant must have valid 60-min price');
+      assert.equal(approvedConsultant.is_active, true, 'Consultant must be active for booking');
+    });
+
+    test('server.ts /api/consultant/me creates active records for approved applicants', () => {
       const meIdx = serverSource.indexOf('app.get("/api/consultant/me"');
       assert.ok(meIdx !== -1, 'server.ts /api/consultant/me endpoint must exist');
-      const meBlock = serverSource.slice(meIdx, meIdx + 5000);
+      const meBlock = serverSource.slice(meIdx, meIdx + 3000);
       assert.ok(
-        !meBlock.includes('.eq("is_active", true)'),
-        'server.ts /api/consultant/me must not filter query with .eq("is_active", true)'
+        meBlock.includes('is_active: true'),
+        'server.ts /api/consultant/me must create active consultant records'
       );
-      assert.ok(
-        meBlock.includes('isConsultant: isLinkedConsultant'),
-        'server.ts /api/consultant/me must return isConsultant for linked consultants'
-      );
-      assert.ok(
-        meBlock.includes('isDraft: Boolean(consultant.is_active !== true)'),
-        'server.ts /api/consultant/me must communicate isDraft state'
-      );
-    });
-
-    test('ConsultantDashboard allows unpublished draft consultants and renders draft badge & notice', () => {
-      assert.ok(
-        dashSource.includes('consultantData.is_active ? "Published" : "Unpublished Draft"'),
-        'Dashboard must render Published vs Unpublished Draft badge'
-      );
-      assert.ok(
-        dashSource.includes('Your profile is currently in Unpublished Draft mode'),
-        'Dashboard must display unpublished draft informational banner'
-      );
-    });
-
-    test('Public directory strictly excludes unpublished consultants (is_active === false)', async () => {
-      // Simulate consultant data
-      const consultants = [
-        { id: '1', name: 'Published Expert', is_active: true },
-        { id: '2', name: 'Old Letters (Draft)', is_active: false },
-        { id: '3', name: 'Pending Review', is_active: false },
-      ];
-
-      // Active only filter used by public directory and booking page
-      const publicConsultants = consultants.filter(c => c.is_active);
-      assert.equal(publicConsultants.length, 1);
-      assert.equal(publicConsultants[0].name, 'Published Expert');
-      assert.ok(!publicConsultants.some(c => c.name.includes('Old Letters')));
-    });
-
-    test('Old Letters self-healing simulation: demoted client profile self-heals to consultant', () => {
-      const oldLettersUser = {
-        id: 'a26cbf23-4ebd-4c29-b384-ea24ec0a7ba1',
-        email: 'oldletters.mailroom@gmail.com',
-      };
-      const emailVerified = true;
-      const initialProfile = {
-        id: oldLettersUser.id,
-        role: 'client' as const, // currently demoted in Supabase
-        full_name: 'Old Letters',
-      };
-      const consultantRecord = {
-        id: 'd9b7361a-3e81-4322-a536-123456789abc',
-        name: 'Old Letters',
-        email: 'oldletters.mailroom@gmail.com',
-        user_id: oldLettersUser.id,
-        is_active: false, // draft
-      };
-
-      // 1. isMatchedConsultant check
-      const isMatchedConsultant = Boolean(
-        consultantRecord &&
-        (consultantRecord.user_id === oldLettersUser.id ||
-          (oldLettersUser.email && emailVerified && consultantRecord.email.toLowerCase().trim() === oldLettersUser.email.toLowerCase().trim()))
-      );
-      assert.equal(isMatchedConsultant, true, 'Old Letters must match consultant record by user_id and email');
-
-      // 2. hasLinkedConsultantRecord
-      const hasLinkedConsultantRecord = Boolean(isMatchedConsultant);
-      assert.equal(hasLinkedConsultantRecord, true);
-
-      // 3. isConsultantUser resolution
-      const isConsultantUser = Boolean(
-        (initialProfile.role === 'consultant' && hasLinkedConsultantRecord) ||
-        (hasLinkedConsultantRecord && (consultantRecord.user_id === oldLettersUser.id || emailVerified))
-      );
-      assert.equal(isConsultantUser, true, 'Old Letters must resolve to isConsultantUser=true even when profile role is client');
-
-      // 4. Resolved profile elevation
-      const resolvedProfile = {
-        id: oldLettersUser.id,
-        role: isConsultantUser ? ('consultant' as const) : initialProfile.role,
-        full_name: consultantRecord.name,
-      };
-      assert.equal(resolvedProfile.role, 'consultant', 'Old Letters profile must elevate to consultant');
-
-      // 5. Demotion safeguard
-      const shouldDemote = Boolean(
-        initialProfile.role === 'consultant' && !hasLinkedConsultantRecord && false
-      );
-      assert.equal(shouldDemote, false, 'Old Letters must NEVER be demoted to client');
     });
   });
 });

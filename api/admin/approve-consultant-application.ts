@@ -288,18 +288,25 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     let consultant = existingConsultants?.[0] || null;
 
     if (consultant) {
-      // Re-approval / renewal: IDENTITY ONLY. Never overwrite reviewed
-      // professional content (title/bio/expertise/pricing) with raw
-      // application text, and never change publication state — public
-      // profile content and is_active are managed explicitly via
-      // Manage Consultants.
-      console.log(`[Approve Consultant] Updating existing consultant record ${consultant.id} for ${cleanEmail} (identity fields only)`);
+      console.log(`[Approve Consultant] Activating existing consultant record ${consultant.id} for ${cleanEmail}`);
       const updateData: Record<string, any> = {
         email: cleanEmail,
+        is_active: true, // Automatically active & published
       };
 
       if (linkedUserId) {
         updateData.user_id = linkedUserId;
+      }
+
+      // If existing pricing was 0 or invalid, set sensible defaults so clients can book
+      if (!consultant.pricing_30 || consultant.pricing_30 <= 0) {
+        updateData.pricing_30 = Number(pricing30) || 1000;
+      }
+      if (!consultant.pricing_60 || consultant.pricing_60 <= 0) {
+        updateData.pricing_60 = Number(pricing60) || 1800;
+      }
+      if (!consultant.title || consultant.title.trim().length === 0) {
+        updateData.title = app.current_job || 'Business Consultant';
       }
 
       const { data: updatedCons, error: updateErr } = await activeDbClient
@@ -318,21 +325,23 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       }
       consultant = updatedCons;
     } else {
-      // First approval: create a NON-PUBLIC draft record with clean defaults
-      // so the account is activated without immediately publishing unreviewed free-text.
-      console.log(`[Approve Consultant] Inserting NON-PUBLIC draft consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
+      // Create fully active and published consultant record
+      console.log(`[Approve Consultant] Inserting ACTIVE consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
+      const genderValue = app.gender?.toLowerCase() === 'female' ? 'female' : 'male';
       const { data: newCons, error: insertErr } = await activeDbClient
         .from('consultants')
         .insert({
           name: app.name,
           email: cleanEmail,
           user_id: linkedUserId || null,
-          is_active: false,
-          title: '',
-          bio: '',
-          expertise: [],
-          pricing_30: 0,
-          pricing_60: 0,
+          is_active: true, // Automatically active & published
+          title: app.current_job || 'Business Consultant',
+          bio: app.experience || `Expert business consultant specializing in ${app.qualification || 'business advisory'}.`,
+          expertise: ['Consulting', app.qualification || 'Advisory'].filter(Boolean),
+          pricing_30: Number(pricing30) || 1000,
+          pricing_60: Number(pricing60) || 1800,
+          gender: genderValue,
+          preferred_time: app.preferred_session_timing || 'Morning (8 AM – 12 PM)',
         })
         .select()
         .single();
@@ -412,16 +421,10 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
     return res.status(200).json({
       success: true,
-      // Approval = ACCOUNT ACTIVATION (profiles.role). The consultant LISTING is
-      // created as a non-public draft (is_active: false) and must be reviewed,
-      // completed and published explicitly via Manage Consultants.
-      message: `${app.name} has been approved. Account activated; consultant listing created as a draft for review and publication.`,
+      message: `${app.name} has been approved. Account activated, linked, and published to Public Experts.`,
       consultant,
       linkedUserId,
       profileUpdated,
-      // Operational visibility: when false, admin-side profile linking and
-      // auth-account lookups could not run (missing SUPABASE_SERVICE_ROLE_KEY)
-      // and the consultant account will self-link at next verified sign-in.
       serviceRoleConfigured: hasServiceRoleKey,
       emailSent,
       emailNotice,

@@ -753,11 +753,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           (hasLinkedConsultantRecord && (consultantOut?.matched?.user_id === userId || emailVerified))
         );
 
-        if (consultantOut?.matched && consultantOut.matched.user_id !== userId && userEmail && emailVerified) {
-          // Self-heal link without mutating public publication state (is_active)
+        if (consultantOut?.matched && (consultantOut.matched.user_id !== userId || !consultantOut.matched.is_active) && userEmail && emailVerified) {
+          // Self-heal link and ensure active status for approved consultant
           supabase
             .from('consultants')
-            .update({ user_id: userId })
+            .update({ user_id: userId, is_active: true })
             .eq('id', consultantOut.matched.id)
             .then();
         }

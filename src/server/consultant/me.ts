@@ -163,15 +163,8 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
       const approvedApp = applications?.[0];
       if (approvedApp) {
-        // ACCOUNT ACTIVATION vs PUBLIC PUBLICATION: an approved application
-        // activates the consultant ACCOUNT (profiles.role). It must NEVER
-        // auto-publish application free-text (qualification, current_job,
-        // experience) as a public consultant profile. Create an identity-only
-        // DRAFT (is_active: false) with neutral empty professional fields —
-        // title/bio/expertise/pricing are filled in by the consultant or admin
-        // and the profile is published explicitly via the Manage Consultants
-        // toggle. Nothing here becomes publicly visible until is_active=true.
-        console.log(`[Consultant Me] Approved application found; creating NON-PUBLIC draft consultant record for ${userEmail}`);
+        console.log(`[Consultant Me] Approved application found; activating consultant record for ${userEmail}`);
+        const genderVal = approvedApp.gender?.toLowerCase() === 'female' ? 'female' : 'male';
         const { data: newConsultant, error: createErr } = await bounded(
           activeDbClient
             .from('consultants')
@@ -179,16 +172,18 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
               name: approvedApp.name,
               email: userEmail,
               user_id: userId,
-              is_active: false,
-              title: '',
-              bio: '',
-              expertise: [],
-              pricing_30: 0,
-              pricing_60: 0,
+              is_active: true, // Automatically active & published
+              title: approvedApp.current_job || 'Business Consultant',
+              bio: approvedApp.experience || `Expert business consultant specializing in ${approvedApp.qualification || 'business advisory'}.`,
+              expertise: ['Consulting', approvedApp.qualification || 'Advisory'].filter(Boolean),
+              pricing_30: 1000,
+              pricing_60: 1800,
+              gender: genderVal,
+              preferred_time: approvedApp.preferred_session_timing || 'Morning (8 AM – 12 PM)',
             })
             .select()
             .single(),
-          'draft consultant creation'
+          'active consultant creation'
         );
 
         if (!createErr && newConsultant) {

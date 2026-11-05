@@ -2318,19 +2318,22 @@ async function startServer() {
 
         const approvedApp = apps?.[0];
         if (approvedApp) {
-          console.log(`[Consultant Me] Creating draft consultant record from approved application for ${userEmail}`);
+          console.log(`[Consultant Me] Creating active consultant record from approved application for ${userEmail}`);
+          const genderValue = approvedApp.gender?.toLowerCase() === "female" ? "female" : "male";
           const { data: newConsultant } = await activeDbClient
             .from("consultants")
             .insert({
               name: approvedApp.name,
               email: userEmail,
               user_id: user.id,
-              is_active: false,
-              title: "",
-              bio: "",
-              expertise: [],
-              pricing_30: 0,
-              pricing_60: 0,
+              is_active: true,
+              title: approvedApp.current_job || "Business Consultant",
+              bio: approvedApp.experience || `Expert business consultant specializing in ${approvedApp.qualification || "business advisory"}.`,
+              expertise: ["Consulting", approvedApp.qualification || "Advisory"].filter(Boolean),
+              pricing_30: 1000,
+              pricing_60: 1800,
+              gender: genderValue,
+              preferred_time: approvedApp.preferred_session_timing || "Morning (8 AM – 12 PM)",
             })
             .select()
             .single();
@@ -2563,18 +2566,24 @@ async function startServer() {
       let consultant = existingConsultants?.[0] || null;
 
       if (consultant) {
-        // Re-approval / renewal: IDENTITY ONLY. Never overwrite reviewed
-        // professional content (title/bio/expertise/pricing) with raw
-        // application text, and never change publication state — public
-        // profile content and is_active are managed explicitly via
-        // Manage Consultants.
-        console.log(`[Approve Consultant] Updating existing consultant record ${consultant.id} for ${cleanEmail} (identity fields only)`);
+        console.log(`[Approve Consultant] Activating existing consultant record ${consultant.id} for ${cleanEmail}`);
         const updateData: Record<string, any> = {
           email: cleanEmail,
+          is_active: true,
         };
 
         if (linkedUserId) {
           updateData.user_id = linkedUserId;
+        }
+
+        if (!consultant.pricing_30 || consultant.pricing_30 <= 0) {
+          updateData.pricing_30 = Number(pricing30) || 1000;
+        }
+        if (!consultant.pricing_60 || consultant.pricing_60 <= 0) {
+          updateData.pricing_60 = Number(pricing60) || 1800;
+        }
+        if (!consultant.title || consultant.title.trim().length === 0) {
+          updateData.title = app.current_job || 'Business Consultant';
         }
 
         const { data: updatedCons, error: updateErr } = await activeDbClient
@@ -2589,21 +2598,22 @@ async function startServer() {
         }
         consultant = updatedCons || consultant;
       } else {
-        // First approval: create a NON-PUBLIC draft record with clean defaults
-        // so the account is activated without immediately publishing unreviewed free-text.
-        console.log(`[Approve Consultant] Inserting NON-PUBLIC draft consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
+        console.log(`[Approve Consultant] Inserting ACTIVE consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
+        const genderValue = app.gender?.toLowerCase() === "female" ? "female" : "male";
         const { data: newCons, error: insertErr } = await activeDbClient
           .from("consultants")
           .insert({
             name: app.name,
             email: cleanEmail,
             user_id: linkedUserId || null,
-            is_active: false,
-            title: '',
-            bio: '',
-            expertise: [],
-            pricing_30: 0,
-            pricing_60: 0,
+            is_active: true,
+            title: app.current_job || "Business Consultant",
+            bio: app.experience || `Expert business consultant specializing in ${app.qualification || "business advisory"}.`,
+            expertise: ["Consulting", app.qualification || "Advisory"].filter(Boolean),
+            pricing_30: Number(pricing30) || 1000,
+            pricing_60: Number(pricing60) || 1800,
+            gender: genderValue,
+            preferred_time: app.preferred_session_timing || "Morning (8 AM – 12 PM)",
           })
           .select()
           .single();

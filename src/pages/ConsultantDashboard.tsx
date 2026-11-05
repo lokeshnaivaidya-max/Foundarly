@@ -31,7 +31,7 @@ import { followUpService } from "@/services/followUpService";
 import ConsultantAvailabilityEditor from "@/components/consultant/ConsultantAvailabilityEditor";
 
 export default function ConsultantDashboard() {
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading, isAdmin } = useAuth();
   const navigate = useNavigate();
   const { formatPrice } = useCurrency();
   
@@ -135,12 +135,6 @@ export default function ConsultantDashboard() {
 
     try {
       setLoading(true);
-      const userParam = { id: user.id, email: user.email };
-
-      // 1. Resolve consultant profile with timeout protection
-      const consultantPromise = consultantDashboardService.getConsultantProfile(userParam);
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000));
-      const consultant = await Promise.race([consultantPromise, timeoutPromise]);
 
       // 1. Admin & Developer Admin routing: send administrators to Admin Dashboard
       if (isAdmin) {
@@ -148,20 +142,23 @@ export default function ConsultantDashboard() {
         return;
       }
 
-      // 2. Strict authorization: user must have:
+      const userParam = { id: user.id, email: user.email };
+
+      // 2. Resolve consultant profile
+      const consultant = await consultantDashboardService.getConsultantProfile(userParam);
+
+      // 3. Strict authorization: user must have:
       // - profiles.role === 'consultant'
-      // - consultants.user_id === auth.uid()
-      // Publication status (is_active) is intentionally NOT required for private dashboard access.
-      // Approved consultants access their dashboard to manage availability, pricing,
-      // and profile settings while unpublished/draft.
+      // - matching authenticated identity
       const isUserConsultant = Boolean(
         profile?.role === "consultant" &&
         consultant &&
-        consultant.user_id === user.id
+        (consultant.user_id === user.id ||
+          (user.email && consultant.email && consultant.email.toLowerCase().trim() === user.email.toLowerCase().trim()))
       );
 
       if (!isUserConsultant) {
-        console.warn("User is not linked to a verified consultant record");
+        console.warn("User is not linked to an active consultant record");
         setAccessDenied(true);
         setLoading(false);
         return;
@@ -456,13 +453,9 @@ export default function ConsultantDashboard() {
                 {consultantData && (
                   <Badge
                     variant="outline"
-                    className={
-                      consultantData.is_active
-                        ? "bg-green-500/15 text-green-400 border-green-500/30 text-xs"
-                        : "bg-amber-500/15 text-amber-400 border-amber-500/30 text-xs"
-                    }
+                    className="bg-green-500/15 text-green-400 border-green-500/30 text-xs"
                   >
-                    {consultantData.is_active ? "Published" : "Unpublished Draft"}
+                    Active Consultant
                   </Badge>
                 )}
               </div>
@@ -478,18 +471,6 @@ export default function ConsultantDashboard() {
       </div>
 
       <div className="container mx-auto px-4 py-8">
-        {/* Unpublished Draft Notice */}
-        {consultantData && consultantData.is_active === false && (
-          <div className="mb-6 bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-lg p-4 text-sm flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <div className="font-semibold text-amber-300">Your profile is currently in Unpublished Draft mode</div>
-              <p className="text-xs text-amber-200/80">
-                You have full access to your Consultant Dashboard to configure availability, review bookings, and manage payout settings. Your public listing on the Experts page will become visible once reviewed and published by an administrator.
-              </p>
-            </div>
-          </div>
-        )}
         {/* Stats section error: independent retry, never a dashboard-wide crash */}
         {sectionErrors.stats && (
           <div className="mb-6 bg-destructive/10 border border-destructive/30 rounded-lg p-4 text-sm flex items-center justify-between gap-3">

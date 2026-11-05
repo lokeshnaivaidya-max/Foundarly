@@ -159,6 +159,79 @@ export const consultantsService = {
     throw new Error('Failed to create consultant after retries');
   },
 
+  // Sequential fallback: used only when the atomic RPC is unavailable.
+  // NOT atomic — if the consultant record is deleted but the profile downgrade
+  // fails, the caller is told explicitly via `profileDowngraded: false`.
+  async deleteSequential(id: string) {
+    // Step 1: Fetch the consultant record to get the linked user_id
+    const { data: existing, error: fetchError } = await supabase
+      .from('consultants')
+      .select('user_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (fetchError) {
+      throw new Error(`Failed to fetch consultant before deletion: ${fetchError.message}`);
+    }
+
+    const linkedUserId = existing?.user_id || null;
+
+    // Step 2: Delete the consultant record
+    const { error } = await supabase
+      .from('consultants')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('Supabase error deleting consultant:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint
+      });
+      throw error;
+    }
+
+    // Step 3: Downgrade the associated user's profile role to 'client'
+    if (linkedUserId) {
+      try {
+        const { data: existingProfile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', linkedUserId)
+          .maybeSingle();
+
+        if (existingProfile?.role === 'consultant') {
+          const { error: downgradeError } = await supabase
+            .from('profiles')
+            .update({ role: 'client' })
+            .eq('id', linkedUserId);
+
+          if (downgradeError) {
+            console.error('[consultantsService.deleteSequential] CRITICAL: failed to downgrade profile from consultant to client', {
+              userId: linkedUserId,
+              error: downgradeError.message
+            });
+            return { deleted: true, profileDowngraded: false, userId: linkedUserId, atomic: false };
+          }
+          console.info('[consultantsService.deleteSequential] Downgraded profiles.role to client for user', { userId: linkedUserId });
+          return { deleted: true, profileDowngraded: true, userId: linkedUserId, atomic: false };
+        }
+
+        if (existingProfile?.role) {
+          console.info('[consultantsService.deleteSequential] Profile already not consultant; no downgrade needed', { userId: linkedUserId, currentRole: existingProfile.role });
+          return { deleted: true, profileDowngraded: false, userId: linkedUserId, atomic: false };
+        }
+      } catch (profileErr) {
+        console.error('[consultantsService.deleteSequential] Exception while downgrading profile', { userId: linkedUserId, error: profileErr });
+        return { deleted: true, profileDowngraded: false, userId: linkedUserId, atomic: false };
+      }
+    }
+
+    console.info('[consultantsService.deleteSequential] Consultant deleted without linked user_id');
+    return { deleted: true, profileDowngraded: false, userId: null, atomic: false };
+  },
+
   async update(id: string, updates: Record<string, any>) {
     const payload = { ...updates };
 
@@ -203,88 +276,34 @@ export const consultantsService = {
   },
 
   async delete(id: string) {
-    // Step 1: Fetch the consultant record to get the linked user_id
-    // before deletion so we can downgrade the associated profile role.
-    const { data: existing, error: fetchError } = await supabase
-      .from('consultants')
-      .select('user_id')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (fetchError) {
-      throw new Error(`Failed to fetch consultant before deletion: ${fetchError.message}`);
-    }
-
-    const linkedUserId = existing?.user_id || null;
-
-    // Step 2: Delete the consultant record
-    const { error } = await supabase
-      .from('consultants')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('Supabase error deleting consultant:', {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint
+    // Preferred path: call the atomic RPC that deletes the consultant record
+    // AND downgrades the associated profile role to client in ONE transaction.
+    // If the RPC is unavailable (migration not applied), fall back to the
+    // sequential path with explicit error handling.
+    try {
+      const { data, error } = await supabase.rpc('delete_consultant_atomically', {
+        consultant_id: id,
       });
-      throw error;
-    }
 
-    // Step 3: Downgrade the associated user's profile role to 'client'
-    // if it is currently 'consultant'. Never downgrade admin/developer_admin.
-    if (linkedUserId) {
-      try {
-        const { data: existingProfile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', linkedUserId)
-          .maybeSingle();
-
-        if (existingProfile?.role === 'consultant') {
-          const { error: downgradeError } = await supabase
-            .from('profiles')
-            .update({ role: 'client' })
-            .eq('id', linkedUserId);
-
-          if (downgradeError) {
-            console.error('[consultantsService.delete] CRITICAL: failed to downgrade profile from consultant to client', {
-              userId: linkedUserId,
-              error: downgradeError.message
-            });
-            // Return success since the consultant record was deleted, but warn about the
-            // partial state so the UI can surface it honestly.
-            return { deleted: true, profileDowngraded: false, userId: linkedUserId };
-          }
-          console.info('[consultantsService.delete] Downgraded profiles.role to client for user', {
-            userId: linkedUserId
-          });
-          return { deleted: true, profileDowngraded: true, userId: linkedUserId };
-        }
-
-        // If already not consultant, don't upsert — preserve unrelated roles.
-        if (existingProfile?.role) {
-          console.info('[consultantsService.delete] Profile already not consultant; no downgrade needed', {
-            userId: linkedUserId,
-            currentRole: existingProfile.role
-          });
-          return { deleted: true, profileDowngraded: false, userId: linkedUserId };
-        }
-      } catch (profileErr) {
-        console.error('[consultantsService.delete] Exception while downgrading profile', {
-          userId: linkedUserId,
-          error: profileErr
-        });
-        // Return success since consultant record is deleted, but report partial state
-        return { deleted: true, profileDowngraded: false, userId: linkedUserId };
+      if (error) {
+        console.warn('[consultantsService.delete] RPC not available, falling back to sequential path:', error.message);
+        return this.deleteSequential(id);
       }
-    }
 
-    // No linked user_id — deletion complete, no profile to downgrade
-    console.info('[consultantsService.delete] Consultant deleted without linked user_id; no profile to downgrade');
-    return { deleted: true, profileDowngraded: false, userId: null };
+      if (!data?.success) {
+        throw new Error(data?.error || 'Atomic delete failed');
+      }
+
+      return {
+        deleted: true,
+        profileDowngraded: data.profile_downgraded,
+        userId: data.user_id,
+        atomic: true,
+      };
+    } catch (rpcErr) {
+      console.warn('[consultantsService.delete] RPC call failed, falling back to sequential path:', rpcErr);
+      return this.deleteSequential(id);
+    }
   },
 
   async toggleActive(id: string, isActive: boolean) {

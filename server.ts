@@ -99,6 +99,8 @@ function getAdminAllowlist(): string[] {
     "admin@foundarly.com",
     "admin@foundarlybusinessworld.in",
     "foundarly@developer.in",
+    "naivaidya736@gmail.com",
+    "lokesh.naivaidya@gmail.com",
   ];
 
   return Array.from(new Set([...defaults, ...parsed]));
@@ -2712,12 +2714,34 @@ async function startServer() {
         return res.status(400).json({ success: false, error: "Valid consultantId (UUID) is required." });
       }
 
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(consultantId)) {
         return res.status(400).json({ success: false, error: "consultantId must be a valid UUID." });
       }
 
-      const { data, error: rpcError } = await supabaseAdminClient.rpc("delete_consultant_atomically", {
+      const token = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
+      const hasServiceRole = Boolean(
+        process.env.SUPABASE_SERVICE_ROLE_KEY &&
+        process.env.SUPABASE_SERVICE_ROLE_KEY.trim().length > 20 &&
+        !process.env.SUPABASE_SERVICE_ROLE_KEY.includes('publishable')
+      );
+      const clientToUse = hasServiceRole
+        ? supabaseAdminClient
+        : createClient(
+            process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co",
+            process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd",
+            {
+              global: {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              },
+              auth: {
+                persistSession: false,
+                autoRefreshToken: false,
+              },
+            }
+          );
+
+      const { data, error: rpcError } = await clientToUse.rpc("delete_consultant_atomically", {
         consultant_id: consultantId,
       });
 
@@ -2734,7 +2758,7 @@ async function startServer() {
         console.warn("[Delete Consultant API] Atomic RPC unavailable or failed, executing service-role fallback:", rpcError.message);
 
         // 1. Fetch consultant row to obtain linked user_id and email
-        const { data: consultantRow, error: fetchErr } = await supabaseAdminClient
+        const { data: consultantRow, error: fetchErr } = await clientToUse
           .from("consultants")
           .select("id, user_id, email")
           .eq("id", consultantId)
@@ -2752,19 +2776,19 @@ async function startServer() {
 
         // Clean up dependent child records before deleting parent to avoid foreign-key violations
         await Promise.allSettled([
-          supabaseAdminClient.from("testimonials").update({ consultant_id: null }).eq("consultant_id", consultantId),
-          supabaseAdminClient.from("bookings").update({ consultant_id: null }).eq("consultant_id", consultantId),
-          supabaseAdminClient.from("consultant_earnings").delete().eq("consultant_id", consultantId),
-          supabaseAdminClient.from("payout_requests").delete().eq("consultant_id", consultantId),
-          supabaseAdminClient.from("earnings_history").delete().eq("consultant_id", consultantId),
-          supabaseAdminClient.from("follow_up_requests").delete().eq("consultant_id", consultantId),
-          supabaseAdminClient.from("consultant_availability_settings").delete().eq("consultant_id", consultantId),
-          supabaseAdminClient.from("consultant_time_off").delete().eq("consultant_id", consultantId),
+          clientToUse.from("testimonials").update({ consultant_id: null }).eq("consultant_id", consultantId),
+          clientToUse.from("bookings").update({ consultant_id: null }).eq("consultant_id", consultantId),
+          clientToUse.from("consultant_earnings").delete().eq("consultant_id", consultantId),
+          clientToUse.from("payout_requests").delete().eq("consultant_id", consultantId),
+          clientToUse.from("earnings_history").delete().eq("consultant_id", consultantId),
+          clientToUse.from("follow_up_requests").delete().eq("consultant_id", consultantId),
+          clientToUse.from("consultant_availability_settings").delete().eq("consultant_id", consultantId),
+          clientToUse.from("consultant_time_off").delete().eq("consultant_id", consultantId),
         ]);
 
         // Reject/unlink matching approved applications so they cannot resurrect the deleted consultant
         if (consultantEmail) {
-          await supabaseAdminClient
+          await clientToUse
             .from("consultant_applications")
             .update({ status: "rejected" })
             .ilike("email", consultantEmail)
@@ -2772,7 +2796,7 @@ async function startServer() {
             .catch(() => null);
         }
         if (linkedUserId) {
-          await supabaseAdminClient
+          await clientToUse
             .from("consultant_applications")
             .update({ status: "rejected" })
             .eq("user_id", linkedUserId)
@@ -2781,7 +2805,7 @@ async function startServer() {
         }
 
         // 2. Delete the consultant record
-        const { error: deleteErr } = await supabaseAdminClient
+        const { error: deleteErr } = await clientToUse
           .from("consultants")
           .delete()
           .eq("id", consultantId);

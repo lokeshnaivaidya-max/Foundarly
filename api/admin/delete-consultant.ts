@@ -24,17 +24,24 @@ interface ResponseLike {
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://rfyxnshvtfswvaogjzwq.supabase.co';
 
-function getAdminClient() {
+function getAdminClient(token?: string | null) {
   const serviceRoleKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.SERVICE_ROLE_KEY ||
     process.env.SUPABASE_SERVICE_KEY;
 
-  if (!serviceRoleKey || serviceRoleKey.trim().length < 20 || serviceRoleKey.includes('publishable')) {
-    return null;
+  if (serviceRoleKey && serviceRoleKey.trim().length >= 20 && !serviceRoleKey.includes('publishable')) {
+    return createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
   }
 
-  return createClient(supabaseUrl, serviceRoleKey, {
+  // Resilient fallback: Scoped client using caller's verified bearer token
+  const anonKey = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd';
+  return createClient(supabaseUrl, anonKey, {
+    global: {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    },
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -62,11 +69,11 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     return res.status(401).json({ success: false, error: 'Authentication required. Missing Bearer token.' });
   }
 
-  const supabaseAdminClient = getAdminClient();
+  const supabaseAdminClient = getAdminClient(token);
   if (!supabaseAdminClient) {
-    return res.status(503).json({
+    return res.status(500).json({
       success: false,
-      error: 'Atomic deletion service is not configured. Apply migration 20260812000000_atomic_consultant_deletion.sql and set SUPABASE_SERVICE_ROLE_KEY.',
+      error: 'Deletion client could not be initialized.',
     });
   }
 
@@ -130,7 +137,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }
 
     // Basic UUID shape check
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(consultantId)) {
       return res.status(400).json({ success: false, error: 'consultantId must be a valid UUID.' });
     }

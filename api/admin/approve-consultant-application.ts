@@ -93,7 +93,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
         return res.status(400).json({ success: false, error: 'Request body must contain explicit boolean `active` value.' });
       }
 
-      if (!consultantId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-5a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(consultantId)) {
+      if (!consultantId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(consultantId)) {
         return res.status(400).json({ success: false, error: 'Valid consultantId (UUID) is required.' });
       }
 

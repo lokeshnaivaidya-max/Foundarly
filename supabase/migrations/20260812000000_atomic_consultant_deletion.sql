@@ -77,4 +77,17 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.delete_consultant_atomically(UUID) IS
-  'Atomic consultant deletion. Deletes listing AND downgrades associated profiles.role from consultant to client in ONE transaction. Never trusts client-supplied user_id. Never downgrades admin/developer_admin. Preserves bookings/applications.';
+  'Atomic consultant deletion. Deletes listing AND downgrades associated profiles.role from consultant to client in ONE transaction. Resolves linked user server-side. Preserves bookings/applications. Admin/Developer Admin roles never downgraded.';
+
+-- SECURITY MODEL:
+--   - SECURITY DEFINER with pg_temp in search_path.
+--   - REVOKE direct execute from PUBLIC, anon, and authenticated roles.
+--   - Only service_role (server-side API with admin + developer-admin verification before invocation) may EXECUTE.
+--   - This RPC may NEVER be invoked by an ordinary authenticated client.
+REVOKE ALL ON FUNCTION public.delete_consultant_atomically(UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.delete_consultant_atomically(UUID) FROM anon;
+REVOKE ALL ON FUNCTION public.delete_consultant_atomically(UUID) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_consultant_atomically(UUID) TO service_role;
+
+-- Sanity check: verify only service_role retains execution rights
+-- (information_schema.routine_privileges should show only service_role after this migration)

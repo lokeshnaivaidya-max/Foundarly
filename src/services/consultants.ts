@@ -159,77 +159,62 @@ export const consultantsService = {
     throw new Error('Failed to create consultant after retries');
   },
 
-  // Sequential fallback: used only when the atomic RPC is unavailable.
-  // NOT atomic — if the consultant record is deleted but the profile downgrade
-  // fails, the caller is told explicitly via `profileDowngraded: false`.
-  async deleteSequential(id: string) {
-    // Step 1: Fetch the consultant record to get the linked user_id
-    const { data: existing, error: fetchError } = await supabase
-      .from('consultants')
-      .select('user_id')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (fetchError) {
-      throw new Error(`Failed to fetch consultant before deletion: ${fetchError.message}`);
+  // Deleting must go through the server-side API: api/admin/delete-consultant.
+  // The server resolves the consultant's user_id itself, verifies Admin / Developer Admin
+  // authorization against the allowlist, executes the atomic PostgreSQL transaction
+  // (delete listing + downgrade profile 'consultant' -> 'client' in ONE transaction),
+  // and rolls back entirely if any step fails.
+  //
+  // Fail closed: if the API is missing/fails, the consultant record is NOT deleted and
+  // NO profile role is modified. There is no direct-RPC path and no sequential fallback.
+  async delete(id: string) {
+    // Validate ID is a UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!id || !uuidRegex.test(id)) {
+      throw new Error('consultantId must be a valid UUID.');
     }
 
-    const linkedUserId = existing?.user_id || null;
+    // Server-side authorization via Bearer token
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      throw new Error('Unauthenticated. Sign-in required to delete consultants.');
+    }
 
-    // Step 2: Delete the consultant record
-    const { error } = await supabase
-      .from('consultants')
-      .delete()
-      .eq('id', id);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    if (error) {
-      console.error('Supabase error deleting consultant:', {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint
+    try {
+      const res = await fetch('/api/admin/delete-consultant', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({ consultantId: id }),
       });
-      throw error;
-    }
+      clearTimeout(timeoutId);
 
-    // Step 3: Downgrade the associated user's profile role to 'client'
-    if (linkedUserId) {
-      try {
-        const { data: existingProfile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', linkedUserId)
-          .maybeSingle();
-
-        if (existingProfile?.role === 'consultant') {
-          const { error: downgradeError } = await supabase
-            .from('profiles')
-            .update({ role: 'client' })
-            .eq('id', linkedUserId);
-
-          if (downgradeError) {
-            console.error('[consultantsService.deleteSequential] CRITICAL: failed to downgrade profile from consultant to client', {
-              userId: linkedUserId,
-              error: downgradeError.message
-            });
-            return { deleted: true, profileDowngraded: false, userId: linkedUserId, atomic: false };
-          }
-          console.info('[consultantsService.deleteSequential] Downgraded profiles.role to client for user', { userId: linkedUserId });
-          return { deleted: true, profileDowngraded: true, userId: linkedUserId, atomic: false };
-        }
-
-        if (existingProfile?.role) {
-          console.info('[consultantsService.deleteSequential] Profile already not consultant; no downgrade needed', { userId: linkedUserId, currentRole: existingProfile.role });
-          return { deleted: true, profileDowngraded: false, userId: linkedUserId, atomic: false };
-        }
-      } catch (profileErr) {
-        console.error('[consultantsService.deleteSequential] Exception while downgrading profile', { userId: linkedUserId, error: profileErr });
-        return { deleted: true, profileDowngraded: false, userId: linkedUserId, atomic: false };
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        throw new Error(
+          json?.error || `Consultant delete failed (HTTP ${res.status}). The atomic migration may need to be applied. No records were deleted or downgraded.`
+        );
       }
-    }
 
-    console.info('[consultantsService.deleteSequential] Consultant deleted without linked user_id');
-    return { deleted: true, profileDowngraded: false, userId: null, atomic: false };
+      return {
+        deleted: Boolean(json.deleted),
+        profileDowngraded: Boolean(json.profileDowngraded),
+        userId: json.userId ?? null,
+        atomic: true,
+      };
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err?.name === 'AbortError') {
+        throw new Error('Consultant delete request timed out. No records were deleted or downgraded.');
+      }
+      throw err instanceof Error ? err : new Error(String(err));
+    }
   },
 
   async update(id: string, updates: Record<string, any>) {
@@ -273,37 +258,6 @@ export const consultantsService = {
     }
 
     throw new Error('Failed to update consultant after retries');
-  },
-
-  async delete(id: string) {
-    // Preferred path: call the atomic RPC that deletes the consultant record
-    // AND downgrades the associated profile role to client in ONE transaction.
-    // If the RPC is unavailable (migration not applied), fall back to the
-    // sequential path with explicit error handling.
-    try {
-      const { data, error } = await supabase.rpc('delete_consultant_atomically', {
-        consultant_id: id,
-      });
-
-      if (error) {
-        console.warn('[consultantsService.delete] RPC not available, falling back to sequential path:', error.message);
-        return this.deleteSequential(id);
-      }
-
-      if (!data?.success) {
-        throw new Error(data?.error || 'Atomic delete failed');
-      }
-
-      return {
-        deleted: true,
-        profileDowngraded: data.profile_downgraded,
-        userId: data.user_id,
-        atomic: true,
-      };
-    } catch (rpcErr) {
-      console.warn('[consultantsService.delete] RPC call failed, falling back to sequential path:', rpcErr);
-      return this.deleteSequential(id);
-    }
   },
 
   async toggleActive(id: string, isActive: boolean) {

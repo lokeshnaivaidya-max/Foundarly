@@ -99,8 +99,6 @@ function getAdminAllowlist(): string[] {
     "admin@foundarly.com",
     "admin@foundarlybusinessworld.in",
     "foundarly@developer.in",
-    "naivaidya736@gmail.com",
-    "lokesh.naivaidya@gmail.com",
   ];
 
   return Array.from(new Set([...defaults, ...parsed]));
@@ -2719,138 +2717,32 @@ async function startServer() {
         return res.status(400).json({ success: false, error: "consultantId must be a valid UUID." });
       }
 
-      const token = req.headers.authorization?.replace(/^Bearer\s+/i, '').trim();
       const hasServiceRole = Boolean(
         process.env.SUPABASE_SERVICE_ROLE_KEY &&
         process.env.SUPABASE_SERVICE_ROLE_KEY.trim().length > 20 &&
         !process.env.SUPABASE_SERVICE_ROLE_KEY.includes('publishable')
       );
-      const clientToUse = hasServiceRole
-        ? supabaseAdminClient
-        : createClient(
-            process.env.VITE_SUPABASE_URL || "https://rfyxnshvtfswvaogjzwq.supabase.co",
-            process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd",
-            {
-              global: {
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-              },
-              auth: {
-                persistSession: false,
-                autoRefreshToken: false,
-              },
-            }
-          );
 
-      const { data, error: rpcError } = await clientToUse.rpc("delete_consultant_atomically", {
+      if (!hasServiceRole) {
+        return res.status(503).json({
+          success: false,
+          error: "Atomic deletion service is not configured. Apply migration 20260812000000_atomic_consultant_deletion.sql and set SUPABASE_SERVICE_ROLE_KEY.",
+        });
+      }
+
+      const { data, error: rpcError } = await supabaseAdminClient.rpc("delete_consultant_atomically", {
         consultant_id: consultantId,
       });
 
-      let result: {
-        success?: boolean;
-        error?: string;
-        deleted?: boolean;
-        profile_downgraded?: boolean;
-        user_id?: string | null;
-        original_profile_role?: string | null;
-      } | null = (data as any) || null;
-
       if (rpcError) {
-        console.warn("[Delete Consultant API] Atomic RPC unavailable or failed, executing service-role fallback:", rpcError.message);
-
-        // 1. Fetch consultant row to obtain linked user_id and email
-        const { data: consultantRow, error: fetchErr } = await clientToUse
-          .from("consultants")
-          .select("id, user_id, email")
-          .eq("id", consultantId)
-          .maybeSingle();
-
-        if (fetchErr || !consultantRow) {
-          return res.status(404).json({
-            success: false,
-            error: "Consultant record not found.",
-          });
-        }
-
-        const linkedUserId = consultantRow.user_id || null;
-        const consultantEmail = consultantRow.email || null;
-
-        // Clean up dependent child records before deleting parent to avoid foreign-key violations
-        await Promise.allSettled([
-          clientToUse.from("testimonials").update({ consultant_id: null }).eq("consultant_id", consultantId),
-          clientToUse.from("bookings").update({ consultant_id: null }).eq("consultant_id", consultantId),
-          clientToUse.from("consultant_earnings").delete().eq("consultant_id", consultantId),
-          clientToUse.from("payout_requests").delete().eq("consultant_id", consultantId),
-          clientToUse.from("earnings_history").delete().eq("consultant_id", consultantId),
-          clientToUse.from("follow_up_requests").delete().eq("consultant_id", consultantId),
-          clientToUse.from("consultant_availability_settings").delete().eq("consultant_id", consultantId),
-          clientToUse.from("consultant_time_off").delete().eq("consultant_id", consultantId),
-        ]);
-
-        // Reject/unlink matching approved applications so they cannot resurrect the deleted consultant
-        if (consultantEmail) {
-          await clientToUse
-            .from("consultant_applications")
-            .update({ status: "rejected" })
-            .ilike("email", consultantEmail)
-            .eq("status", "approved")
-            .catch(() => null);
-        }
-        if (linkedUserId) {
-          await clientToUse
-            .from("consultant_applications")
-            .update({ status: "rejected" })
-            .eq("user_id", linkedUserId)
-            .eq("status", "approved")
-            .catch(() => null);
-        }
-
-        // 2. Delete the consultant record
-        const { error: deleteErr } = await clientToUse
-          .from("consultants")
-          .delete()
-          .eq("id", consultantId);
-
-        if (deleteErr) {
-          console.error("[Delete Consultant API] Fallback delete failed:", deleteErr.message);
-          return res.status(500).json({
-            success: false,
-            error: `Failed to delete consultant record: ${deleteErr.message}`,
-          });
-        }
-
-        let profileDowngraded = false;
-        let originalRole: string | null = null;
-
-        // 3. Downgrade profile if user was linked and has role 'consultant'
-        if (linkedUserId) {
-          const { data: profileRow } = await supabaseAdminClient
-            .from("profiles")
-            .select("role")
-            .eq("id", linkedUserId)
-            .maybeSingle();
-
-          originalRole = profileRow?.role || null;
-          if (originalRole === "consultant") {
-            const { error: downgradeErr } = await supabaseAdminClient
-              .from("profiles")
-              .update({ role: "client" })
-              .eq("id", linkedUserId)
-              .eq("role", "consultant");
-
-            if (!downgradeErr) {
-              profileDowngraded = true;
-            }
-          }
-        }
-
-        result = {
-          success: true,
-          deleted: true,
-          profile_downgraded: profileDowngraded,
-          user_id: linkedUserId,
-          original_profile_role: originalRole,
-        };
+        console.error("[Delete Consultant API] Atomic RPC error:", rpcError.message);
+        return res.status(500).json({
+          success: false,
+          error: `Failed to execute atomic deletion: ${rpcError.message}`,
+        });
       }
+
+      const result = (data as any) || null;
 
       if (!result?.success) {
         return res.status(404).json({

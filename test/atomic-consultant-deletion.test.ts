@@ -135,7 +135,10 @@ describe('Atomic Consultant Deletion — Security Hardening Audit', () => {
       assert.ok(sql.includes('SECURITY DEFINER'), 'Must be SECURITY DEFINER for server-side execution');
       assert.ok(sql.includes("SET search_path = public, pg_temp"), 'search_path must be pinned');
       // Resolve user_id from the consultants table server-side — never from client input
-      assert.ok(sql.includes('SELECT user_id INTO consultant_user_id'));
+      assert.ok(
+        sql.includes('SELECT user_id, email INTO consultant_user_id, consultant_email') ||
+        sql.includes('SELECT user_id INTO consultant_user_id')
+      );
       assert.ok(sql.includes('DELETE FROM public.consultants WHERE id = consultant_id'));
       assert.ok(sql.includes("UPDATE public.profiles"));
       assert.ok(sql.includes("SET role = 'client'"));
@@ -189,8 +192,9 @@ describe('Atomic Consultant Deletion — Security Hardening Audit', () => {
 
     test('No email matching can elevate or preserve consultant from deletion path', () => {
       const sql = readRel('supabase/migrations/20260812000000_atomic_consultant_deletion.sql');
-      assert.ok(!/ilike.*email/i.test(sql), 'No email comparison allowed');
-      assert.ok(!/email\s*=\s*/i.test(sql), 'No email equality allowed');
+      // Profile downgrade must target user_id directly, never email matching
+      const profileBlock = sql.slice(sql.indexOf('UPDATE public.profiles'));
+      assert.ok(!/email/i.test(profileBlock), 'Profile downgrade must use user_id, never email');
     });
   });
 

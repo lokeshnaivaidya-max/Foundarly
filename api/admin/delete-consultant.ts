@@ -24,24 +24,17 @@ interface ResponseLike {
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://rfyxnshvtfswvaogjzwq.supabase.co';
 
-function getAdminClient(token?: string | null) {
+function getAdminClient() {
   const serviceRoleKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.SERVICE_ROLE_KEY ||
     process.env.SUPABASE_SERVICE_KEY;
 
-  if (serviceRoleKey && serviceRoleKey.trim().length >= 20 && !serviceRoleKey.includes('publishable')) {
-    return createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+  if (!serviceRoleKey || serviceRoleKey.trim().length < 20 || serviceRoleKey.includes('publishable')) {
+    return null;
   }
 
-  // Resilient fallback: Scoped client using caller's verified bearer token
-  const anonKey = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_QPkFtczpj8_WzxPf4ZoENw_ZpnfN9vd';
-  return createClient(supabaseUrl, anonKey, {
-    global: {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    },
+  return createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -69,11 +62,11 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     return res.status(401).json({ success: false, error: 'Authentication required. Missing Bearer token.' });
   }
 
-  const supabaseAdminClient = getAdminClient(token);
+  const supabaseAdminClient = getAdminClient();
   if (!supabaseAdminClient) {
-    return res.status(500).json({
+    return res.status(503).json({
       success: false,
-      error: 'Deletion client could not be initialized.',
+      error: 'Atomic deletion service is not configured. Apply migration 20260812000000_atomic_consultant_deletion.sql and set SUPABASE_SERVICE_ROLE_KEY.',
     });
   }
 
@@ -154,7 +147,15 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       'atomic delete consultant rpc'
     );
 
-    let result: {
+    if (rpcError) {
+      console.error('[Delete Consultant API] Atomic RPC error:', rpcError.message);
+      return res.status(500).json({
+        success: false,
+        error: `Failed to execute atomic deletion: ${rpcError.message}`,
+      });
+    }
+
+    const result: {
       success?: boolean;
       error?: string;
       deleted?: boolean;
@@ -162,99 +163,6 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       user_id?: string | null;
       original_profile_role?: string | null;
     } | null = (data as any) || null;
-
-    if (rpcError) {
-      console.warn('[Delete Consultant] Atomic RPC unavailable or failed, executing service-role fallback:', rpcError.message);
-      
-      // 1. Fetch consultant row to obtain linked user_id and email
-      const { data: consultantRow, error: fetchErr } = await bounded(
-        supabaseAdminClient.from('consultants').select('id, user_id, email').eq('id', consultantId).maybeSingle(),
-        'fetch consultant for deletion'
-      );
-
-      if (fetchErr || !consultantRow) {
-        return res.status(404).json({
-          success: false,
-          error: 'Consultant record not found.',
-        });
-      }
-
-      const linkedUserId = consultantRow.user_id || null;
-      const consultantEmail = consultantRow.email || null;
-
-      // Clean up dependent child records before deleting parent to avoid foreign-key violations
-      await Promise.allSettled([
-        supabaseAdminClient.from('testimonials').update({ consultant_id: null }).eq('consultant_id', consultantId),
-        supabaseAdminClient.from('bookings').update({ consultant_id: null }).eq('consultant_id', consultantId),
-        supabaseAdminClient.from('consultant_earnings').delete().eq('consultant_id', consultantId),
-        supabaseAdminClient.from('payout_requests').delete().eq('consultant_id', consultantId),
-        supabaseAdminClient.from('earnings_history').delete().eq('consultant_id', consultantId),
-        supabaseAdminClient.from('follow_up_requests').delete().eq('consultant_id', consultantId),
-        supabaseAdminClient.from('consultant_availability_settings').delete().eq('consultant_id', consultantId),
-        supabaseAdminClient.from('consultant_time_off').delete().eq('consultant_id', consultantId),
-      ]);
-
-      // Reject/unlink matching approved applications so they cannot resurrect the deleted consultant
-      if (consultantEmail) {
-        await supabaseAdminClient
-          .from('consultant_applications')
-          .update({ status: 'rejected' })
-          .ilike('email', consultantEmail)
-          .eq('status', 'approved')
-          .catch(() => null);
-      }
-      if (linkedUserId) {
-        await supabaseAdminClient
-          .from('consultant_applications')
-          .update({ status: 'rejected' })
-          .eq('user_id', linkedUserId)
-          .eq('status', 'approved')
-          .catch(() => null);
-      }
-
-      // 2. Delete the consultant record
-      const { error: deleteErr } = await bounded(
-        supabaseAdminClient.from('consultants').delete().eq('id', consultantId),
-        'delete consultant row'
-      );
-
-      if (deleteErr) {
-        console.error('[Delete Consultant] Fallback delete failed:', deleteErr.message);
-        return res.status(500).json({
-          success: false,
-          error: `Failed to delete consultant record: ${deleteErr.message}`,
-        });
-      }
-
-      let profileDowngraded = false;
-      let originalRole: string | null = null;
-
-      // 3. Downgrade profile if user was linked and has role 'consultant'
-      if (linkedUserId) {
-        const { data: profileRow } = await bounded(
-          supabaseAdminClient.from('profiles').select('role').eq('id', linkedUserId).maybeSingle(),
-          'lookup profile for downgrade'
-        );
-        originalRole = profileRow?.role || null;
-        if (originalRole === 'consultant') {
-          const { error: downgradeErr } = await bounded(
-            supabaseAdminClient.from('profiles').update({ role: 'client' }).eq('id', linkedUserId).eq('role', 'consultant'),
-            'downgrade profile to client'
-          );
-          if (!downgradeErr) {
-            profileDowngraded = true;
-          }
-        }
-      }
-
-      result = {
-        success: true,
-        deleted: true,
-        profile_downgraded: profileDowngraded,
-        user_id: linkedUserId,
-        original_profile_role: originalRole,
-      };
-    }
 
     if (!result?.success) {
       return res.status(404).json({

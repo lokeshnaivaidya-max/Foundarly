@@ -78,7 +78,6 @@ export default function BookingPage() {
   const rotateX = useTransform(mouseY, [-300, 300], [4, -4]);
   const rotateY = useTransform(mouseX, [-300, 300], [-4, 4]);
   const formRef = useRef<HTMLDivElement>(null);
-  const formInView = useInView(formRef, { once: true, margin: "-60px" });
 
   // India Standard Time (IST) calendar dates for booking
   const todayIstStr = getNowInIST().dateStr;
@@ -444,7 +443,7 @@ export default function BookingPage() {
       <section className="py-16 bg-background relative">
         <div className="absolute top-0 right-0 w-[400px] h-[400px] rounded-full bg-primary/3 blur-[100px] pointer-events-none" />
         <div className="container mx-auto px-6 max-w-2xl relative z-10">
-          <motion.div ref={formRef} initial={{ opacity: 0, y: 30 }} animate={formInView ? { opacity: 1, y: 0 } : {}} transition={{ duration: 0.6 }}>
+          <motion.div ref={formRef} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
 
             {submitted ? (
               <motion.div className="bg-gradient-card border border-primary/20 rounded-2xl p-12 text-center"

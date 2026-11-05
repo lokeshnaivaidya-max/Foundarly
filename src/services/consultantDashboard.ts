@@ -104,8 +104,11 @@ async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; n
   }
 
   // 2. Direct Supabase query fallback (matching by user_id OR email)
+  // NOTE: the authenticated consultant's own listing is intentionally matched
+  // regardless of publication state — a non-public draft must not hide the
+  // consultant's own dashboard data (authorization is role-based).
   try {
-    let query = supabase.from("consultants").select("id, name, email, user_id, is_active").eq("is_active", true);
+    let query = supabase.from("consultants").select("id, name, email, user_id, is_active");
     if (userEmail) {
       query = query.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
     } else {

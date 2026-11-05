@@ -43,7 +43,7 @@ function HeroSection() {
 
   const { profile, isAdmin } = useAuth();
   const isAdminRole = Boolean(isAdmin);
-  const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
+  const isConsultantRole = !isAdminRole && profile?.role === "consultant";
 
   const handleMouseMove = (e: React.MouseEvent) => {
     const rect = containerRef.current?.getBoundingClientRect();

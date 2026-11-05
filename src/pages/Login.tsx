@@ -67,8 +67,8 @@ export default function LoginPage() {
         console.log("[Login] Redirecting to admin", { fromPath, isAdmin, isUserAdmin: isUserAdmin(user, profile) });
         const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
         navigate(validAdminFrom, { replace: true });
-      } else if (isConsultant || profile?.role === 'consultant' || profile?.is_consultant) {
-        console.log("[Login] Redirecting to consultant dashboard", { fromPath, isConsultant, profileRole: profile?.role, profileIsConsultant: profile?.is_consultant });
+      } else if (isConsultant || profile?.role === 'consultant') {
+        console.log("[Login] Redirecting to consultant dashboard", { fromPath, isConsultant, profileRole: profile?.role });
         const validConsultantFrom = (typeof fromPath === 'string' && fromPath.startsWith('/consultant')) ? fromPath : '/consultant/dashboard';
         navigate(validConsultantFrom, { replace: true });
       } else {
@@ -128,7 +128,7 @@ export default function LoginPage() {
         console.log("[Login] signIn returned profile", {
           userId: user?.id,
           userProfileRole: userProfile?.role ?? 'null',
-          userProfileIsConsultant: userProfile?.is_consultant ?? false,
+          userProfile: userProfile,
           contextProfileRole: profile?.role ?? 'null',
           activeProfileRole: (userProfile || profile)?.role ?? 'null',
         });
@@ -159,8 +159,8 @@ export default function LoginPage() {
           console.log("[Login] handleSubmit: redirecting to admin", { activeProfileRole: activeProfile?.role, fromPath });
           const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
           navigate(validAdminFrom, { replace: true });
-        } else if (activeProfile?.role === 'consultant' || activeProfile?.is_consultant) {
-          console.log("[Login] handleSubmit: redirecting to consultant dashboard", { activeProfileRole: activeProfile?.role, activeProfileIsConsultant: activeProfile?.is_consultant, fromPath });
+        } else if (activeProfile?.role === 'consultant') {
+          console.log("[Login] handleSubmit: redirecting to consultant dashboard", { activeProfileRole: activeProfile?.role, activeProfileIsConsultant: activeProfile?.role === 'consultant', fromPath });
           const validConsultantFrom = (typeof fromPath === 'string' && fromPath.startsWith('/consultant')) ? fromPath : '/consultant/dashboard';
           navigate(validConsultantFrom, { replace: true });
         } else {

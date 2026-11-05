@@ -268,7 +268,6 @@ export const consultantApplicationsService = {
             .from('profiles')
             .update({
               role: 'consultant',
-              is_consultant: true,
               updated_at: new Date().toISOString(),
             })
             .eq('id', linkedUserId);

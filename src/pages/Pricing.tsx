@@ -18,7 +18,7 @@ export default function PricingPage() {
   const [loading, setLoading] = useState(true);
 
   const isAdminRole = Boolean(isAdmin);
-  const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
+  const isConsultantRole = !isAdminRole && profile?.role === "consultant";
 
   useEffect(() => {
     loadPricing();

@@ -143,9 +143,7 @@ export default function ConsultantDashboard() {
       const isUserConsultant = Boolean(
         consultant ||
         profile?.role === "consultant" ||
-        profile?.is_consultant ||
-        (user.user_metadata as any)?.role === "consultant" ||
-        (user.user_metadata as any)?.is_consultant
+        (user.user_metadata as any)?.role === "consultant"
       );
 
       if (!isUserConsultant) {
@@ -162,7 +160,7 @@ export default function ConsultantDashboard() {
         console.log("Syncing user role to consultant in profiles table");
         supabase
           .from("profiles")
-          .upsert({ id: user.id, role: "consultant", is_consultant: true, full_name: consultant.name })
+          .upsert({ id: user.id, role: "consultant", full_name: consultant.name })
           .then(() => {})
           .catch((err) => console.warn("Could not sync consultant role:", err));
       }
@@ -171,7 +169,7 @@ export default function ConsultantDashboard() {
       await loadDashboardData();
     } catch (error) {
       console.error("Error checking consultant access:", error);
-      if (profile?.role === "consultant" || profile?.is_consultant) {
+      if (profile?.role === "consultant") {
         setAccessDenied(false);
         await loadDashboardData();
       } else {

@@ -2368,7 +2368,6 @@ async function startServer() {
             id: user.id,
             role: "consultant",
             full_name: consultant.name,
-            is_consultant: true,
           });
       }
 
@@ -2485,7 +2484,6 @@ async function startServer() {
                 id: linkedUserId,
                 role: "consultant",
                 full_name: app.name,
-                is_consultant: true,
               });
           }
         }
@@ -4860,7 +4858,6 @@ async function startServer() {
           full_name: anonymizedName,
           email: anonymizedEmail,
           role: "client",
-          is_consultant: false,
           updated_at: new Date().toISOString(),
         })
         .eq("id", user.id);

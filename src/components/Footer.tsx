@@ -5,7 +5,7 @@ import { Youtube, Instagram, PlayCircle } from "lucide-react";
 export default function Footer() {
   const { profile, isAdmin } = useAuth();
   const isAdminRole = Boolean(isAdmin);
-  const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
+  const isConsultantRole = !isAdminRole && profile?.role === "consultant";
 
   return (
     <footer className="border-t border-border/80 bg-background/95 backdrop-blur-lg">

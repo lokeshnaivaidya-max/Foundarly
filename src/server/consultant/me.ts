@@ -344,7 +344,6 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
             id: userId,
             role: 'consultant',
             full_name: consultant.name,
-            is_consultant: true,
           }),
         'profile role upsert'
       );

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
-import { supabase, PRIMARY_AUTH_KEY, FALLBACK_AUTH_KEY } from '@/lib/supabase';
+import { supabase, supabaseUrl, PRIMARY_AUTH_KEY, FALLBACK_AUTH_KEY } from '@/lib/supabase';
 import { secureLog } from '@/utils/security';
 import { 
   isAllowedAdminEmail, 
@@ -421,51 +421,61 @@ const cached = getDegradedCachedRole(userId);
     });
 
     // Step 2: Authoritative session check via getSession without destructive racing
-    supabase.auth.getSession().then(async ({ data, error }) => {
-      if (!isMountedRef.current) return;
-      if (error) {
-        console.warn('[AuthContext] getSession notice:', error.message);
-        setAuthError(error.message);
-      }
-      if (data?.session?.user) {
-        applyAuth(data.session, data.session.user);
-        setAuthError(null);
-        if (!shouldSkipResolution(data.session.user.id)) {
-          setLoading(true);
-          await resolveProfile(data.session.user.id, data.session.user);
-        }
-      } else {
-        // Non-destructive: check storage and active ref before clearing.
-        // Do not clear the user if onAuthStateChange has not yet had a chance
-        // to deliver INITIAL_SESSION; doing so could briefly route a logged-in
-        // user to /login during a page refresh.
-        const stored = getStoredSession();
-        if (!initialAuthProcessedRef.current) {
-          // onAuthStateChange has not yet processed the initial session;
-          // defer to it rather than clearing user here.
-          if (stored?.user && !activeUserRef.current) {
-            applyAuth(stored, stored.user);
+    const { data: { user: adminUser }, error: userError } = await withAbortableFetch<{
+      data: { user: { id: string; email: string } | null };
+      error: { message: string } | null;
+    }>(
+      `${supabaseUrl}/auth/v1/user`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${session?.access_token || ''}`,
+          apikey: supabaseKey || '',
+        },
+      },
+      8000,
+      'auth.getSession'
+    );
+
+    if (!isMountedRef.current) return;
+      if (userError || !adminUser) {
+        console.warn('[AuthContext] getSession notice:', userError?.message);
+        setAuthError(userError?.message);
+        if (data?.session?.user) {
+          applyAuth(data.session, data.session.user);
+          setAuthError(null);
+          if (!shouldSkipResolution(data.session.user.id)) {
             setLoading(true);
-            setAuthError(null);
-            await resolveProfile(stored.user.id, stored.user);
+            await resolveProfile(data.session.user.id, data.session.user);
           }
-        } else if (!stored && !activeUserRef.current) {
-          applyAuth(null, null);
-          setProfile(null);
+        } else {
+          const stored = getStoredSession();
+          if (!initialAuthProcessedRef.current) {
+            if (stored?.user && !activeUserRef.current) {
+              applyAuth(stored, stored.user);
+              setAuthError(null);
+              if (!shouldSkipResolution(stored.user.id)) {
+                setLoading(true);
+                await resolveProfile(stored.user.id, stored.user);
+              }
+            } else if (!stored && !activeUserRef.current) {
+              applyAuth(null, null);
+              setProfile(null);
+            }
+          }
+          initialAuthProcessedRef.current = true;
+          if (inFlightFetchRef.current.size === 0) {
+            setLoading(false);
+          }
         }
-      }
-      initialAuthProcessedRef.current = true;
-      if (inFlightFetchRef.current.size === 0) {
-        setLoading(false);
-      }
-    }).catch((err) => {
-      console.warn('[AuthContext] getSession error:', err);
-      setAuthError(err?.message || 'Session check failed');
-      initialAuthProcessedRef.current = true;
-      if (inFlightFetchRef.current.size === 0) {
-        setLoading(false);
-      }
-    });
+      }).catch((err: any) => {
+        console.warn('[AuthContext] getSession error:', err);
+        setAuthError(err?.message || 'Session check failed');
+        initialAuthProcessedRef.current = true;
+        if (inFlightFetchRef.current.size === 0) {
+          setLoading(false);
+        }
+      });
 
     // Safety timeout: loading will never block the UI past 2000ms, but only when no
     // authoritative profile fetch is in flight so we never render with a stale /
@@ -555,7 +565,6 @@ const cached = getDegradedCachedRole(userId);
             id: userId,
             role: 'super_admin',
             full_name: targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Super Admin',
-            is_consultant: false,
           };
           setCachedProfile(userId, superProfile);
           setProfile(superProfile);
@@ -572,7 +581,6 @@ const cached = getDegradedCachedRole(userId);
             id: userId,
             role: 'developer_admin',
             full_name: targetUser?.user_metadata?.full_name || targetUser?.email?.split('@')[0] || 'Developer Admin',
-            is_consultant: false,
           };
           setCachedProfile(userId, resolvedDevProfile);
           setProfile(resolvedDevProfile);
@@ -679,7 +687,6 @@ const cached = getDegradedCachedRole(userId);
             id: userId,
             role: 'super_admin',
             full_name: profileData.full_name || targetUser?.user_metadata?.full_name || 'Super Admin',
-            is_consultant: false,
           };
           setCachedProfile(userId, superProfile);
           setProfile(superProfile);
@@ -694,7 +701,6 @@ const cached = getDegradedCachedRole(userId);
             id: userId,
             role: 'admin',
             full_name: profileData.full_name || targetUser?.user_metadata?.full_name || 'Administrator',
-            is_consultant: false,
           };
           setCachedProfile(userId, adminProfile);
           setProfile(adminProfile);
@@ -709,7 +715,6 @@ const cached = getDegradedCachedRole(userId);
             id: userId,
             role: 'developer_admin',
             full_name: profileData?.full_name || targetUser?.user_metadata?.full_name || 'Developer Admin',
-            is_consultant: false,
           };
           if (!data || data.role !== 'developer_admin') {
             // BEST-EFFORT PROFILE SYNC — never discard a successful
@@ -763,7 +768,6 @@ const cached = getDegradedCachedRole(userId);
         secureLog.info('[AuthContext] fetchProfile: consultant check initial state', {
           userId,
           profileRole: profileData?.role ?? 'null',
-          profileIsConsultant: profileData?.is_consultant ?? false,
           isConsultantUser: isConsultantUser,
         });
 
@@ -776,7 +780,6 @@ const cached = getDegradedCachedRole(userId);
             id: userId,
             role: 'consultant',
             full_name: consultantName || targetUser?.user_metadata?.full_name || 'Consultant',
-            is_consultant: true,
           };
 
           if (!profileData || profileData.role !== 'consultant') {
@@ -784,7 +787,6 @@ const cached = getDegradedCachedRole(userId);
               id: userId,
               full_name: consultantProfile.full_name,
               role: 'consultant',
-              is_consultant: true,
             }).then();
           }
 
@@ -861,7 +863,6 @@ const cached = getDegradedCachedRole(userId);
             id: userId,
             role: 'consultant',
             full_name: consultantName || targetUser?.user_metadata?.full_name || 'Consultant',
-            is_consultant: true,
           };
 
           if (!profileData || profileData.role !== 'consultant') {
@@ -878,7 +879,6 @@ const cached = getDegradedCachedRole(userId);
                   id: userId,
                   full_name: consultantProfile.full_name,
                   role: 'consultant',
-                  is_consultant: true,
                 }),
                 'consultant profile upsert'
               );
@@ -916,8 +916,7 @@ const cached = getDegradedCachedRole(userId);
           id: userId,
           role: 'client',
           full_name: profileData?.full_name || fallbackName,
-          is_consultant: false,
-        };
+          };
 
         // TRANSIENT FAILURE GUARD: if the profiles lookup timed out or errored,
         // the consultant checks above also ran against the same degraded

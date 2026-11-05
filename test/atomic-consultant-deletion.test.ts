@@ -200,5 +200,53 @@ describe('Atomic Consultant Deletion — Security Hardening Audit', () => {
       assert.ok(src.includes('userId'));
       assert.ok(src.includes("error: 'Invalid or expired session token.'"));
     });
+
+    test('API returns 503 when SUPABASE_SERVICE_ROLE_KEY is missing/invalid', () => {
+      const src = readRel('api/admin/delete-consultant.ts');
+      assert.ok(src.includes('SUPABASE_SERVICE_ROLE_KEY'), 'Must read service role key from env');
+      assert.ok(src.includes('status(503)'), 'Must return 503 when service role key is missing');
+      assert.ok(src.includes('service is not configured'), 'Must explain missing configuration');
+    });
+
+    test('API enforces bounded timeouts on auth.getUser and RPC calls', () => {
+      const src = readRel('api/admin/delete-consultant.ts');
+      // Auth.getUser must be bounded with AbortController
+      assert.ok(src.includes('AbortController'), 'Must use AbortController for auth.getUser');
+      assert.ok(src.includes('AbortError'), 'Must throw AbortError on auth timeout');
+      // RPC must be bounded with AbortController
+      assert.ok(src.includes('AbortController'), 'Must use AbortController for RPC');
+      assert.ok(src.includes('AbortError'), 'Must throw AbortError on RPC timeout');
+    });
+
+    test('RPC timeout does not trigger sequential fallback', () => {
+      const src = readRel('api/admin/delete-consultant.ts');
+      assert.ok(!src.includes('deleteSequential'), 'No sequential fallback function');
+      assert.ok(!src.includes('fallback'), 'No fallback path');
+      assert.ok(src.includes('setTimeout'), 'Has timeout mechanism');
+      assert.ok(src.includes('AbortController'), 'Uses AbortController for cancellation');
+    });
+  });
+
+  describe('9. RPC timeout behavior', () => {
+    test('RPC timeout does not silently succeed', () => {
+      const src = readRel('api/admin/delete-consultant.ts');
+      // On AbortError, returns 504 timeout error
+      assert.ok(src.includes('name === \'AbortError\''), 'Checks for AbortError');
+      assert.ok(src.includes('status(504)'), 'Returns 504 on timeout');
+      assert.ok(src.includes('RPC call timed out'), 'Reports timeout explicitly');
+    });
+
+    test('Successful RPC response is returned correctly', () => {
+      const src = readRel('api/admin/delete-consultant.ts');
+      assert.ok(src.includes('success: true'), 'Returns success:true on success');
+      assert.ok(src.includes('deleted:'), 'Reports deletion status');
+      assert.ok(src.includes('profileDowngraded:'), 'Reports profile downgrade status');
+    });
+
+    test('RPC error returns 500 with detail', () => {
+      const src = readRel('api/admin/delete-consultant.ts');
+      assert.ok(src.includes('status(500)'), 'Returns 500 on RPC error');
+      assert.ok(src.includes('detail:'), 'Includes error detail');
+    });
   });
 });

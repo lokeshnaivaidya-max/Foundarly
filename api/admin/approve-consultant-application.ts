@@ -263,7 +263,6 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
               id: linkedUserId,
               role: 'consultant',
               full_name: app.name,
-              is_consultant: true,
             });
           if (profileUpsertErr) {
             console.error('[Approve Consultant] FAILED to update applicant profile role:', {

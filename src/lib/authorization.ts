@@ -135,7 +135,7 @@ export function getUserEffectiveRole(
   if (profile?.role === 'admin' && user?.email && isAllowedAdminEmail(user.email)) {
     return 'admin';
   }
-  if (profile?.role === 'consultant' || profile?.is_consultant) {
+  if (profile?.role === 'consultant') {
     return 'consultant';
   }
   return 'client';
@@ -168,7 +168,7 @@ export function sanitizeUserRole(
     return 'developer_admin';
   }
 
-  if (currentRole === 'consultant' || (typeof profileOrRole === 'object' && profileOrRole?.is_consultant)) {
+  if (currentRole === 'consultant') {
     return 'consultant';
   }
 

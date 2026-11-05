@@ -179,16 +179,16 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
               name: approvedApp.name,
               email: userEmail,
               user_id: userId,
-              is_active: false,
-              title: '',
-              bio: '',
-              expertise: [],
+              is_active: true,
+              title: approvedApp.title || '',
+              bio: approvedApp.bio || '',
+              expertise: approvedApp.expertise || [],
               pricing_30: 0,
               pricing_60: 0,
             })
             .select()
             .single(),
-          'draft consultant creation'
+          'active consultant creation'
         );
 
         if (!createErr && newConsultant) {

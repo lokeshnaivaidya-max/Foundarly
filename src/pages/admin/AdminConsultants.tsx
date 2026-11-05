@@ -307,11 +307,11 @@ export default function AdminConsultants() {
         toast({ title: "Deleted", description: "Consultant removed successfully. No linked account found." });
       }
       loadConsultants();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting consultant:', error);
       toast({
-        title: "Error",
-        description: "Failed to delete consultant",
+        title: "Delete Failed",
+        description: error?.message || "Failed to delete consultant. Please try again.",
         variant: "destructive"
       });
     }

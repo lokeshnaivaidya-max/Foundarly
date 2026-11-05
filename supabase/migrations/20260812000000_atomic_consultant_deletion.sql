@@ -19,12 +19,13 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
   consultant_user_id UUID;
+  consultant_email TEXT;
   profile_role TEXT;
   result JSONB;
   profile_downgraded BOOLEAN := FALSE;
 BEGIN
-  -- Step 1: Resolve the consultant's linked user_id (never trust client input)
-  SELECT user_id INTO consultant_user_id
+  -- Step 1: Resolve the consultant's linked user_id and email (never trust client input)
+  SELECT user_id, email INTO consultant_user_id, consultant_email
   FROM public.consultants
   WHERE id = consultant_id;
 
@@ -45,10 +46,81 @@ BEGIN
     WHERE id = consultant_user_id;
   END IF;
 
-  -- Step 3: Delete the consultant record FIRST (inside same transaction)
+  -- Step 3: Safely clean up foreign-key dependencies to avoid constraint violations
+  BEGIN
+    UPDATE public.testimonials SET consultant_id = NULL WHERE consultant_id = consultant_id;
+  EXCEPTION WHEN undefined_table OR undefined_column THEN
+    NULL;
+  END;
+
+  BEGIN
+    UPDATE public.bookings SET consultant_id = NULL WHERE consultant_id = consultant_id;
+  EXCEPTION WHEN undefined_table OR undefined_column THEN
+    NULL;
+  END;
+
+  BEGIN
+    DELETE FROM public.consultant_earnings WHERE consultant_id = consultant_id;
+  EXCEPTION WHEN undefined_table OR undefined_column THEN
+    NULL;
+  END;
+
+  BEGIN
+    DELETE FROM public.payout_requests WHERE consultant_id = consultant_id;
+  EXCEPTION WHEN undefined_table OR undefined_column THEN
+    NULL;
+  END;
+
+  BEGIN
+    DELETE FROM public.earnings_history WHERE consultant_id = consultant_id;
+  EXCEPTION WHEN undefined_table OR undefined_column THEN
+    NULL;
+  END;
+
+  BEGIN
+    DELETE FROM public.follow_up_requests WHERE consultant_id = consultant_id;
+  EXCEPTION WHEN undefined_table OR undefined_column THEN
+    NULL;
+  END;
+
+  BEGIN
+    DELETE FROM public.consultant_availability_settings WHERE consultant_id = consultant_id;
+  EXCEPTION WHEN undefined_table OR undefined_column THEN
+    NULL;
+  END;
+
+  BEGIN
+    DELETE FROM public.consultant_time_off WHERE consultant_id = consultant_id;
+  EXCEPTION WHEN undefined_table OR undefined_column THEN
+    NULL;
+  END;
+
+  -- Demote/reject any matching approved applications so they cannot resurrect the consultant
+  BEGIN
+    IF consultant_email IS NOT NULL AND consultant_user_id IS NOT NULL THEN
+      UPDATE public.consultant_applications
+      SET status = 'rejected'
+      WHERE (email ILIKE consultant_email OR user_id = consultant_user_id)
+        AND status = 'approved';
+    ELSIF consultant_email IS NOT NULL THEN
+      UPDATE public.consultant_applications
+      SET status = 'rejected'
+      WHERE email ILIKE consultant_email
+        AND status = 'approved';
+    ELSIF consultant_user_id IS NOT NULL THEN
+      UPDATE public.consultant_applications
+      SET status = 'rejected'
+      WHERE user_id = consultant_user_id
+        AND status = 'approved';
+    END IF;
+  EXCEPTION WHEN undefined_table OR undefined_column THEN
+    NULL;
+  END;
+
+  -- Step 4: Delete the consultant record (inside same transaction)
   DELETE FROM public.consultants WHERE id = consultant_id;
 
-  -- Step 4: Downgrade profile role from consultant to client in the SAME transaction
+  -- Step 5: Downgrade profile role from consultant to client in the SAME transaction
   IF consultant_user_id IS NOT NULL THEN
     IF profile_role = 'consultant' THEN
       UPDATE public.profiles

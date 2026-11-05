@@ -601,14 +601,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             let q: any = supabase
               .from('consultants')
               .select('id, name, email, user_id, is_active');
-            // Strict: match ONLY by authenticated user_id. No email ilike.
-            q = q.eq('user_id', userId);
+            if (userEmail && emailVerified) {
+              q = q.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
+            } else {
+              q = q.eq('user_id', userId);
+            }
             const outcome = await Promise.race([
               q.limit(1),
               new Promise<null>((r) => setTimeout(() => r(null), 3000)),
             ]);
             if (!outcome) return { matched: null as null, definitivelyEmpty: false };
-            const outcomeWithData = outcome as { data?: Array<{ id: string; name: string | null; user_id: string | null }>; error?: any };
+            const outcomeWithData = outcome as { data?: Array<{ id: string; name: string | null; email?: string | null; user_id: string | null; is_active?: boolean }>; error?: any };
             const rawConsultants = outcomeWithData?.data;
             const queryError = outcomeWithData?.error;
             if (Array.isArray(rawConsultants) && rawConsultants.length === 0 && !queryError) {
@@ -620,8 +623,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         })();
 
-        // Approved application rescue — needed only to elevate an account with
-        // an approved consultant application but no linked consultants row.
+        // Approved application rescue — needed to elevate an account with
+        // an approved consultant application or pending linking.
         const applicationRescuePromise = (async () => {
           if (!userEmail || !emailVerified) return null;
           try {
@@ -643,9 +646,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         })();
 
-        const [profilesOut, initialConsultantOut] = await Promise.all([
+        const [profilesOut, initialConsultantOut, approvedApp] = await Promise.all([
           Promise.race([dbQueryPromise, timeoutPromise]),
           consultantRescuePromise,
+          applicationRescuePromise,
         ]);
         let consultantOut = initialConsultantOut;
         const { data, error: profileFetchError } = profilesOut;
@@ -728,20 +732,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // 5. Consultant check:
-        // A user is a consultant if and ONLY if:
-        // - profile in DB has role === 'consultant'
-        // - AND exact consultants.user_id === userId
-        // - AND consultant is active (is_active === true strictly; null/undefined must not grant access)
-        // Never grant consultant access based on email, localStorage, user metadata, or profile role alone.
-        let hasActiveConsultantRecord = Boolean(
+        // A user is a consultant if:
+        // - They have an active consultant record matching their user_id or verified email
+        // - OR they have an approved application in consultant_applications
+        // If consultant record was deleted and no approved application exists, they are strictly client.
+        const isMatchedConsultant = Boolean(
           consultantOut?.matched &&
-          consultantOut.matched.user_id === userId &&
+          (consultantOut.matched.user_id === userId ||
+            (userEmail && emailVerified && consultantOut.matched.email?.toLowerCase().trim() === userEmail.toLowerCase().trim())) &&
           (consultantOut.matched as any).is_active === true
         );
 
-        let isConsultantUser = Boolean(
-          profileData?.role === 'consultant' && hasActiveConsultantRecord
+        let hasActiveConsultantRecord = Boolean(
+          isMatchedConsultant || (approvedApp && emailVerified)
         );
+
+        let isConsultantUser = Boolean(
+          (profileData?.role === 'consultant' && hasActiveConsultantRecord) ||
+          (hasActiveConsultantRecord && (consultantOut?.matched?.user_id === userId || emailVerified))
+        );
+
+        if (consultantOut?.matched && consultantOut.matched.user_id !== userId && userEmail && emailVerified) {
+          supabase
+            .from('consultants')
+            .update({ user_id: userId, is_active: true })
+            .eq('id', consultantOut.matched.id)
+            .then();
+        }
 
         if (!profilesLookupFailed) {
           // If not recognized yet, but user email is verified and not an admin, check /api/consultant/me for authoritative self-linking
@@ -763,7 +780,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 clearTimeout(timeoutId);
                 if (meRes?.ok) {
                   const meData = await meRes.json().catch(() => null);
-                  if (meData?.success && meData?.isConsultant && meData?.linked && meData?.consultant?.is_active === true) {
+                  if (meData?.success && meData?.isConsultant && meData?.consultant?.is_active === true) {
                     isConsultantUser = true;
                     hasActiveConsultantRecord = true;
                     consultantOut = { matched: meData.consultant, definitivelyEmpty: false };
@@ -776,7 +793,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        const consultantName = consultantOut?.matched?.name || profileData?.full_name;
+        const consultantName = consultantOut?.matched?.name || approvedApp?.name || profileData?.full_name;
 
         // Demote unlinked/orphan consultant profiles in memory/session so they are strictly treated as client
         if (profileData?.role === 'consultant' && !hasActiveConsultantRecord) {
@@ -784,6 +801,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             userId,
             fullName: profileData.full_name,
           });
+          supabase.from('profiles').update({ role: 'client' }).eq('id', userId).eq('role', 'consultant').then();
         }
 
         secureLog.info('[AuthContext] fetchProfile: consultant check status', {
@@ -793,7 +811,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           isConsultantUser,
         });
 
-        if (isConsultantUser && consultantOut?.matched) {
+        if (isConsultantUser && (consultantOut?.matched || approvedApp)) {
           const consultantProfile: Profile = {
             id: userId,
             role: 'consultant',

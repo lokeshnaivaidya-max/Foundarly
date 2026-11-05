@@ -304,9 +304,10 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       // application text, and never change publication state — public
       // profile content and is_active are managed explicitly via
       // Manage Consultants.
-      console.log(`[Approve Consultant] Updating existing consultant record ${consultant.id} for ${cleanEmail} (identity fields only)`);
+      console.log(`[Approve Consultant] Updating existing consultant record ${consultant.id} for ${cleanEmail} (identity fields and activation)`);
       const updateData: Record<string, any> = {
         email: cleanEmail,
+        is_active: true,
       };
 
       if (linkedUserId) {
@@ -331,22 +332,19 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       }
       consultant = updatedCons;
     } else {
-      // First approval: create a NON-PUBLIC DRAFT record. Approval activates
-      // the applicant's ACCOUNT (profiles.role = consultant) but does NOT
-      // publish application free-text as a public consultant profile. The
-      // draft (is_active: false) is reviewed, completed and published
-      // explicitly via the Manage Consultants toggle.
-      console.log(`[Approve Consultant] Inserting NON-PUBLIC draft consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
+      // First approval: create an ACTIVE record with clean defaults so the user
+      // has immediate access to their consultant dashboard upon sign-in.
+      console.log(`[Approve Consultant] Inserting active consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
       const { data: newCons, error: insertErr } = await activeDbClient
         .from('consultants')
         .insert({
           name: app.name,
           email: cleanEmail,
           user_id: linkedUserId || null,
-          is_active: false,
-          title: '',
-          bio: '',
-          expertise: [],
+          is_active: true,
+          title: app.title || 'Professional Consultant',
+          bio: app.bio || '',
+          expertise: app.expertise || [],
           pricing_30: 0,
           pricing_60: 0,
         })

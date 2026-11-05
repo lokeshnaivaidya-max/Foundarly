@@ -96,12 +96,21 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       return res.status(410).json({ success: false, error: 'Invalid or expired session token.' });
     }
 
-    // 2. Authorize caller — only allowlisted Admins or Developer Admin
+    // 2. Authorize caller — allowlisted Admins, Developer Admin, or database profile with admin/super_admin/developer_admin role
     const adminEmail = (adminUser.email || '').toLowerCase().trim();
     const isAllowlisted = isAllowedAdminEmail(adminEmail);
     const isDevAdmin = isDeveloperAdmin(adminUser, null);
 
-    if (!isAllowlisted && !isDevAdmin) {
+    const { data: callerProfile } = await bounded(
+      supabaseAdminClient.from('profiles').select('role').eq('id', adminUser.id).maybeSingle(),
+      'lookup caller profile'
+    );
+    const isProfileAdmin =
+      callerProfile?.role === 'admin' ||
+      callerProfile?.role === 'super_admin' ||
+      callerProfile?.role === 'developer_admin';
+
+    if (!isAllowlisted && !isDevAdmin && !isProfileAdmin) {
       return res.status(403).json({ success: false, error: 'Forbidden. Admin or Developer Admin authorization required.' });
     }
 
@@ -127,7 +136,8 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }
 
     // 4. Invoke the ATOMIC PostgreSQL RPC via service-role
-    //    - resolves linked user_id from the consultants table (never from the client)
+    //    - resolves linked user_id and email from the consultants table (never from the client)
+    //    - cascades foreign key dependencies safely
     //    - deletes consultant + downgrades associated profiles.role 'consultant' → 'client' in ONE transaction
     //    - rolls back entirely if any step fails
     const { data, error: rpcError } = await bounded(
@@ -149,9 +159,9 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     if (rpcError) {
       console.warn('[Delete Consultant] Atomic RPC unavailable or failed, executing service-role fallback:', rpcError.message);
       
-      // 1. Fetch consultant row to obtain linked user_id
+      // 1. Fetch consultant row to obtain linked user_id and email
       const { data: consultantRow, error: fetchErr } = await bounded(
-        supabaseAdminClient.from('consultants').select('id, user_id').eq('id', consultantId).maybeSingle(),
+        supabaseAdminClient.from('consultants').select('id, user_id, email').eq('id', consultantId).maybeSingle(),
         'fetch consultant for deletion'
       );
 
@@ -163,6 +173,37 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       }
 
       const linkedUserId = consultantRow.user_id || null;
+      const consultantEmail = consultantRow.email || null;
+
+      // Clean up dependent child records before deleting parent to avoid foreign-key violations
+      await Promise.allSettled([
+        supabaseAdminClient.from('testimonials').update({ consultant_id: null }).eq('consultant_id', consultantId),
+        supabaseAdminClient.from('bookings').update({ consultant_id: null }).eq('consultant_id', consultantId),
+        supabaseAdminClient.from('consultant_earnings').delete().eq('consultant_id', consultantId),
+        supabaseAdminClient.from('payout_requests').delete().eq('consultant_id', consultantId),
+        supabaseAdminClient.from('earnings_history').delete().eq('consultant_id', consultantId),
+        supabaseAdminClient.from('follow_up_requests').delete().eq('consultant_id', consultantId),
+        supabaseAdminClient.from('consultant_availability_settings').delete().eq('consultant_id', consultantId),
+        supabaseAdminClient.from('consultant_time_off').delete().eq('consultant_id', consultantId),
+      ]);
+
+      // Reject/unlink matching approved applications so they cannot resurrect the deleted consultant
+      if (consultantEmail) {
+        await supabaseAdminClient
+          .from('consultant_applications')
+          .update({ status: 'rejected' })
+          .ilike('email', consultantEmail)
+          .eq('status', 'approved')
+          .catch(() => null);
+      }
+      if (linkedUserId) {
+        await supabaseAdminClient
+          .from('consultant_applications')
+          .update({ status: 'rejected' })
+          .eq('user_id', linkedUserId)
+          .eq('status', 'approved')
+          .catch(() => null);
+      }
 
       // 2. Delete the consultant record
       const { error: deleteErr } = await bounded(

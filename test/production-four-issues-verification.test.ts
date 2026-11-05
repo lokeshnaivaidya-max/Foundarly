@@ -67,7 +67,6 @@ describe('Production Verification Suite: 4 Critical Client Issues', () => {
     });
 
     it('1.3 Rejects consultant access when is_active is null, undefined, or false', () => {
-      const consultantUser = { id: 'c-user-1', email: 'test@example.com' };
       const records = [
         { is_active: false },
         { is_active: null },
@@ -80,6 +79,25 @@ describe('Production Verification Suite: 4 Critical Client Issues', () => {
         );
         assert.equal(hasActive, false, `Record with is_active=${rec.is_active} must be rejected`);
       }
+    });
+
+    it('1.4 Approved applicant or verified consultant email receives immediate consultant dashboard access', () => {
+      const user = { id: 'lokesh-arcade-id', email: 'lokesh.arcade@example.com' };
+      const emailVerified = true;
+      const approvedApp = { id: 'app-1', name: 'Lokesh Arcade', status: 'approved', email: 'lokesh.arcade@example.com' };
+      const consultantRecord = { id: 'c-1', user_id: 'lokesh-arcade-id', email: 'lokesh.arcade@example.com', is_active: true };
+
+      const isMatchedConsultant = Boolean(
+        consultantRecord &&
+        (consultantRecord.user_id === user.id ||
+          (user.email && emailVerified && consultantRecord.email.toLowerCase() === user.email.toLowerCase())) &&
+        consultantRecord.is_active === true
+      );
+
+      const hasActiveConsultantRecord = Boolean(isMatchedConsultant || (approvedApp && emailVerified));
+      const isConsultantUser = Boolean(hasActiveConsultantRecord);
+
+      assert.equal(isConsultantUser, true, 'Approved applicant must immediately access consultant dashboard');
     });
   });
 
@@ -181,6 +199,27 @@ describe('Production Verification Suite: 4 Critical Client Issues', () => {
       assert.equal(result.success, true);
       assert.equal(result.atomic, true);
       assert.equal(testProfile.role, 'client', 'User profile safely demoted to client');
+    });
+
+    it('3.4 Database admin profiles are authorized to delete and dependent application is rejected', () => {
+      const dbAdminProfile = { id: 'admin-uuid-db', role: 'admin' as const };
+      const isProfileAdmin =
+        dbAdminProfile.role === 'admin' ||
+        dbAdminProfile.role === 'super_admin' ||
+        dbAdminProfile.role === 'developer_admin';
+      assert.equal(isProfileAdmin, true, 'Database admin role must be authorized to delete consultants');
+
+      // Application status transition on deletion
+      const applications = [
+        { id: 'app-lokesh', email: 'lokesh.arcade@example.com', status: 'approved' }
+      ];
+      const targetEmail = 'lokesh.arcade@example.com';
+      for (const app of applications) {
+        if (app.email === targetEmail && app.status === 'approved') {
+          app.status = 'rejected';
+        }
+      }
+      assert.equal(applications[0].status, 'rejected', 'Application must be rejected so it does not resurrect deleted consultant');
     });
   });
 

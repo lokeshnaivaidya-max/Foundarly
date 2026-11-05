@@ -2721,23 +2721,81 @@ async function startServer() {
         consultant_id: consultantId,
       });
 
-      if (rpcError) {
-        console.error("[Delete Consultant API] Atomic RPC failed:", rpcError.message);
-        return res.status(500).json({
-          success: false,
-          error: "Atomic deletion failed. Neither the consultant record nor the profile role were changed.",
-          detail: rpcError.message,
-        });
-      }
-
-      const result = data as {
+      let result: {
         success?: boolean;
         error?: string;
         deleted?: boolean;
         profile_downgraded?: boolean;
         user_id?: string | null;
         original_profile_role?: string | null;
-      };
+      } | null = (data as any) || null;
+
+      if (rpcError) {
+        console.warn("[Delete Consultant API] Atomic RPC unavailable or failed, executing service-role fallback:", rpcError.message);
+
+        // 1. Fetch consultant row to obtain linked user_id
+        const { data: consultantRow, error: fetchErr } = await supabaseAdminClient
+          .from("consultants")
+          .select("id, user_id")
+          .eq("id", consultantId)
+          .maybeSingle();
+
+        if (fetchErr || !consultantRow) {
+          return res.status(404).json({
+            success: false,
+            error: "Consultant record not found.",
+          });
+        }
+
+        const linkedUserId = consultantRow.user_id || null;
+
+        // 2. Delete the consultant record
+        const { error: deleteErr } = await supabaseAdminClient
+          .from("consultants")
+          .delete()
+          .eq("id", consultantId);
+
+        if (deleteErr) {
+          console.error("[Delete Consultant API] Fallback delete failed:", deleteErr.message);
+          return res.status(500).json({
+            success: false,
+            error: `Failed to delete consultant record: ${deleteErr.message}`,
+          });
+        }
+
+        let profileDowngraded = false;
+        let originalRole: string | null = null;
+
+        // 3. Downgrade profile if user was linked and has role 'consultant'
+        if (linkedUserId) {
+          const { data: profileRow } = await supabaseAdminClient
+            .from("profiles")
+            .select("role")
+            .eq("id", linkedUserId)
+            .maybeSingle();
+
+          originalRole = profileRow?.role || null;
+          if (originalRole === "consultant") {
+            const { error: downgradeErr } = await supabaseAdminClient
+              .from("profiles")
+              .update({ role: "client" })
+              .eq("id", linkedUserId)
+              .eq("role", "consultant");
+
+            if (!downgradeErr) {
+              profileDowngraded = true;
+            }
+          }
+        }
+
+        result = {
+          success: true,
+          deleted: true,
+          profile_downgraded: profileDowngraded,
+          user_id: linkedUserId,
+          original_profile_role: originalRole,
+        };
+      }
 
       if (!result?.success) {
         return res.status(404).json({

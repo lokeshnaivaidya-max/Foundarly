@@ -86,31 +86,14 @@ export default function BookingPage() {
     return getNowInIST(d).dateStr;
   })();
 
-  useEffect(() => {
-    if (!authLoading && user) {
-      if (isUserAdmin(user, profile) || isAdmin) {
-        navigate("/admin", { replace: true });
-        return;
-      }
-      if (isConsultant) {
-        navigate("/consultant/dashboard", { replace: true });
-        return;
-      }
-    } else if (!authLoading && !user) {
-      toast.error("Please login to book a session");
-      navigate("/login");
-    }
-  }, [user, profile, isAdmin, isConsultant, authLoading, navigate]);
+  // If user is not logged in when submitting, handleSubmit prompts login.
+  // We do not abruptly bounce users away from the Booking page after 3 seconds.
 
   const { data: consultants, isLoading, error: consultantsError, refetch: refetchConsultants } = useQuery({
     queryKey: ["consultants", "active"],
-    queryFn: () => consultantsService.getAll(true, true), // forceRefresh=true on every refetch
-    // NO automatic retries: the request settles in <=6s (hard deadline) and a
-    // failure surfaces the explicit error + Retry button immediately (acceptance:
-    // useful error within 8 seconds). Concurrent duplicate requests are
-    // deduplicated inside consultantsService.
+    queryFn: () => consultantsService.getAll(true, false),
     retry: 0,
-    staleTime: 0, // Always refetch to avoid stale consultant data
+    staleTime: 30000,
   });
 
   useEffect(() => {

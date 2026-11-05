@@ -643,10 +643,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         })();
 
-        const [profilesOut, consultantOut] = await Promise.all([
+        const [profilesOut, initialConsultantOut] = await Promise.all([
           Promise.race([dbQueryPromise, timeoutPromise]),
           consultantRescuePromise,
         ]);
+        let consultantOut = initialConsultantOut;
         const { data, error: profileFetchError } = profilesOut;
         const profileData = (data as Profile) || null;
         // A TIMED-OUT or errored profile lookup is a TRANSIENT failure, not

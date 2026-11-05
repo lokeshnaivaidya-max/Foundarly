@@ -126,6 +126,10 @@ export default function Header() {
   const isConsultantRole = Boolean(isConsultant);
   const isClientRole = Boolean(isClient);
 
+  // All CTA routing must use the same resolved role booleans below.
+  // The CTA and route guard below share these exact variables — no duplicate
+  // role checks elsewhere in this component.
+
   return (
     <header
       className={cn(

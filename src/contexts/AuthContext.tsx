@@ -613,16 +613,16 @@ const cached = getDegradedCachedRole(userId);
         // Consultants rescue — fast server-side (~0.4s). Returns a definitive
         // outcome so a clean 200-empty response (revocation evidence) can be
         // distinguished from a timeout or network error.
+        // ONLY match by authenticated user_id — never by email. Email-based
+        // matching would grant consultant status to any account whose email
+        // happens to match a consultant record, which misclassifies clients.
         const consultantRescuePromise = (async () => {
           try {
             let q: any = supabase
               .from('consultants')
               .select('id, name, email, user_id, is_active');
-            if (userEmail && emailVerified) {
-              q = q.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
-            } else {
-              q = q.eq('user_id', userId);
-            }
+            // Strict: match ONLY by authenticated user_id. No email ilike.
+            q = q.eq('user_id', userId);
             const outcome = await Promise.race([
               q.limit(1),
               new Promise<null>((r) => setTimeout(() => r(null), 3000)),
@@ -800,16 +800,16 @@ const cached = getDegradedCachedRole(userId);
         // user_id). If it found nothing, its 200-empty response disconfirms a
         // cached consultant role (fail-closed).
         if (!isConsultantUser && consultantOut) {
+          // Consultant record matched by user_id — this is the legitimate
+          // path: the user has an existing consultant record linked to their
+          // authenticated account. Only mark consultant if the user_id actually
+          // matches (now guaranteed by the revised rescue query above).
           isConsultantUser = true;
           consultantName = consultantName || consultantOut.name;
           consultantLookupDefinitivelyEmpty = false;
-          if (consultantOut.user_id !== userId) {
-            supabase
-              .from('consultants')
-              .update({ user_id: userId } as any)
-              .eq('id', consultantOut.id)
-              .then();
-          }
+          // No longer update user_id on the consultant record — that was the
+          // source of cross-user contamination. The link was established at
+          // admin approval time; preserve the existing relationship.
           secureLog.info('[AuthContext] fetchProfile: consultant resolved via concurrent consultants rescue', {
             correlationId, userId, consultantId: consultantOut.id,
           });

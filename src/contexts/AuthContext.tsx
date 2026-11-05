@@ -1132,7 +1132,7 @@ const cached = getDegradedCachedRole(userId);
   const isCurrentSuperAdmin = isSuperAdmin(user, profile);
   const isCurrentDevAdmin = isDeveloperAdmin(user, profile);
   const isCurrentAdmin = isUserAdmin(user, profile);
-  const isCurrentConsultant = !isCurrentAdmin && (profile?.role === 'consultant' || profile?.is_consultant === true);
+  const isCurrentConsultant = !isCurrentAdmin && profile?.role === 'consultant';
   const isCurrentClient = !isCurrentAdmin && !isCurrentConsultant;
 
   const hasRole = (role: UserRole) => {

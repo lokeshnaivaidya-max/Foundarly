@@ -349,7 +349,7 @@ describe('Foundarly Consultant Availability & Consultation Pricing Management', 
 
   it('13. Admin role authorization check: only authorized admin roles can update settings', () => {
     function canManageAvailability(userRole: string, email: string): boolean {
-      const allowedAdminEmails = ['admin@foundarly.com', 'lokesh.naivaidya@gmail.com'];
+      const allowedAdminEmails = ['admin@foundarly.com', 'admin@foundarlybusinessworld.in'];
       if (userRole === 'developer_admin') return true;
       if (userRole === 'super_admin' && allowedAdminEmails.includes(email.toLowerCase())) return true;
       if (userRole === 'admin' && allowedAdminEmails.includes(email.toLowerCase())) return true;

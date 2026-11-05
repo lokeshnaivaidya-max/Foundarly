@@ -56,8 +56,6 @@ export function getAdminAllowlist(): string[] {
   const defaults = [
     'admin@foundarly.com',
     'admin@foundarlybusinessworld.in',
-    'jvedtechadmin@gmail.com',
-    'lokesh.naivaidya@gmail.com',
   ];
 
   return Array.from(new Set([...defaults, ...parsedList]));

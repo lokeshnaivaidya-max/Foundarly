@@ -732,15 +732,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // - AND exact consultants.user_id === userId
         // - AND consultant is active (is_active === true strictly; null/undefined must not grant access)
         // Never grant consultant access based on email, localStorage, user metadata, or profile role alone.
-        const hasActiveConsultantRecord = Boolean(
+        let hasActiveConsultantRecord = Boolean(
           consultantOut?.matched &&
           consultantOut.matched.user_id === userId &&
           (consultantOut.matched as any).is_active === true
         );
 
-        const isConsultantUser = Boolean(
+        let isConsultantUser = Boolean(
           profileData?.role === 'consultant' && hasActiveConsultantRecord
         );
+
+        if (!profilesLookupFailed) {
+          // If not recognized yet, but user email is verified and not an admin, check /api/consultant/me for authoritative self-linking
+          if (!isConsultantUser && userEmail && emailVerified && !isAllowlistedAdmin) {
+            try {
+              const sessionResult = await withDbTimeout(
+                supabase.auth.getSession(),
+                'auth session lookup for self-linking',
+                2500
+              ).catch(() => null);
+              const session = sessionResult?.data?.session ?? null;
+              if (session?.access_token) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000);
+                const meRes = await fetch('/api/consultant/me', {
+                  headers: { Authorization: `Bearer ${session.access_token}` },
+                  signal: controller.signal,
+                }).catch(() => null);
+                clearTimeout(timeoutId);
+                if (meRes?.ok) {
+                  const meData = await meRes.json().catch(() => null);
+                  if (meData?.success && meData?.isConsultant && meData?.linked && meData?.consultant?.is_active === true) {
+                    isConsultantUser = true;
+                    hasActiveConsultantRecord = true;
+                    consultantOut = { matched: meData.consultant, definitivelyEmpty: false };
+                  }
+                }
+              }
+            } catch (healErr) {
+              // Non-fatal self-heal attempt
+            }
+          }
+        }
+
         const consultantName = consultantOut?.matched?.name || profileData?.full_name;
 
         // Demote unlinked/orphan consultant profiles in memory/session so they are strictly treated as client

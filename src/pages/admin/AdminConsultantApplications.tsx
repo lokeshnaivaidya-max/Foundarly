@@ -60,7 +60,7 @@ export default function AdminConsultantApplications() {
   };
 
   const handleApprove = async () => {
-    if (!selectedApp) return;
+    if (!selectedApp || processing) return;
 
     setProcessing(true);
     try {
@@ -113,7 +113,7 @@ export default function AdminConsultantApplications() {
   };
 
   const handleReject = async () => {
-    if (!selectedApp) return;
+    if (!selectedApp || processing) return;
 
     setProcessing(true);
     try {

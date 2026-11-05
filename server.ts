@@ -99,8 +99,6 @@ function getAdminAllowlist(): string[] {
     "admin@foundarly.com",
     "admin@foundarlybusinessworld.in",
     "foundarly@developer.in",
-    "jvedtechadmin@gmail.com",
-    "lokesh.naivaidya@gmail.com",
   ];
 
   return Array.from(new Set([...defaults, ...parsed]));
@@ -2360,8 +2358,8 @@ async function startServer() {
         consultant.user_id = user.id;
       }
 
-      // Self-heal profile role ONLY for non-administrator accounts
-      if (!isSuper && !isDev) {
+      // Self-heal profile role ONLY for non-administrator accounts after authoritative linking
+      if (consultant.user_id === user.id && !isSuper && !isDev) {
         await activeDbClient
           .from("profiles")
           .upsert({
@@ -2372,9 +2370,12 @@ async function startServer() {
           });
       }
 
+      const isActiveConsultant = Boolean(consultant.user_id === user.id && consultant.is_active === true);
+
       return res.json({
         success: true,
-        isConsultant: true,
+        isConsultant: isActiveConsultant,
+        isDraft: Boolean(consultant.is_active !== true),
         consultant,
       });
     } catch (err: any) {

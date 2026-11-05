@@ -82,7 +82,8 @@ describe('Atomic Consultant Deletion — Security Hardening Audit', () => {
     test('Dev Admin identity resolves via verified email', () => {
       assert.equal(isDeveloperAdmin({ email: 'foundarly@developer.in' } as any, null), true);
       assert.equal(isAllowedAdminEmail('admin@foundarly.com'), true);
-      assert.equal(isAllowedAdminEmail('lokesh.naivaidya@gmail.com'), true);
+      assert.equal(isAllowedAdminEmail('admin@foundarlybusinessworld.in'), true);
+      assert.equal(isAllowedAdminEmail('lokesh.naivaidya@gmail.com'), false);
     });
 
     test('Deletion service calls /api/admin/delete-consultant with Bearer token', () => {

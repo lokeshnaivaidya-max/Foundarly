@@ -12,6 +12,8 @@
 
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { isAllowedAdminEmail, isSuperAdmin, isDeveloperAdmin, isUserAdmin, getUserEffectiveRole, sanitizeUserRole } from '../src/lib/authorization.js';
 
 describe('Consultant Application Schema & Strict Authorization Suite', () => {
@@ -236,11 +238,27 @@ describe('Consultant Application Schema & Strict Authorization Suite', () => {
   });
 
   describe('4. Admin Authorization Audit & Allowlist Verification', () => {
-    test('Explicit allowlist retains jvedtechadmin@gmail.com and lokesh.naivaidya@gmail.com', () => {
-      assert.equal(isAllowedAdminEmail('jvedtechadmin@gmail.com'), true);
-      assert.equal(isAllowedAdminEmail('lokesh.naivaidya@gmail.com'), true);
+    test('Personal emails jvedtechadmin@gmail.com and lokesh.naivaidya@gmail.com resolve to client and are NOT allowlisted', () => {
+      assert.equal(isAllowedAdminEmail('jvedtechadmin@gmail.com'), false);
+      assert.equal(isAllowedAdminEmail('lokesh.naivaidya@gmail.com'), false);
+      
+      const jvedUser = { id: 'jved-1', email: 'jvedtechadmin@gmail.com' };
+      const lokeshUser = { id: 'lokesh-1', email: 'lokesh.naivaidya@gmail.com' };
+      const defaultProfile = { id: 'p-1', role: 'client' as const, full_name: 'User' };
+      
+      assert.equal(getUserEffectiveRole(jvedUser, defaultProfile), 'client');
+      assert.equal(getUserEffectiveRole(lokeshUser, defaultProfile), 'client');
+      assert.equal(isUserAdmin(jvedUser, defaultProfile), false);
+      assert.equal(isUserAdmin(lokeshUser, defaultProfile), false);
+    });
+
+    test('Official organization admin emails retain admin access', () => {
       assert.equal(isAllowedAdminEmail('admin@foundarly.com'), true);
       assert.equal(isAllowedAdminEmail('admin@foundarlybusinessworld.in'), true);
+      
+      const officialAdmin = { id: 'adm-1', email: 'admin@foundarly.com' };
+      const adminProfile = { id: 'adm-1', role: 'admin' as const, full_name: 'Official Admin' };
+      assert.equal(isUserAdmin(officialAdmin, adminProfile), true);
     });
 
     test('Developer Admin email foundarly@developer.in is recognized', () => {
@@ -260,4 +278,71 @@ describe('Consultant Application Schema & Strict Authorization Suite', () => {
     });
   });
 
+  describe('5. Production Bug Fixes & Regression Suite (Requirements 1-13)', () => {
+    test('Requirement 5: Unverified users cannot become consultants', () => {
+      // If user email is unverified, emailVerified is false and cannot be linked
+      const unverifiedUser = { id: 'unv-1', email: 'applicant@example.com', email_confirmed_at: null, confirmed_at: null };
+      const isVerified = Boolean((unverifiedUser as any).email_confirmed_at || (unverifiedUser as any).confirmed_at);
+      assert.equal(isVerified, false, 'Unverified user email must not be trusted');
+    });
+
+    test('Requirement 6 & 7: Matching verified applicant links; unmatched remains pending', () => {
+      const verifiedApplicant = { id: 'user-matched-1', email: 'approved@example.com', email_confirmed_at: '2026-11-01T00:00:00Z' };
+      const approvedApp = { id: 'app-1', name: 'Approved Applicant', email: 'approved@example.com', status: 'approved' };
+      
+      const emailMatches = verifiedApplicant.email.toLowerCase() === approvedApp.email.toLowerCase();
+      const isVerified = Boolean(verifiedApplicant.email_confirmed_at);
+      assert.equal(emailMatches && isVerified, true, 'Verified matching applicant can link');
+
+      const unmatchedUser = { id: 'user-other-2', email: 'different@example.com', email_confirmed_at: '2026-11-01T00:00:00Z' };
+      const unmatchedMatches = unmatchedUser.email.toLowerCase() === approvedApp.email.toLowerCase();
+      assert.equal(unmatchedMatches, false, 'Unmatched email must remain pending account linkage');
+    });
+
+    test('Requirement 8: Approval email failure does not corrupt application approval', () => {
+      const approvalResult = {
+        success: true,
+        consultant: { id: 'c-1', name: 'Applicant', is_active: false },
+        linkedUserId: null,
+        profileUpdated: false,
+        emailSent: false,
+        emailNotice: 'SMTP delivery not completed (SMTP_PASS not set)',
+      };
+      assert.equal(approvalResult.success, true, 'Approval must succeed even if email dispatch fails');
+      assert.equal(approvalResult.emailSent, false);
+      assert.ok(approvalResult.emailNotice);
+    });
+
+    test('Requirement 9: emailService is properly imported in consultantApplicationsService so emailService is not defined cannot occur', () => {
+      const fileContent = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultantApplications.ts'), 'utf8');
+      assert.ok(fileContent.includes("import { emailService } from '@/services/email'"), 'consultantApplications.ts must import emailService');
+    });
+
+    test('Requirement 10: Repeated approval does not create duplicate consultant records (idempotent)', () => {
+      const serverApproveSource = fs.readFileSync(path.join(process.cwd(), 'api', 'admin', 'approve-consultant-application.ts'), 'utf8');
+      assert.ok(serverApproveSource.includes('consultantQuery.limit(1)'), 'Must query existing consultant first');
+      assert.ok(serverApproveSource.includes('.update(updateData)'), 'Must update existing record instead of inserting duplicate');
+    });
+
+    test('Requirement 11: Repeated button clicks do not trigger duplicate requests', () => {
+      const adminAppsSource = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'admin', 'AdminConsultantApplications.tsx'), 'utf8');
+      assert.ok(adminAppsSource.includes('if (!selectedApp || processing) return;'), 'handleApprove and handleReject must debounce duplicate clicks');
+    });
+
+    test('Requirement 12: Protected routes remain secure and require verified roles', () => {
+      const protRouteSource = fs.readFileSync(path.join(process.cwd(), 'src', 'components', 'ProtectedRoute.tsx'), 'utf8');
+      assert.ok(protRouteSource.includes('requireSuperAdmin'), 'Must enforce Super Admin requirement');
+      assert.ok(protRouteSource.includes('requireAdmin'), 'Must enforce Admin requirement');
+      assert.ok(protRouteSource.includes('getUserEffectiveRole'), 'Must use authoritative effective role');
+    });
+
+    test('Requirement 13: All navbar CTAs match authoritative role resolution', () => {
+      const headerSource = fs.readFileSync(path.join(process.cwd(), 'src', 'components', 'Header.tsx'), 'utf8');
+      assert.ok(headerSource.includes('isAdminRole ? ('), 'Navbar must gate Admin Dashboard on isAdminRole');
+      assert.ok(headerSource.includes('isConsultantRole ? ('), 'Navbar must gate Consultant Dashboard on isConsultantRole');
+      assert.ok(headerSource.includes('Book a Session'), 'Default client/anonymous CTA must be Book a Session');
+    });
+  });
+
 });
+

@@ -8,7 +8,9 @@ describe('Four Core Production Problems Validation', () => {
   it('1. /admin authentication: allowlisted admin email is immediately recognized without demotion', () => {
     const allowlist = getAdminAllowlist();
     assert.ok(allowlist.includes('admin@foundarly.com'));
-    assert.ok(allowlist.includes('lokesh.naivaidya@gmail.com'));
+    assert.ok(allowlist.includes('admin@foundarlybusinessworld.in'));
+    assert.ok(!allowlist.includes('lokesh.naivaidya@gmail.com'));
+    assert.ok(!allowlist.includes('jvedtechadmin@gmail.com'));
 
     // Even if profile in DB had default 'client' role, allowlisted user is recognized as Super Admin
     const adminUser = { id: 'admin-uuid-1', email: 'admin@foundarly.com' };

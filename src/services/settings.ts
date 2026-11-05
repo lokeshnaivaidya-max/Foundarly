@@ -18,22 +18,49 @@ const FALLBACK_SETTINGS: SiteSetting[] = [
   { id: '7', setting_key: 'cancellation_window', setting_value: '24', updated_at: new Date().toISOString() }
 ];
 
+let cachedSettings: { data: SiteSetting[]; expiresAt: number } | null = null;
+let inFlightGetAll: Promise<SiteSetting[]> | null = null;
+
 export const settingsService = {
-  async getAll() {
-    try {
-      const { data, error } = await (supabase as any)
-        .from('site_settings')
-        .select('*');
-      
-      if (error) {
-        console.warn('[Site Settings] Fetch error, using default settings:', error.message);
-        return FALLBACK_SETTINGS;
-      }
-      return (data && data.length > 0 ? data : FALLBACK_SETTINGS) as SiteSetting[];
-    } catch (err: any) {
-      console.warn('[Site Settings] Unexpected fetch error, using default settings:', err);
-      return FALLBACK_SETTINGS;
+  async getAll(): Promise<SiteSetting[]> {
+    const now = Date.now();
+    if (cachedSettings && cachedSettings.expiresAt > now) {
+      return cachedSettings.data;
     }
+
+    if (inFlightGetAll) {
+      return inFlightGetAll;
+    }
+
+    inFlightGetAll = (async () => {
+      try {
+        const queryPromise = (supabase as any)
+          .from('site_settings')
+          .select('*');
+
+        const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+          setTimeout(() => resolve({ data: null, error: new Error('Settings query timeout') }), 3500)
+        );
+
+        const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
+        
+        if (error) {
+          console.warn('[Site Settings] Fetch notice, using fallback settings:', error.message);
+          return FALLBACK_SETTINGS;
+        }
+
+        const result = (data && data.length > 0 ? data : FALLBACK_SETTINGS) as SiteSetting[];
+        cachedSettings = { data: result, expiresAt: Date.now() + 60000 };
+        return result;
+      } catch (err: any) {
+        console.warn('[Site Settings] Unexpected fetch error, using fallback settings:', err?.message || err);
+        return FALLBACK_SETTINGS;
+      } finally {
+        inFlightGetAll = null;
+      }
+    })();
+
+    return inFlightGetAll;
   },
 
   async getBySetting(settingKey: string) {
@@ -93,6 +120,7 @@ export const settingsService = {
       throw new Error(`Failed to save setting '${settingKey}': ${error.message || 'Database write failed'}`);
     }
 
+    cachedSettings = null;
     return data as SiteSetting;
   },
 };

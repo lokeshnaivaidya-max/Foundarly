@@ -335,8 +335,8 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       }
     }
 
-    // 5. Authoritatively update user profile role in profiles table (unless admin)
-    if (!isSuper && !isDev) {
+    // 5. Authoritatively update user profile role in profiles table ONLY AFTER authoritative linking
+    if (linked && !isSuper && !isDev) {
       const { error: profileErr } = await bounded(
         activeDbClient
           .from('profiles')

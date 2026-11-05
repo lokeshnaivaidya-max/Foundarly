@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
+import { emailService } from '@/services/email';
 
 type ConsultantApplication = Database['public']['Tables']['consultant_applications']['Row'];
 type ConsultantApplicationInsert = Database['public']['Tables']['consultant_applications']['Insert'];
@@ -203,10 +204,18 @@ export const consultantApplicationsService = {
         }
       } else {
         const errJson = await res.json().catch(() => null);
-        console.warn('[consultantApplicationsService] Server approve endpoint notice, activating direct authenticated client flow:', errJson?.error || res.statusText);
+        const errMsg = errJson?.error || `Server approval request failed with status ${res.status}`;
+        // If server explicitly denied or reported an error, do not silently bypass with unsafe client fallback
+        if (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404) {
+          throw new Error(errMsg);
+        }
+        console.warn('[consultantApplicationsService] Server approve endpoint notice:', errMsg);
       }
     } catch (apiErr: any) {
-      console.warn('[consultantApplicationsService] Server approve endpoint unreachable, activating direct authenticated client flow:', apiErr?.message);
+      if (apiErr?.message && (apiErr.message.includes('Forbidden') || apiErr.message.includes('Unauthorized') || apiErr.message.includes('required'))) {
+        throw apiErr;
+      }
+      console.warn('[consultantApplicationsService] Server approve endpoint notice, using resilient authenticated flow:', apiErr?.message);
     }
 
     if (serverSuccess && serverResult) {

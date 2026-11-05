@@ -2505,45 +2505,48 @@ async function startServer() {
       const { data: existingConsultants } = await consultantQuery.limit(1);
       let consultant = existingConsultants?.[0] || null;
 
-      const genderValue = (app.gender?.toLowerCase() === "female" ? "female" : "male") as "male" | "female";
-      const parsedPricing30 = Number(pricing30) || 1000;
-      const parsedPricing60 = Number(pricing60) || 1800;
-
       if (consultant) {
+        // Re-approval / renewal: IDENTITY ONLY. Never overwrite reviewed
+        // professional content (title/bio/expertise/pricing) with raw
+        // application text, and never change publication state — public
+        // profile content and is_active are managed explicitly via
+        // Manage Consultants.
+        console.log(`[Approve Consultant] Updating existing consultant record ${consultant.id} for ${cleanEmail} (identity fields only)`);
         const updateData: Record<string, any> = {
-          name: app.name,
-          title: app.current_job || consultant.title || "Consultant",
-          bio: app.experience || consultant.bio || "",
-          gender: genderValue,
-          is_active: true,
           email: cleanEmail,
-          preferred_time: app.preferred_session_timing || consultant.preferred_time || "Morning (8 AM – 12 PM)",
         };
-        if (linkedUserId) updateData.user_id = linkedUserId;
 
-        const { data: updatedCons } = await activeDbClient
+        if (linkedUserId) {
+          updateData.user_id = linkedUserId;
+        }
+
+        const { data: updatedCons, error: updateErr } = await activeDbClient
           .from("consultants")
           .update(updateData)
           .eq("id", consultant.id)
           .select()
           .single();
 
+        if (updateErr) {
+          console.error("[Approve Consultant] Error updating consultant record:", updateErr);
+        }
         consultant = updatedCons || consultant;
       } else {
+        // First approval: create a NON-PUBLIC draft record with clean defaults
+        // so the account is activated without immediately publishing unreviewed free-text.
+        console.log(`[Approve Consultant] Inserting NON-PUBLIC draft consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
         const { data: newCons, error: insertErr } = await activeDbClient
           .from("consultants")
           .insert({
             name: app.name,
-            title: app.current_job || "Consultant",
-            bio: app.experience || "",
-            expertise: ["Consulting", app.qualification || "Advisory"].filter(Boolean),
-            pricing_30: parsedPricing30,
-            pricing_60: parsedPricing60,
-            gender: genderValue,
-            is_active: true,
             email: cleanEmail,
-            preferred_time: app.preferred_session_timing || "Morning (8 AM – 12 PM)",
             user_id: linkedUserId || null,
+            is_active: false,
+            title: '',
+            bio: '',
+            expertise: [],
+            pricing_30: 0,
+            pricing_60: 0,
           })
           .select()
           .single();

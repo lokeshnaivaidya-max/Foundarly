@@ -304,10 +304,9 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       // application text, and never change publication state — public
       // profile content and is_active are managed explicitly via
       // Manage Consultants.
-      console.log(`[Approve Consultant] Updating existing consultant record ${consultant.id} for ${cleanEmail} (identity fields and activation)`);
+      console.log(`[Approve Consultant] Updating existing consultant record ${consultant.id} for ${cleanEmail} (identity fields only)`);
       const updateData: Record<string, any> = {
         email: cleanEmail,
-        is_active: true,
       };
 
       if (linkedUserId) {
@@ -322,8 +321,6 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
         .single();
 
       if (updateErr || !updatedCons) {
-        // Consultant activation is the core deliverable of approval; fail loudly
-        // so the admin knows to retry instead of silently "succeeding".
         console.error('[Approve Consultant] Error updating consultant record:', updateErr);
         return res.status(500).json({
           success: false,
@@ -332,19 +329,19 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       }
       consultant = updatedCons;
     } else {
-      // First approval: create an ACTIVE record with clean defaults so the user
-      // has immediate access to their consultant dashboard upon sign-in.
-      console.log(`[Approve Consultant] Inserting active consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
+      // First approval: create a NON-PUBLIC draft record with clean defaults
+      // so the account is activated without immediately publishing unreviewed free-text.
+      console.log(`[Approve Consultant] Inserting NON-PUBLIC draft consultant record for ${cleanEmail} (linkedUserId: ${linkedUserId})`);
       const { data: newCons, error: insertErr } = await activeDbClient
         .from('consultants')
         .insert({
           name: app.name,
           email: cleanEmail,
           user_id: linkedUserId || null,
-          is_active: true,
-          title: app.title || 'Professional Consultant',
-          bio: app.bio || '',
-          expertise: app.expertise || [],
+          is_active: false,
+          title: '',
+          bio: '',
+          expertise: [],
           pricing_30: 0,
           pricing_60: 0,
         })

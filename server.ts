@@ -2368,6 +2368,7 @@ async function startServer() {
             id: user.id,
             role: "consultant",
             full_name: consultant.name,
+            is_consultant: true,
           });
       }
 
@@ -2484,6 +2485,7 @@ async function startServer() {
                 id: linkedUserId,
                 role: "consultant",
                 full_name: app.name,
+                is_consultant: true,
               });
           }
         }
@@ -2698,6 +2700,67 @@ async function startServer() {
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message, consultants: [] });
+    }
+  });
+
+  // Admin: Delete Consultant Atomically via service-role RPC
+  app.post("/api/admin/delete-consultant", requireAdminAuth, async (req, res) => {
+    try {
+      const consultantId = req.body?.consultantId;
+      if (!consultantId || typeof consultantId !== "string") {
+        return res.status(400).json({ success: false, error: "Valid consultantId (UUID) is required." });
+      }
+
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(consultantId)) {
+        return res.status(400).json({ success: false, error: "consultantId must be a valid UUID." });
+      }
+
+      const { data, error: rpcError } = await supabaseAdminClient.rpc("delete_consultant_atomically", {
+        consultant_id: consultantId,
+      });
+
+      if (rpcError) {
+        console.error("[Delete Consultant API] Atomic RPC failed:", rpcError.message);
+        return res.status(500).json({
+          success: false,
+          error: "Atomic deletion failed. Neither the consultant record nor the profile role were changed.",
+          detail: rpcError.message,
+        });
+      }
+
+      const result = data as {
+        success?: boolean;
+        error?: string;
+        deleted?: boolean;
+        profile_downgraded?: boolean;
+        user_id?: string | null;
+        original_profile_role?: string | null;
+      };
+
+      if (!result?.success) {
+        return res.status(404).json({
+          success: false,
+          error: result?.error || "Consultant record not found.",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        deleted: result.deleted ?? true,
+        profileDowngraded: result.profile_downgraded ?? false,
+        userId: result.user_id ?? null,
+        originalProfileRole: result.original_profile_role ?? null,
+        message: result.profile_downgraded
+          ? "Consultant record deleted and associated account authorization revoked (downgraded to Client)."
+          : "Consultant record deleted. Profile role was not downgraded.",
+      });
+    } catch (err: any) {
+      console.error("[Delete Consultant API] Unexpected exception:", err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || "An unexpected error occurred while deleting the consultant.",
+      });
     }
   });
 
@@ -4858,6 +4921,7 @@ async function startServer() {
           full_name: anonymizedName,
           email: anonymizedEmail,
           role: "client",
+          is_consultant: false,
           updated_at: new Date().toISOString(),
         })
         .eq("id", user.id);

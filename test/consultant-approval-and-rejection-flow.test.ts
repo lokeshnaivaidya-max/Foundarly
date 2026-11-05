@@ -437,9 +437,9 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'consultant', is_consultant: true }), 'consultant');
     });
 
-    test('Returns consultant when profile role is consultant', () => {
+    test('Returns consultant when profile is_consultant is true', () => {
       const user = mockUser('consultant@example.com');
-      assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'consultant' }), 'consultant');
+      assert.equal(getUserEffectiveRole(user, { id: 'user-123', role: 'client', is_consultant: true }), 'consultant');
     });
 
     test('Returns client for ordinary users', () => {
@@ -974,8 +974,8 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
     test('Dashboard access is independent of the public consultants listing', () => {
       const dashSource = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'ConsultantDashboard.tsx'), 'utf8');
       assert.ok(
-        dashSource.includes('profile?.role === "consultant"'),
-        'Dashboard access must be granted from the trusted profiles.role, not a public listing record'
+        dashSource.includes('profile?.role === "consultant"') && dashSource.includes('profile?.is_consultant'),
+        'Dashboard access must be granted from the activated account role, not a public listing record'
       );
       const svcSource = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultantDashboard.ts'), 'utf8');
       assert.ok(

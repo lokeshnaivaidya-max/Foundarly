@@ -27,7 +27,6 @@ type Profile = Database['public']['Tables']['profiles']['Row'] | {
   id: string;
   role?: string | null;
   full_name?: string | null;
-  is_consultant?: boolean | null;
   [key: string]: any;
 };
 
@@ -135,7 +134,7 @@ export function getUserEffectiveRole(
   if (profile?.role === 'admin' && user?.email && isAllowedAdminEmail(user.email)) {
     return 'admin';
   }
-  if (profile?.role === 'consultant') {
+  if (profile?.role === 'consultant' || (profile as any)?.is_consultant) {
     return 'consultant';
   }
   return 'client';
@@ -168,7 +167,7 @@ export function sanitizeUserRole(
     return 'developer_admin';
   }
 
-  if (currentRole === 'consultant') {
+  if (currentRole === 'consultant' || (typeof profileOrRole === 'object' && (profileOrRole as any)?.is_consultant)) {
     return 'consultant';
   }
 

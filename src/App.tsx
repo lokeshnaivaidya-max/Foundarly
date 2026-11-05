@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -14,56 +14,63 @@ import AIChatWidget from "@/components/AIChatWidget";
 import { CookieConsent } from "@/components/CookieConsent";
 import { PaymentRealtimeListener } from "@/components/PaymentRealtimeListener";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { PageLoader } from "@/components/PageLoader";
+
+// Eager load primary landing page for maximum initial load performance
 import Index from "./pages/Index";
-import Consultants from "./pages/Consultants";
-import Booking from "./pages/Booking";
-import MyBookings from "./pages/MyBookings";
-import NetworkHub from "./pages/NetworkHub";
-import ChannelView from "./pages/ChannelView";
-import Pricing from "./pages/Pricing";
-import About from "./pages/About";
-import Blog from "./pages/Blog";
-import BlogPost from "./pages/BlogPost";
-import FAQs from "./pages/FAQs";
-import Login from "./pages/Login";
-import ResetPasswordPage from "./pages/ResetPassword";
-import AdminLoginPage from "./pages/AdminLogin";
-import NotFound from "./pages/NotFound";
-import AdminLayout from "./components/admin/AdminLayout";
-import AdminOverview from "./pages/admin/AdminOverview";
-import AdminContent from "./pages/admin/AdminContent";
-import AdminTestimonials from "./pages/admin/AdminTestimonials";
-import AdminConsultants from "./pages/admin/AdminConsultants";
-import AdminAvailabilityPricing from "./pages/admin/AdminAvailabilityPricing";
-import AdminBookings from "./pages/admin/AdminBookings";
-import AdminBlog from "./pages/admin/AdminBlog";
-import AdminUsers from "./pages/admin/AdminUsers";
-import AdminSettings from "./pages/admin/AdminSettings";
-import AdminFAQs from "./pages/admin/AdminFAQs";
-import AdminPricing from "./pages/admin/AdminPricing";
-import AdminNetworkingChannels from "./pages/admin/AdminNetworkingChannels";
-import AdminNetworkingGroups from "./pages/admin/AdminNetworkingGroups";
-import AdminNetworkingMessages from "./pages/admin/AdminNetworkingMessages";
-import AdminNetworkingShowcases from "./pages/admin/AdminNetworkingShowcases";
-import AdminNetworkingReports from "./pages/admin/AdminNetworkingReports";
-import AdminConsultantApplications from "./pages/admin/AdminConsultantApplications";
-import AdminCategories from "./pages/admin/AdminCategories";
-import AdminReferrals from "./pages/admin/AdminReferrals";
-import DeveloperPortal from "./pages/admin/DeveloperPortal";
-import AdminAdministrators from "./pages/admin/AdminAdministrators";
-import AdminPayouts from "./pages/admin/AdminPayouts";
-import AdminPayments from "./pages/admin/AdminPayments";
-import UPIVerification from "./pages/admin/UPIVerification";
-import ApplyConsultant from "./pages/ApplyConsultant";
-import Terms from "./pages/Terms";
-import Privacy from "./pages/Privacy";
-import NetworkingTerms from "./pages/NetworkingTerms";
-import Meeting from "./pages/Meeting";
-import CameraTest from "./pages/CameraTest";
-import Review from "./pages/Review";
-import UPIPaymentPage from "./pages/UPIPayment";
-import ConsultantDashboard from "./pages/ConsultantDashboard";
-import ConsultantProfile from "./pages/ConsultantProfile";
+
+// Lazy-load secondary and role-specific routes with React.lazy
+const Consultants = lazy(() => import("./pages/Consultants"));
+const Booking = lazy(() => import("./pages/Booking"));
+const MyBookings = lazy(() => import("./pages/MyBookings"));
+const NetworkHub = lazy(() => import("./pages/NetworkHub"));
+const ChannelView = lazy(() => import("./pages/ChannelView"));
+const Pricing = lazy(() => import("./pages/Pricing"));
+const About = lazy(() => import("./pages/About"));
+const Blog = lazy(() => import("./pages/Blog"));
+const BlogPost = lazy(() => import("./pages/BlogPost"));
+const FAQs = lazy(() => import("./pages/FAQs"));
+const Login = lazy(() => import("./pages/Login"));
+const ResetPasswordPage = lazy(() => import("./pages/ResetPassword"));
+const AdminLoginPage = lazy(() => import("./pages/AdminLogin"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const ApplyConsultant = lazy(() => import("./pages/ApplyConsultant"));
+const Terms = lazy(() => import("./pages/Terms"));
+const Privacy = lazy(() => import("./pages/Privacy"));
+const NetworkingTerms = lazy(() => import("./pages/NetworkingTerms"));
+const Meeting = lazy(() => import("./pages/Meeting"));
+const CameraTest = lazy(() => import("./pages/CameraTest"));
+const Review = lazy(() => import("./pages/Review"));
+const UPIPaymentPage = lazy(() => import("./pages/UPIPayment"));
+const ConsultantDashboard = lazy(() => import("./pages/ConsultantDashboard"));
+const ConsultantProfile = lazy(() => import("./pages/ConsultantProfile"));
+
+// Lazy-load Admin routes
+const AdminLayout = lazy(() => import("./components/admin/AdminLayout"));
+const AdminOverview = lazy(() => import("./pages/admin/AdminOverview"));
+const AdminContent = lazy(() => import("./pages/admin/AdminContent"));
+const AdminTestimonials = lazy(() => import("./pages/admin/AdminTestimonials"));
+const AdminConsultants = lazy(() => import("./pages/admin/AdminConsultants"));
+const AdminAvailabilityPricing = lazy(() => import("./pages/admin/AdminAvailabilityPricing"));
+const AdminBookings = lazy(() => import("./pages/admin/AdminBookings"));
+const AdminBlog = lazy(() => import("./pages/admin/AdminBlog"));
+const AdminUsers = lazy(() => import("./pages/admin/AdminUsers"));
+const AdminSettings = lazy(() => import("./pages/admin/AdminSettings"));
+const AdminFAQs = lazy(() => import("./pages/admin/AdminFAQs"));
+const AdminPricing = lazy(() => import("./pages/admin/AdminPricing"));
+const AdminNetworkingChannels = lazy(() => import("./pages/admin/AdminNetworkingChannels"));
+const AdminNetworkingGroups = lazy(() => import("./pages/admin/AdminNetworkingGroups"));
+const AdminNetworkingMessages = lazy(() => import("./pages/admin/AdminNetworkingMessages"));
+const AdminNetworkingShowcases = lazy(() => import("./pages/admin/AdminNetworkingShowcases"));
+const AdminNetworkingReports = lazy(() => import("./pages/admin/AdminNetworkingReports"));
+const AdminConsultantApplications = lazy(() => import("./pages/admin/AdminConsultantApplications"));
+const AdminCategories = lazy(() => import("./pages/admin/AdminCategories"));
+const AdminReferrals = lazy(() => import("./pages/admin/AdminReferrals"));
+const DeveloperPortal = lazy(() => import("./pages/admin/DeveloperPortal"));
+const AdminAdministrators = lazy(() => import("./pages/admin/AdminAdministrators"));
+const AdminPayouts = lazy(() => import("./pages/admin/AdminPayouts"));
+const AdminPayments = lazy(() => import("./pages/admin/AdminPayments"));
+const UPIVerification = lazy(() => import("./pages/admin/UPIVerification"));
 
 import { RolePreviewProvider } from "@/contexts/RolePreviewContext";
 import RolePreviewBanner from "@/components/RolePreviewBanner";
@@ -145,96 +152,98 @@ const App = () => (
                     <PaymentRealtimeListener />
                     <AIChatWidget />
                     <CookieConsent />
-                    <Routes>
-                    <Route path="/" element={<Index />} />
-                    <Route path="/home" element={<Index />} />
-                    <Route path="/consultants" element={<Consultants />} />
-                    <Route path="/consultants/:id" element={<ConsultantProfile />} />
-                    <Route path="/consultant/profile/:id" element={<ConsultantProfile />} />
-                    <Route path="/booking" element={<Booking />} />
-                    <Route path="/my-bookings" element={
-                      <ProtectedRoute>
-                        <MyBookings />
-                      </ProtectedRoute>
-                    } />
-                    <Route path="/consultant" element={
-                      <ProtectedRoute allowedRoles={['consultant', 'admin']}>
-                        <ConsultantDashboard />
-                      </ProtectedRoute>
-                    } />
-                    <Route path="/consultant/dashboard" element={
-                      <ProtectedRoute allowedRoles={['consultant', 'admin']}>
-                        <ConsultantDashboard />
-                      </ProtectedRoute>
-                    } />
-                    <Route path="/consultant-dashboard" element={
-                      <ProtectedRoute allowedRoles={['consultant', 'admin']}>
-                        <ConsultantDashboard />
-                      </ProtectedRoute>
-                    } />
-                    <Route path="/network" element={
-                      <ProtectedRoute>
-                        <NetworkHub />
-                      </ProtectedRoute>
-                    } />
-                    <Route path="/network/channel/:id" element={<ChannelView />} />
-                    <Route path="/pricing" element={<Pricing />} />
-                    <Route path="/about" element={<About />} />
-                    <Route path="/blog" element={<Blog />} />
-                    <Route path="/blog/:id" element={<BlogPost />} />
-                    <Route path="/faqs" element={<FAQs />} />
-                    <Route path="/apply-consultant" element={<ApplyConsultant />} />
-                    <Route path="/terms" element={<Terms />} />
-                    <Route path="/privacy" element={<Privacy />} />
-                    <Route path="/networking-terms" element={<NetworkingTerms />} />
-                    <Route path="/camera-test" element={<CameraTest />} />
-                    <Route path="/meeting/:roomId" element={<Meeting />} />
-                    <Route path="/meeting/booking/:bookingId" element={<Meeting />} />
-                    <Route path="/review/:bookingId" element={<Review />} />
-                    <Route path="/upi-payment" element={<UPIPaymentPage />} />
-                    <Route path="/login" element={<Login />} />
-                    <Route path="/reset-password" element={<ResetPasswordPage />} />
-                    <Route path="/admin/login" element={<AdminLoginPage />} />
-                    <Route
-                      path="/admin"
-                      element={
-                        <ProtectedRoute requireAdmin>
-                          <AdminLayout />
-                        </ProtectedRoute>
-                      }
-                    >
-                      <Route index element={<AdminOverview />} />
-                      <Route path="developer" element={<DeveloperPortal />} />
-                      <Route path="developer/logs" element={<DeveloperPortal defaultTab="logs" />} />
-                      <Route path="administrators" element={<ProtectedRoute requireSuperAdmin><AdminAdministrators /></ProtectedRoute>} />
-                      <Route path="users" element={<AdminUsers />} />
-                      <Route path="settings" element={<AdminSettings />} />
-                      <Route path="pricing" element={<AdminPricing />} />
-                      <Route path="bookings" element={<AdminBookings />} />
-                      <Route path="payouts" element={<AdminPayouts />} />
-                      <Route path="payments" element={<AdminPayments />} />
-                      <Route path="upi-verification" element={<UPIVerification />} />
-                      <Route path="consultants" element={<AdminConsultants />} />
-                      <Route path="availability-pricing" element={<AdminAvailabilityPricing />} />
-                      <Route path="consultation-settings" element={<AdminAvailabilityPricing />} />
-                      <Route path="consultant-applications" element={<AdminConsultantApplications />} />
-                      <Route path="content" element={<AdminContent />} />
-                      <Route path="categories" element={<AdminCategories />} />
-                      <Route path="referrals" element={<AdminReferrals />} />
-                      <Route path="testimonials" element={<AdminTestimonials />} />
-                      <Route path="blog" element={<AdminBlog />} />
-                      <Route path="faqs" element={<AdminFAQs />} />
-                      <Route path="networking/channels" element={<AdminNetworkingChannels />} />
-                      <Route path="networking/groups" element={<AdminNetworkingGroups />} />
-                      <Route path="networking/messages" element={<AdminNetworkingMessages />} />
-                      <Route path="networking/showcases" element={<AdminNetworkingShowcases />} />
-                      <Route path="networking/reports" element={<AdminNetworkingReports />} />
-                    </Route>
-                    <Route path="/404" element={<NotFound />} />
-                    <Route path="*" element={<NotFound />} />
-                  </Routes>
-                </RolePreviewProvider>
-              </BrowserRouter>
+                    <Suspense fallback={<PageLoader text="Loading..." />}>
+                      <Routes>
+                        <Route path="/" element={<Index />} />
+                        <Route path="/home" element={<Index />} />
+                        <Route path="/consultants" element={<Consultants />} />
+                        <Route path="/consultants/:id" element={<ConsultantProfile />} />
+                        <Route path="/consultant/profile/:id" element={<ConsultantProfile />} />
+                        <Route path="/booking" element={<Booking />} />
+                        <Route path="/my-bookings" element={
+                          <ProtectedRoute>
+                            <MyBookings />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/consultant" element={
+                          <ProtectedRoute allowedRoles={['consultant', 'admin']}>
+                            <ConsultantDashboard />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/consultant/dashboard" element={
+                          <ProtectedRoute allowedRoles={['consultant', 'admin']}>
+                            <ConsultantDashboard />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/consultant-dashboard" element={
+                          <ProtectedRoute allowedRoles={['consultant', 'admin']}>
+                            <ConsultantDashboard />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/network" element={
+                          <ProtectedRoute>
+                            <NetworkHub />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/network/channel/:id" element={<ChannelView />} />
+                        <Route path="/pricing" element={<Pricing />} />
+                        <Route path="/about" element={<About />} />
+                        <Route path="/blog" element={<Blog />} />
+                        <Route path="/blog/:id" element={<BlogPost />} />
+                        <Route path="/faqs" element={<FAQs />} />
+                        <Route path="/apply-consultant" element={<ApplyConsultant />} />
+                        <Route path="/terms" element={<Terms />} />
+                        <Route path="/privacy" element={<Privacy />} />
+                        <Route path="/networking-terms" element={<NetworkingTerms />} />
+                        <Route path="/camera-test" element={<CameraTest />} />
+                        <Route path="/meeting/:roomId" element={<Meeting />} />
+                        <Route path="/meeting/booking/:bookingId" element={<Meeting />} />
+                        <Route path="/review/:bookingId" element={<Review />} />
+                        <Route path="/upi-payment" element={<UPIPaymentPage />} />
+                        <Route path="/login" element={<Login />} />
+                        <Route path="/reset-password" element={<ResetPasswordPage />} />
+                        <Route path="/admin/login" element={<AdminLoginPage />} />
+                        <Route
+                          path="/admin"
+                          element={
+                            <ProtectedRoute requireAdmin>
+                              <AdminLayout />
+                            </ProtectedRoute>
+                          }
+                        >
+                          <Route index element={<AdminOverview />} />
+                          <Route path="developer" element={<DeveloperPortal />} />
+                          <Route path="developer/logs" element={<DeveloperPortal defaultTab="logs" />} />
+                          <Route path="administrators" element={<ProtectedRoute requireSuperAdmin><AdminAdministrators /></ProtectedRoute>} />
+                          <Route path="users" element={<AdminUsers />} />
+                          <Route path="settings" element={<AdminSettings />} />
+                          <Route path="pricing" element={<AdminPricing />} />
+                          <Route path="bookings" element={<AdminBookings />} />
+                          <Route path="payouts" element={<AdminPayouts />} />
+                          <Route path="payments" element={<AdminPayments />} />
+                          <Route path="upi-verification" element={<UPIVerification />} />
+                          <Route path="consultants" element={<AdminConsultants />} />
+                          <Route path="availability-pricing" element={<AdminAvailabilityPricing />} />
+                          <Route path="consultation-settings" element={<AdminAvailabilityPricing />} />
+                          <Route path="consultant-applications" element={<AdminConsultantApplications />} />
+                          <Route path="content" element={<AdminContent />} />
+                          <Route path="categories" element={<AdminCategories />} />
+                          <Route path="referrals" element={<AdminReferrals />} />
+                          <Route path="testimonials" element={<AdminTestimonials />} />
+                          <Route path="blog" element={<AdminBlog />} />
+                          <Route path="faqs" element={<AdminFAQs />} />
+                          <Route path="networking/channels" element={<AdminNetworkingChannels />} />
+                          <Route path="networking/groups" element={<AdminNetworkingGroups />} />
+                          <Route path="networking/messages" element={<AdminNetworkingMessages />} />
+                          <Route path="networking/showcases" element={<AdminNetworkingShowcases />} />
+                          <Route path="networking/reports" element={<AdminNetworkingReports />} />
+                        </Route>
+                        <Route path="/404" element={<NotFound />} />
+                        <Route path="*" element={<NotFound />} />
+                      </Routes>
+                    </Suspense>
+                  </RolePreviewProvider>
+                </BrowserRouter>
               </TooltipProvider>
             </CurrencyProvider>
           </ThemeProvider>

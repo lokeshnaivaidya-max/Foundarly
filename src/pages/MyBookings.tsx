@@ -544,7 +544,7 @@ export default function MyBookingsPage() {
       navigate("/admin", { replace: true });
       return;
     }
-    if (!authLoading && (isConsultant || profile?.role === 'consultant')) {
+    if (!authLoading && (isConsultant || profile?.role === 'consultant' || profile?.is_consultant)) {
       setLoading(false);
       navigate("/consultant/dashboard", { replace: true });
       return;
@@ -962,7 +962,7 @@ export default function MyBookingsPage() {
               <Badge variant="outline" className="text-xs border-primary/30 text-primary">
                 {profile?.role === 'admin' || profile?.role === 'super_admin' || profile?.role === 'developer_admin'
                   ? 'Administrator'
-                  : profile?.role === 'consultant'
+                  : profile?.role === 'consultant' || profile?.is_consultant
                   ? 'Verified Consultant'
                   : 'Client Account'}
               </Badge>

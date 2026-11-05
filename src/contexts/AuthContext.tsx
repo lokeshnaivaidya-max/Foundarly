@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
-import { supabase, supabaseUrl, PRIMARY_AUTH_KEY, FALLBACK_AUTH_KEY } from '@/lib/supabase';
+import { supabase, PRIMARY_AUTH_KEY, FALLBACK_AUTH_KEY } from '@/lib/supabase';
 import { secureLog } from '@/utils/security';
 import { 
   isAllowedAdminEmail, 
@@ -14,7 +14,6 @@ export interface Profile {
   id: string;
   role: UserRole;
   full_name: string | null;
-  is_consultant?: boolean;
 }
 
 // How often an ordinary client's resolved role is re-checked. A client role can
@@ -224,6 +223,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Duplicate-resolution guard: concurrent auth events must not stack parallel
   // resolution loops (fetchProfile itself is de-duplicated; this guards the loop).
   const resolveInFlightRef = useRef<boolean>(false);
+  // Monotonically increasing resolution ID to discard stale async resolution requests
+  const activeResolutionIdRef = useRef<number>(0);
   // Component-scope handle to the effect-scoped resolveProfile so an explicit
   // retry can be offered when authoritative resolution definitively fails.
   const resolveProfileRef = useRef<((userId: string, currentUser: User | null, retryCount?: number) => Promise<void>) | null>(null);
@@ -267,13 +268,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       currentUser: User | null,
       retryCount = 0
     ) => {
-      // Correlation ID: one ID per resolution CHAIN (all retries share it) so
-      // structured logs can be traced end-to-end. Never logs tokens/secrets.
+      // Monotonic resolution ID: only the most recent resolution request may write state
+      const resolutionId = ++activeResolutionIdRef.current;
       const correlationId = `res_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-      // Duplicate-resolution guard: concurrent auth events (SIGNED_IN +
-      // INITIAL_SESSION + TOKEN_REFRESHED arriving together) must not stack
-      // parallel resolution sequences for the same user. Retries (retryCount
-      // > 0) are part of the SAME sequential loop and bypass this guard.
       if (resolveInFlightRef.current && retryCount === 0) {
         return;
       }
@@ -290,36 +287,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
         setRoleResolutionFailed(false);
         const resolved = await fetchProfile(userId, currentUser, correlationId);
+        // Stale-request protection: discard if a newer resolution started
+        if (activeResolutionIdRef.current !== resolutionId) {
+          secureLog.info('[AuthContext] Stale resolution request discarded', { resolutionId, active: activeResolutionIdRef.current });
+          return;
+        }
         if (resolved) {
           profileResolvedRef.current = { userId, role: resolved.role ?? 'null', resolvedAt: Date.now() };
           setRoleResolutionFailed(false);
           secureLog.info(
             '[AuthContext] resolveProfile: role resolution complete',
-            { correlationId, userId, role: resolved.role ?? 'null', isConsultant: resolved.is_consultant ?? false }
+            { correlationId, userId, role: resolved.role ?? 'null' }
           );
         } else if (retryCount < 2) {
           // Retry after a short delay to handle transient network/RLS errors
-          // that could cause a consultant to be misclassified as a client
           secureLog.warn('[AuthContext] resolveProfile: attempt failed; scheduling retry', {
             correlationId, userId, nextAttempt: retryCount + 2,
           });
           await new Promise((r) => setTimeout(r, 500));
           return resolveProfile(userId, currentUser, retryCount + 1);
         } else {
-          // Definitive failure: the profile is unresolved. Callers (ProtectedRoute,
-          // Login) must wait or show an explicit error state — never route as client.
           setRoleResolutionFailed(true);
-// Stale-request protection: only the active resolution operation may release loading
-// or overwrite profile/role state. A resolution ID is tracked in resolveProfileRef; if a
-// different resolution ID is detected, this catch/finally block preserves the currently-
-// active chain's state and returns early so the active operation's setLoading(false) in
-// the finally block can still execute.
-const currentResolutionId = resolveProfileRef.current?.resolutionId;
-if (currentResolutionId && currentResolutionId !== resolutionId) {
-  console.warn('[AuthContext] Stale resolution request detected, preserving current state', { currentResolutionId, resolutionId });
-  return;
-}
-const cached = getDegradedCachedRole(userId);
+          const cached = getDegradedCachedRole(userId);
+          if (cached && activeResolutionIdRef.current === resolutionId) {
+            setProfile(cached);
+          }
           secureLog.warn('[AuthContext] resolveProfile: profile resolution failed after retries', {
             correlationId, userId, attempts: retryCount + 1,
           });
@@ -328,17 +320,10 @@ const cached = getDegradedCachedRole(userId);
         console.warn('[AuthContext] Authoritative profile resolution failed:', err);
         setRoleResolutionFailed(true);
       } finally {
-        // Stale-request protection: only the active resolution operation may release
-        // loading or overwrite profile/role state. A resolution ID is tracked in
-        // resolveProfileRef; if a different resolution ID is detected, this finally
-        // block preserves the currently-active chain's state and returns early so the
-        // operation that originally set loading=true can still execute its setLoading(false).
-        const currentResolutionId = resolveProfileRef.current?.resolutionId;
-        if (currentResolutionId && currentResolutionId !== resolutionId) {
-          console.warn('[AuthContext] Stale resolution request detected in finally, preserving current state', { currentResolutionId, resolutionId });
-          return;
-        }
         resolveInFlightRef.current = false;
+        if (activeResolutionIdRef.current === resolutionId && isMountedRef.current) {
+          setLoading(false);
+        }
       }
     };
 
@@ -421,61 +406,51 @@ const cached = getDegradedCachedRole(userId);
     });
 
     // Step 2: Authoritative session check via getSession without destructive racing
-    const { data: { user: adminUser }, error: userError } = await withAbortableFetch<{
-      data: { user: { id: string; email: string } | null };
-      error: { message: string } | null;
-    }>(
-      `${supabaseUrl}/auth/v1/user`,
-      {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${session?.access_token || ''}`,
-          apikey: supabaseKey || '',
-        },
-      },
-      8000,
-      'auth.getSession'
-    );
-
-    if (!isMountedRef.current) return;
-      if (userError || !adminUser) {
-        console.warn('[AuthContext] getSession notice:', userError?.message);
-        setAuthError(userError?.message);
-        if (data?.session?.user) {
-          applyAuth(data.session, data.session.user);
-          setAuthError(null);
-          if (!shouldSkipResolution(data.session.user.id)) {
+    supabase.auth.getSession().then(async ({ data, error }) => {
+      if (!isMountedRef.current) return;
+      if (error) {
+        console.warn('[AuthContext] getSession notice:', error.message);
+        setAuthError(error.message);
+      }
+      if (data?.session?.user) {
+        applyAuth(data.session, data.session.user);
+        setAuthError(null);
+        if (!shouldSkipResolution(data.session.user.id)) {
+          setLoading(true);
+          await resolveProfile(data.session.user.id, data.session.user);
+        }
+      } else {
+        // Non-destructive: check storage and active ref before clearing.
+        // Do not clear the user if onAuthStateChange has not yet had a chance
+        // to deliver INITIAL_SESSION; doing so could briefly route a logged-in
+        // user to /login during a page refresh.
+        const stored = getStoredSession();
+        if (!initialAuthProcessedRef.current) {
+          // onAuthStateChange has not yet processed the initial session;
+          // defer to it rather than clearing user here.
+          if (stored?.user && !activeUserRef.current) {
+            applyAuth(stored, stored.user);
             setLoading(true);
-            await resolveProfile(data.session.user.id, data.session.user);
+            setAuthError(null);
+            await resolveProfile(stored.user.id, stored.user);
           }
-        } else {
-          const stored = getStoredSession();
-          if (!initialAuthProcessedRef.current) {
-            if (stored?.user && !activeUserRef.current) {
-              applyAuth(stored, stored.user);
-              setAuthError(null);
-              if (!shouldSkipResolution(stored.user.id)) {
-                setLoading(true);
-                await resolveProfile(stored.user.id, stored.user);
-              }
-            } else if (!stored && !activeUserRef.current) {
-              applyAuth(null, null);
-              setProfile(null);
-            }
-          }
-          initialAuthProcessedRef.current = true;
-          if (inFlightFetchRef.current.size === 0) {
-            setLoading(false);
-          }
+        } else if (!stored && !activeUserRef.current) {
+          applyAuth(null, null);
+          setProfile(null);
         }
-      }).catch((err: any) => {
-        console.warn('[AuthContext] getSession error:', err);
-        setAuthError(err?.message || 'Session check failed');
-        initialAuthProcessedRef.current = true;
-        if (inFlightFetchRef.current.size === 0) {
-          setLoading(false);
-        }
-      });
+      }
+      initialAuthProcessedRef.current = true;
+      if (inFlightFetchRef.current.size === 0) {
+        setLoading(false);
+      }
+    }).catch((err) => {
+      console.warn('[AuthContext] getSession error:', err);
+      setAuthError(err?.message || 'Session check failed');
+      initialAuthProcessedRef.current = true;
+      if (inFlightFetchRef.current.size === 0) {
+        setLoading(false);
+      }
+    });
 
     // Safety timeout: loading will never block the UI past 2000ms, but only when no
     // authoritative profile fetch is in flight so we never render with a stale /
@@ -513,17 +488,10 @@ const cached = getDegradedCachedRole(userId);
       ) {
         secureLog.warn('[AuthContext] Profile resolution exceeded terminal watchdog; surfacing verification failure');
         setRoleResolutionFailed(true);
-// Stale-request protection: only the active resolution operation may release loading
-// or overwrite profile/role state. A resolution ID is tracked in resolveProfileRef; if a
-// different resolution ID is detected, this catch/finally block preserves the currently-
-// active chain's state and returns early so the active operation's setLoading(false) in
-// the finally block can still execute.
-const currentResolutionId = resolveProfileRef.current?.resolutionId;
-if (currentResolutionId && currentResolutionId !== resolutionId) {
-  console.warn('[AuthContext] Stale resolution request detected, preserving current state', { currentResolutionId, resolutionId });
-  return;
-}
-const cached = getDegradedCachedRole(userId);
+        const cached = getDegradedCachedRole(currentUser.id);
+        if (cached && isMountedRef.current) {
+          setProfile(cached);
+        }
         setLoading(false);
       }
     }, 30000);
@@ -636,12 +604,13 @@ const cached = getDegradedCachedRole(userId);
               new Promise<null>((r) => setTimeout(() => r(null), 3000)),
             ]);
             if (!outcome) return { matched: null as null, definitivelyEmpty: false };
-            const outcomeWithData = outcome as { data?: Array<{ id: string; name: string | null; user_id: string | null }> };
-            const rows = outcomeWithData?.data;
-            if (Array.isArray(rows) && rows.length === 0) {
+            const outcomeWithData = outcome as { data?: Array<{ id: string; name: string | null; user_id: string | null }>; error?: any };
+            const rawConsultants = outcomeWithData?.data;
+            const queryError = outcomeWithData?.error;
+            if (Array.isArray(rawConsultants) && rawConsultants.length === 0 && !queryError) {
               return { matched: null as null, definitivelyEmpty: true };
             }
-            return { matched: rows?.[0] ?? null, definitivelyEmpty: false };
+            return { matched: rawConsultants?.[0] ?? null, definitivelyEmpty: false };
           } catch {
             return { matched: null as null, definitivelyEmpty: false };
           }
@@ -831,29 +800,29 @@ const cached = getDegradedCachedRole(userId);
         if (!isConsultantUser) {
           const appOut = await applicationRescuePromise;
           if (appOut && appOut.status === 'approved') {
-            // Only grant consultant status from an explicitly approved application.
-            // Pending or rejected applications must never grant consultant access.
             isConsultantUser = true;
             consultantName = consultantName || appOut.name;
             // Best-effort self-heal: link the consultant record at sign-in.
-            try {
-              const sessionResult = await withDbTimeout(
-                supabase.auth.getSession(),
-                'self-heal session lookup',
-                3000
-              ).catch(() => null);
-              const session = sessionResult?.data?.session ?? null;
-              if (session?.access_token) {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 3500);
-                await fetch('/api/consultant/me', {
-                  headers: { Authorization: `Bearer ${session.access_token}` },
-                  signal: controller.signal,
-                }).catch(() => null);
-                clearTimeout(timeoutId);
+            if (!profilesLookupFailed) {
+              try {
+                const sessionResult = await withDbTimeout(
+                  supabase.auth.getSession(),
+                  'auth session lookup',
+                  3000
+                ).catch(() => null);
+                const session = sessionResult?.data?.session ?? null;
+                if (session?.access_token) {
+                  const controller = new AbortController();
+                  const timeoutId = setTimeout(() => controller.abort(), 3500);
+                  await fetch('/api/consultant/me', {
+                    headers: { Authorization: `Bearer ${session.access_token}` },
+                    signal: controller.signal,
+                  }).catch(() => null);
+                  clearTimeout(timeoutId);
+                }
+              } catch (healErr) {
+                console.warn('[AuthContext] Consultant self-heal notice:', healErr);
               }
-            } catch (healErr) {
-              console.warn('[AuthContext] Consultant self-heal notice:', healErr);
             }
           }
         }
@@ -916,7 +885,7 @@ const cached = getDegradedCachedRole(userId);
           id: userId,
           role: 'client',
           full_name: profileData?.full_name || fallbackName,
-          };
+        };
 
         // TRANSIENT FAILURE GUARD: if the profiles lookup timed out or errored,
         // the consultant checks above also ran against the same degraded

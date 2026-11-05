@@ -21,7 +21,7 @@ export default function ApplyConsultant() {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  const isAlreadyConsultant = Boolean(isConsultant || profile?.role === 'consultant');
+  const isAlreadyConsultant = Boolean(isConsultant || profile?.role === 'consultant' || profile?.is_consultant);
 
   const [formData, setFormData] = useState({
     name: user?.user_metadata?.full_name || '',

@@ -4,9 +4,9 @@ import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function ClosingCTASection() {
-  const { profile, isAdmin } = useAuth();
+  const { profile, isAdmin, isConsultant } = useAuth();
   const isAdminRole = Boolean(isAdmin);
-  const isConsultantRole = !isAdminRole && profile?.role === "consultant";
+  const isConsultantRole = !isAdminRole && Boolean(isConsultant);
 
   return (
     <section className="py-24 bg-gradient-hero relative overflow-hidden">

@@ -140,30 +140,27 @@ export default function ConsultantDashboard() {
       const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000));
       const consultant = await Promise.race([consultantPromise, timeoutPromise]);
 
+      // 1. Admin & Developer Admin routing: send administrators to Admin Dashboard
+      if (isAdmin) {
+        navigate('/admin', { replace: true });
+        return;
+      }
+
+      // 2. Strict authorization: user must have profile?.role === "consultant" or profile?.is_consultant
       const isUserConsultant = Boolean(
-        consultant ||
         profile?.role === "consultant" ||
-        (user.user_metadata as any)?.role === "consultant"
+        (profile as any)?.is_consultant ||
+        (consultant && consultant.user_id === user.id && (consultant as any).is_active !== false)
       );
 
       if (!isUserConsultant) {
-        console.log("User is not linked to an active consultant record");
+        console.warn("User is not linked to an active consultant record");
         setAccessDenied(true);
         setLoading(false);
         return;
       }
 
       setAccessDenied(false);
-
-      // 2. Ensure profile role is consultant in profiles table
-      if (consultant && (!profile || profile.role !== "consultant")) {
-        console.log("Syncing user role to consultant in profiles table");
-        supabase
-          .from("profiles")
-          .upsert({ id: user.id, role: "consultant", full_name: consultant.name })
-          .then(() => {})
-          .catch((err) => console.warn("Could not sync consultant role:", err));
-      }
 
       // User has verified consultant access, load dashboard data
       await loadDashboardData();

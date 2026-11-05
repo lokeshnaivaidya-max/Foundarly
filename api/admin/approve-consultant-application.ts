@@ -59,7 +59,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
   try {
     const { data: { user: adminUser }, error: userError } = await supabaseAdminClient.auth.getUser(token);
     if (userError || !adminUser) {
-      return res.status(410).json({ success: false, error: 'Invalid or expired session token.' });
+      return res.status(401).json({ success: false, error: 'Invalid or expired session token.' });
     }
 
     // 2. Verify authorization - Admin or Developer Admin only

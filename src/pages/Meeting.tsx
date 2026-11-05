@@ -318,7 +318,7 @@ export default function MeetingPage() {
   const location = useLocation();
   const { user, profile, isAdmin, loading: authLoading } = useAuth();
 
-  const dashboardPath = isAdmin ? '/admin' : (profile?.role === 'consultant') ? '/consultant/dashboard' : '/my-bookings';
+  const dashboardPath = isAdmin ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings';
 
   const webrtcServiceRef = useRef<WebRTCService | null>(null);
   const meetingContainerRef = useRef<HTMLDivElement | null>(null);

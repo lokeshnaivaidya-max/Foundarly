@@ -50,7 +50,7 @@ export default function ReviewPage() {
   const navigate = useNavigate();
   const { user, profile, isAdmin, loading: authLoading } = useAuth();
 
-  const getBackPath = () => isAdmin ? '/admin' : (profile?.role === 'consultant') ? '/consultant/dashboard' : '/my-bookings';
+  const getBackPath = () => isAdmin ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings';
 
   const [booking, setBooking] = useState<any>(null);
   const [loading, setLoading] = useState(true);

@@ -24,7 +24,7 @@ export default function AdminLoginPage() {
       if (isDeveloperAdmin(user, profile) || isSuperAdmin(user, profile) || isUserAdmin(user, profile)) {
         const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
         navigate(validAdminFrom, { replace: true });
-      } else if (profile?.role === 'consultant') {
+      } else if (profile?.role === 'consultant' || profile?.is_consultant) {
         navigate("/consultant/dashboard", { replace: true });
       } else {
         navigate("/my-bookings", { replace: true });

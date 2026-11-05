@@ -105,7 +105,7 @@ async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; n
 
   // 2. Direct Supabase query fallback — read-only, no automatic user_id updates.
   // Step 1: Try matching by user_id only (limit 2 to detect ambiguity).
-  let query = supabase.from("consultants").select("id, name, email, user_id, is_active").eq("user_id", userId).limit(2);
+  const query = supabase.from("consultants").select("id, name, email, user_id, is_active").eq("user_id", userId).limit(2);
   const { data: userMatches, error: userErr } = await query;
   
   // If user_id query returns MORE than one record → ambiguity, return null.
@@ -119,24 +119,9 @@ async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; n
     return userMatches[0];
   }
 
-  // Step 2: If user_id query returned zero records, try email fallback.
-  if (userEmail && userMatches.length !== 1) {
-    query = supabase.from("consultants").select("id, name, email, user_id, is_active");
-    query = query.ilike("email", userEmail.trim().toLowerCase());
-    const { data: emailMatches, error: emailErr } = await query.limit(2);
-    
-    if (!emailErr && emailMatches && emailMatches.length > 1) {
-      // Multiple records match email → ambiguity, do NOT select arbitrarily.
-      console.warn("[consultantDashboard] Ambiguous: multiple records match email", { userEmail, count: emailMatches.length });
-      return null;
-    }
-    
-    if (!emailErr && emailMatches && emailMatches.length === 1) {
-      return emailMatches[0]; // Unique match by email
-    }
-  }
-
-  return null; // No matching consultant record
+  // Step 2: Strict security enforcement — never match consultant records by email alone.
+  // Consultant access strictly requires authenticated user_id linking (consultants.user_id = auth.uid()).
+  return null; // No matching consultant record linked to authenticated user_id
 
   // 3. No consultant listing record: return null. Account activation
   // (profiles.role = consultant) independently grants dashboard access —

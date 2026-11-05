@@ -50,7 +50,7 @@ export default function ConsultantProfile() {
   });
 
   const isAdminRole = Boolean(isAdmin);
-  const isConsultantRole = !isAdminRole && profile?.role === "consultant";
+  const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
   const isClientRole = !isAdminRole && !isConsultantRole;
 
   const handleShare = () => {

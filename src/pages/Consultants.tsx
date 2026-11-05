@@ -57,7 +57,7 @@ function ConsultantCard({ c, index }: { c: any; index: number }) {
   const navigate = useNavigate();
 
   const isAdminRole = Boolean(isAdmin);
-  const isConsultantRole = !isAdminRole && profile?.role === "consultant";
+  const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
   const isClientRole = !isAdminRole && !isConsultantRole;
 
   const getInitials = (name: string) => {

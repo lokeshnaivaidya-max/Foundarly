@@ -12,7 +12,7 @@ export default function ConsultantsSection() {
   const { formatPrice } = useCurrency();
   const { profile, isAdmin } = useAuth();
   const isAdminRole = Boolean(isAdmin);
-  const isConsultantRole = !isAdminRole && profile?.role === "consultant";
+  const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
   const isClientRole = !isAdminRole && !isConsultantRole;
   const { data: consultants, isLoading } = useQuery({
     queryKey: ['consultants', 'active'],

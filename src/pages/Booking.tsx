@@ -92,7 +92,7 @@ export default function BookingPage() {
         navigate("/admin", { replace: true });
         return;
       }
-      if (profile?.role === "consultant") {
+      if (profile?.role === "consultant" || profile?.is_consultant) {
         navigate("/consultant/dashboard", { replace: true });
         return;
       }
@@ -459,7 +459,7 @@ export default function BookingPage() {
                   <span className="text-foreground font-medium">{formData.email}</span>
                 </p>
                 <div className="flex gap-3 justify-center">
-                  <Button onClick={() => navigate(isAdmin ? '/admin' : (profile?.role === 'consultant') ? '/consultant/dashboard' : '/my-bookings')} className="glow-gold-sm">View My Bookings</Button>
+                  <Button onClick={() => navigate(isAdmin ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings')} className="glow-gold-sm">View My Bookings</Button>
                   <Button variant="outline" onClick={() => { setSubmitted(false); setFormData({ name: "", email: "", consultant_id: "", date: "", message: "", session_duration: 60 }); }}>
                     Book Another
                   </Button>

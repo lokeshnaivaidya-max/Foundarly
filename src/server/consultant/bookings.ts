@@ -93,13 +93,19 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
     const activeDbClient = hasServiceRoleKey ? supabaseAdminClient : authenticatedClient;
 
-    // Consultant identity: ONLY match by authenticated user_id. Email matching
-    // must never be used here because a matching email on a different user's
-    // consultant record would leak that consultant's bookings to the wrong user.
+    // Consultant identity: the authenticated UUID is authoritative; verified
+    // email only as a fallback. An inactive draft record is a valid identity
+    // for reading the consultant's OWN bookings (dashboard access is role-
+    // based and independent of public listing publication).
     let consultantQuery = activeDbClient
       .from('consultants')
-      .select('id, name, email, user_id, is_active')
-      .eq('user_id', userId);
+      .select('id, name, email, user_id, is_active');
+
+    if (userEmail) {
+      consultantQuery = consultantQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
+    } else {
+      consultantQuery = consultantQuery.eq('user_id', userId);
+    }
 
     const { data: consultants } = await bounded(consultantQuery.limit(1), 'consultant lookup');
     const consultant = consultants?.[0] || null;

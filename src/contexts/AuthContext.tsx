@@ -750,10 +750,11 @@ const cached = getDegradedCachedRole(userId);
 
         // 5. Consultant check:
         // A user is a consultant if:
-        // - profile in DB has role === 'consultant' or is_consultant === true
-        // - OR /api/consultant/me returns isConsultant === true
-        // - OR user is found in the consultants table by user_id OR email
-        let isConsultantUser = Boolean(profileData?.role === 'consultant' || profileData?.is_consultant);
+        // - profile in DB has role === 'consultant'
+        // - AND user has a consultant record linked to their authenticated user ID
+        // - AND the consultant is active/explicitly approved per the application workflow
+        // Email matching alone must NEVER grant consultant access.
+        let isConsultantUser = Boolean(profileData?.role === 'consultant');
         let consultantName = profileData?.full_name;
         // Live consultants lookup outcome — a definitive 200-empty response
         // positively disconfirms a cached consultant role (fail-closed).
@@ -800,18 +801,23 @@ const cached = getDegradedCachedRole(userId);
         // user_id). If it found nothing, its 200-empty response disconfirms a
         // cached consultant role (fail-closed).
         if (!isConsultantUser && consultantOut) {
-          // Consultant record matched by user_id — this is the legitimate
-          // path: the user has an existing consultant record linked to their
-          // authenticated account. Only mark consultant if the user_id actually
-          // matches (now guaranteed by the revised rescue query above).
-          isConsultantUser = true;
-          consultantName = consultantName || consultantOut.name;
-          consultantLookupDefinitivelyEmpty = false;
+          // Consultant record matched by user_id. Only elevate if the
+          // profiles DB already confirmed consultant role earlier in this
+          // resolution. A consultant record alone cannot promote a client:
+          // consultant status requires profiles.role = 'consultant' AND
+          // explicit approval per the existing workflow.
+          if (profileData?.role === 'consultant') {
+            isConsultantUser = true;
+            consultantName = consultantName || consultantOut.name;
+            consultantLookupDefinitivelyEmpty = false;
+          }
           // No longer update user_id on the consultant record — that was the
           // source of cross-user contamination. The link was established at
           // admin approval time; preserve the existing relationship.
-          secureLog.info('[AuthContext] fetchProfile: consultant resolved via concurrent consultants rescue', {
+          secureLog.info('[AuthContext] fetchProfile: consultant rescue check', {
             correlationId, userId, consultantId: consultantOut.id,
+            profileRole: profileData?.role ?? 'null',
+            promoted: profileData?.role === 'consultant',
           });
         } else if (!isConsultantUser) {
           consultantLookupDefinitivelyEmpty = true;
@@ -822,11 +828,12 @@ const cached = getDegradedCachedRole(userId);
         // answer in <300ms; a degraded applications table costs at most 4s.
         if (!isConsultantUser) {
           const appOut = await applicationRescuePromise;
-          if (appOut) {
+          if (appOut && appOut.status === 'approved') {
+            // Only grant consultant status from an explicitly approved application.
+            // Pending or rejected applications must never grant consultant access.
             isConsultantUser = true;
             consultantName = consultantName || appOut.name;
-            // Best-effort self-heal: ask the server to create the non-public
-            // consultants draft row (bounded, non-fatal, never required).
+            // Best-effort self-heal: link the consultant record at sign-in.
             try {
               const sessionResult = await withDbTimeout(
                 supabase.auth.getSession(),

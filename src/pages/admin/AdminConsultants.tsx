@@ -293,11 +293,19 @@ export default function AdminConsultants() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this consultant?')) return;
-    
+    if (!confirm('Are you sure you want to delete this consultant? This will also revoke their consultant authorization.')) return;
+
     try {
-      await consultantsService.delete(id);
-      toast({ title: "Deleted", description: "Consultant removed successfully" });
+      const result = await consultantsService.delete(id);
+      
+      if (result.profileDowngraded) {
+        toast({ title: "Consultant Deleted", description: "Consultant record removed and account authorization revoked (downgraded to Client)." });
+      } else if (result.userId) {
+        console.warn('[AdminConsultants] Consultant deleted but profile role downgrade failed or not needed', result);
+        toast({ title: "Consultant Deleted", description: "Consultant record removed. Authorization may need manual review." });
+      } else {
+        toast({ title: "Deleted", description: "Consultant removed successfully. No linked account found." });
+      }
       loadConsultants();
     } catch (error) {
       console.error('Error deleting consultant:', error);

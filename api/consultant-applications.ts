@@ -163,7 +163,6 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       linkedin_url: linkedin_url && String(linkedin_url).trim().length > 0 ? String(linkedin_url).trim() : null,
       status: 'pending',
       created_at: new Date().toISOString(),
-      ...(authenticatedUserId ? { user_id: authenticatedUserId } : {}),
     };
 
     console.log(

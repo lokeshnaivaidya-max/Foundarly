@@ -720,19 +720,15 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       );
     });
 
-    test('Application submission stamps the verified authenticated UUID (never name-based)', () => {
+    test('Application submission conforms to production schema without user_id column', () => {
       const source = fs.readFileSync(path.join(process.cwd(), 'api', 'consultant-applications.ts'), 'utf8');
       assert.ok(
-        source.includes('user_id: authenticatedUserId'),
-        'Submission must stamp the authenticated UUID when identity is proven'
+        !source.includes('user_id: authenticatedUserId'),
+        'consultant_applications does not have user_id column; must not be included in payload'
       );
       assert.ok(
-        source.includes('applicantEmailVerified'),
-        'user_id may only be stamped for a verified account email'
-      );
-      assert.ok(
-        source.includes('applicantEmail === normalizedEmail'),
-        'user_id may only be stamped when the account email matches the application email'
+        source.includes('normalizedEmail'),
+        'Application identity is preserved using normalizedEmail'
       );
     });
 
@@ -971,11 +967,13 @@ describe('Foundarly Consultant Application Approval & Rejection Flow', () => {
       );
     });
 
-    test('Dashboard access is independent of the public consultants listing', () => {
+    test('Dashboard access requires active linked consultant record and valid role', () => {
       const dashSource = fs.readFileSync(path.join(process.cwd(), 'src', 'pages', 'ConsultantDashboard.tsx'), 'utf8');
       assert.ok(
-        dashSource.includes('profile?.role === "consultant"') && dashSource.includes('profile?.is_consultant'),
-        'Dashboard access must be granted from the activated account role, not a public listing record'
+        dashSource.includes('profile?.role === "consultant"') &&
+        dashSource.includes('consultant.user_id === user.id') &&
+        dashSource.includes('(consultant as any).is_active === true'),
+        'Dashboard access must strictly require profile consultant role, user_id match, and is_active === true'
       );
       const svcSource = fs.readFileSync(path.join(process.cwd(), 'src', 'services', 'consultantDashboard.ts'), 'utf8');
       assert.ok(

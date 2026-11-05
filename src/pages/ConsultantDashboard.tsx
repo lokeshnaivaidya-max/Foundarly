@@ -146,11 +146,16 @@ export default function ConsultantDashboard() {
         return;
       }
 
-      // 2. Strict authorization: user must have profile?.role === "consultant" or profile?.is_consultant
+      // 2. Strict authorization: user must have ALL THREE:
+      // - profiles.role === 'consultant'
+      // - consultants.user_id === auth.uid()
+      // - consultants.is_active === true
+      // Null or undefined is_active must NOT grant access.
       const isUserConsultant = Boolean(
-        profile?.role === "consultant" ||
-        (profile as any)?.is_consultant ||
-        (consultant && consultant.user_id === user.id && (consultant as any).is_active !== false)
+        profile?.role === "consultant" &&
+        consultant &&
+        consultant.user_id === user.id &&
+        (consultant as any).is_active === true
       );
 
       if (!isUserConsultant) {
@@ -166,13 +171,8 @@ export default function ConsultantDashboard() {
       await loadDashboardData();
     } catch (error) {
       console.error("Error checking consultant access:", error);
-      if (profile?.role === "consultant") {
-        setAccessDenied(false);
-        await loadDashboardData();
-      } else {
-        setAccessDenied(true);
-        setLoading(false);
-      }
+      setAccessDenied(true);
+      setLoading(false);
     }
   };
 

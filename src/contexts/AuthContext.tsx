@@ -730,12 +730,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // A user is a consultant if and ONLY if:
         // - profile in DB has role === 'consultant'
         // - AND exact consultants.user_id === userId
-        // - AND consultant is active (is_active === true)
+        // - AND consultant is active (is_active === true strictly; null/undefined must not grant access)
         // Never grant consultant access based on email, localStorage, user metadata, or profile role alone.
         const hasActiveConsultantRecord = Boolean(
           consultantOut?.matched &&
           consultantOut.matched.user_id === userId &&
-          (consultantOut.matched as any).is_active !== false
+          (consultantOut.matched as any).is_active === true
         );
 
         const isConsultantUser = Boolean(
@@ -743,18 +743,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         );
         const consultantName = consultantOut?.matched?.name || profileData?.full_name;
 
-        // Auto-demote accounts with orphaned or unlinked consultant profile role to client
+        // Demote unlinked/orphan consultant profiles in memory/session so they are strictly treated as client
         if (profileData?.role === 'consultant' && !hasActiveConsultantRecord) {
-          secureLog.warn('[AuthContext] Unlinked consultant profile role detected; demoting to client', {
+          secureLog.warn('[AuthContext] Unlinked consultant profile role detected; treating as client in session', {
             userId,
             fullName: profileData.full_name,
           });
-          // Asynchronously self-heal the profiles table
-          void withDbTimeout(
-            supabase.from('profiles').update({ role: 'client' }).eq('id', userId),
-            'demote unlinked consultant profile to client',
-            3000
-          ).catch(() => null);
         }
 
         secureLog.info('[AuthContext] fetchProfile: consultant check status', {

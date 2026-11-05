@@ -62,11 +62,10 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       return res.status(401).json({ success: false, error: 'Invalid or expired session token.' });
     }
 
-    // 2. Verify authorization - Admin or Developer Admin only
     const adminEmail = (adminUser.email || '').toLowerCase().trim();
     const isAllowlisted = isAllowedAdminEmail(adminEmail);
     const isDevAdmin = adminEmail === 'foundarly@developer.in';
-    const isAdmin = isAllowlisted || adminUser.user_metadata?.role === 'admin' || adminUser.role === 'admin';
+    const isAdmin = isAllowlisted;
 
     if (!isAdmin && !isDevAdmin) {
       return res.status(403).json({ success: false, error: 'Forbidden. Admin or Developer Admin authorization required.' });

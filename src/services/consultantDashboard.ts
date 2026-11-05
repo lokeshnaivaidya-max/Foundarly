@@ -103,29 +103,40 @@ async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; n
     console.warn("[consultantDashboardService] API /api/consultant/me check error:", apiErr);
   }
 
-  // 2. Direct Supabase query fallback (matching by user_id OR email)
-  // NOTE: the authenticated consultant's own listing is intentionally matched
-  // regardless of publication state — a non-public draft must not hide the
-  // consultant's own dashboard data (authorization is role-based).
-  try {
-    let query = supabase.from("consultants").select("id, name, email, user_id, is_active");
-    if (userEmail) {
-      query = query.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
-    } else {
-      query = query.eq("user_id", userId);
-    }
-
-    const { data: consultants, error } = await query.limit(1);
-    if (!error && consultants && consultants.length > 0) {
-      const c = consultants[0];
-      if (c.user_id !== userId) {
-        supabase.from("consultants").update({ user_id: userId }).eq("id", c.id).then();
-      }
-      return c;
-    }
-  } catch (dbErr) {
-    console.error("[consultantDashboardService] Error looking up consultant in Supabase:", dbErr);
+  // 2. Direct Supabase query fallback — read-only, no automatic user_id updates.
+  // Step 1: Try matching by user_id only (limit 2 to detect ambiguity).
+  let query = supabase.from("consultants").select("id, name, email, user_id, is_active").eq("user_id", userId).limit(2);
+  const { data: userMatches, error: userErr } = await query;
+  
+  // If user_id query returns MORE than one record → ambiguity, return null.
+  if (!userErr && userMatches && userMatches.length > 1) {
+    console.warn("[consultantDashboard] Ambiguous: multiple consultant records match user_id", { userId, count: userMatches.length });
+    return null;
   }
+  
+  // If user_id query returns exactly one record → return it (read-only, no updates).
+  if (!userErr && userMatches && userMatches.length === 1) {
+    return userMatches[0];
+  }
+
+  // Step 2: If user_id query returned zero records, try email fallback.
+  if (userEmail && userMatches.length !== 1) {
+    query = supabase.from("consultants").select("id, name, email, user_id, is_active");
+    query = query.ilike("email", userEmail.trim().toLowerCase());
+    const { data: emailMatches, error: emailErr } = await query.limit(2);
+    
+    if (!emailErr && emailMatches && emailMatches.length > 1) {
+      // Multiple records match email → ambiguity, do NOT select arbitrarily.
+      console.warn("[consultantDashboard] Ambiguous: multiple records match email", { userEmail, count: emailMatches.length });
+      return null;
+    }
+    
+    if (!emailErr && emailMatches && emailMatches.length === 1) {
+      return emailMatches[0]; // Unique match by email
+    }
+  }
+
+  return null; // No matching consultant record
 
   // 3. No consultant listing record: return null. Account activation
   // (profiles.role = consultant) independently grants dashboard access —

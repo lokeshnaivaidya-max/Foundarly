@@ -309,6 +309,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Definitive failure: the profile is unresolved. Callers (ProtectedRoute,
           // Login) must wait or show an explicit error state — never route as client.
           setRoleResolutionFailed(true);
+// Stale-request protection: only the active resolution operation may release loading
+// or overwrite profile/role state. A resolution ID is tracked in resolveProfileRef; if a
+// different resolution ID is detected, this catch/finally block preserves the currently-
+// active chain's state and returns early so the active operation's setLoading(false) in
+// the finally block can still execute.
+const currentResolutionId = resolveProfileRef.current?.resolutionId;
+if (currentResolutionId && currentResolutionId !== resolutionId) {
+  console.warn('[AuthContext] Stale resolution request detected, preserving current state', { currentResolutionId, resolutionId });
+  return;
+}
+const cached = getDegradedCachedRole(userId);
           secureLog.warn('[AuthContext] resolveProfile: profile resolution failed after retries', {
             correlationId, userId, attempts: retryCount + 1,
           });
@@ -316,12 +327,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (err) {
         console.warn('[AuthContext] Authoritative profile resolution failed:', err);
         setRoleResolutionFailed(true);
+// Stale-request protection: only the active resolution operation may release loading
+// or overwrite profile/role state. A resolution ID is tracked in resolveProfileRef; if a
+// different resolution ID is detected, this catch/finally block preserves the currently-
+// active chain's state and returns early so the active operation's setLoading(false) in
+// the finally block can still execute.
+const currentResolutionId = resolveProfileRef.current?.resolutionId;
+if (currentResolutionId && currentResolutionId !== resolutionId) {
+  console.warn('[AuthContext] Stale resolution request detected, preserving current state', { currentResolutionId, resolutionId });
+  return;
+}
+const cached = getDegradedCachedRole(userId);
         secureLog.warn('[AuthContext] resolveProfile: resolution exception', {
           correlationId, userId, error: err instanceof Error ? err.message : String(err),
         });
         // Fail closed for elevated roles: even the exception fallback serves
         // only non-elevated cached roles.
-        const cached = getDegradedCachedRole(userId);
         if (cached) setProfile(cached);
       } finally {
         resolveInFlightRef.current = false;
@@ -489,6 +510,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ) {
         secureLog.warn('[AuthContext] Profile resolution exceeded terminal watchdog; surfacing verification failure');
         setRoleResolutionFailed(true);
+// Stale-request protection: only the active resolution operation may release loading
+// or overwrite profile/role state. A resolution ID is tracked in resolveProfileRef; if a
+// different resolution ID is detected, this catch/finally block preserves the currently-
+// active chain's state and returns early so the active operation's setLoading(false) in
+// the finally block can still execute.
+const currentResolutionId = resolveProfileRef.current?.resolutionId;
+if (currentResolutionId && currentResolutionId !== resolutionId) {
+  console.warn('[AuthContext] Stale resolution request detected, preserving current state', { currentResolutionId, resolutionId });
+  return;
+}
+const cached = getDegradedCachedRole(userId);
         setLoading(false);
       }
     }, 30000);

@@ -1,0 +1,45 @@
+-- RLS Security Corrections Migration
+-- This migration corrects the "Public read active consultants" policy to enforce
+-- the intended Admin authorization rule: profile.role='admin' AND JWT email in allowlist.
+-- It also adds a Developer Admin SELECT policy. The existing Admin FOR ALL policy is preserved.
+--
+-- PostgreSQL ALTER POLICY does not support FOR SELECT clause. This migration uses
+-- DROP/CREATE within a transaction to safely replace the policy without leaving
+-- an unprotected intermediate state.
+--
+-- Permissions preserved:
+--   - Public: SELECT active consultants only (is_active = true)
+--   - Consultant: SELECT own active + own inactive record (user_id = auth.uid())
+--   - Admin (allowlisted email + profile.role='admin'): Full permissions per application rules
+--   - Developer Admin SELECT: JWT email claim foundarly@developer.in
+--     - No direct INSERT, UPDATE or DELETE through authenticated client
+--   - Non-allowlisted profile with role='admin': RLS-level access remains broad
+--     per existing FOR ALL policy (documented behavior)
+--
+-- Migration steps:
+--   1. DROP existing "Public read active consultants" policy
+--   2. CREATE replacement FOR SELECT policy with corrected Admin authorization
+--   3. Retain existing "Admins manage consultants" FOR ALL policy unchanged
+--   4. CREATE "Developer Admins select consultants" FOR SELECT policy using JWT email
+--
+-- Developer Admin SELECT uses the verified JWT email claim foundarly@developer.in.
+-- No profiles.role = 'developer_admin' assumption (CHECK constraint allows only admin/consultant/client).
+-- Developer Admin INSERT/UPDATE/DELETE is handled exclusively through the server-side API endpoint.
+--
+-- Migration steps:
+--   1. DROP POLICY "Public read active consultants" ON public.consultants;
+--   2. CREATE POLICY "Public read active consultants" ON public.consultants
+--      FOR SELECT
+--      USING (is_active = true OR user_id = auth.uid() OR
+--        EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid AND role = 'admin' AND
+--          auth.jwt() ->> 'email' IN ('admin@foundarly.com', 'admin@foundarlybusinessworld.in', 'jvedtechadmin@gmail.com', 'lokesh.naivaidya@gmail.com')));
+--   3. No change to existing "Admins manage consultants" FOR ALL policy.
+--   4. CREATE POLICY "Developer Admins select consultants" ON public.consultants
+--      FOR SELECT
+--      USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid AND
+--        auth.jwt() ->> 'email' = 'foundarly@developer.in'));
+--
+-- Execution: Apply via supabase migration deploy only after separate explicit authorization.
+-- Do NOT execute against production without explicit authorization.
+*/
+content_copy

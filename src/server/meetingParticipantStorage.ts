@@ -15,6 +15,7 @@ const DATA_DIR = path.resolve(process.cwd(), 'data');
 const STORAGE_FILE = path.join(DATA_DIR, 'meeting_participants.json');
 
 const memoryStore = new Map<string, ParticipantJoinItem>();
+const startTimeStore = new Map<string, string>();
 
 // Ensure local persistence directory exists
 try {
@@ -183,6 +184,29 @@ export const meetingParticipantStorage = {
 
   reset(): void {
     memoryStore.clear();
+    startTimeStore.clear();
     saveToFile();
+  },
+
+  recordMeetingStart(bookingId: string, timestamp?: string): string {
+    const cleanBooking = (bookingId || '').trim().replace(/^foundarly-/, '');
+    const existing = startTimeStore.get(cleanBooking);
+    if (existing) {
+      return existing;
+    }
+    const start = timestamp || new Date().toISOString();
+    startTimeStore.set(cleanBooking, start);
+    return start;
+  },
+
+  getMeetingStartTime(bookingId: string): string | null {
+    const cleanBooking = (bookingId || '').trim().replace(/^foundarly-/, '');
+    return startTimeStore.get(cleanBooking) || null;
+  },
+
+  clearMeetingStartTimeForTesting(bookingId: string): void {
+    const cleanBooking = (bookingId || '').trim().replace(/^foundarly-/, '');
+    startTimeStore.delete(cleanBooking);
   }
 };
+

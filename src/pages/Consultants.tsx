@@ -53,12 +53,13 @@ function ConsultantCard({ c, index }: { c: any; index: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: "-50px" });
   const { formatPrice } = useCurrency();
-  const { profile, isAdmin } = useAuth();
+  const { user, profile, isAdmin, isRoleResolving } = useAuth();
   const navigate = useNavigate();
 
   const isAdminRole = Boolean(isAdmin);
   const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
-  const isClientRole = !isAdminRole && !isConsultantRole;
+  const isResolvingAuth = Boolean(user && !isAdminRole && (isRoleResolving || !profile));
+  const isClientRole = !isAdminRole && !isConsultantRole && !isResolvingAuth;
 
   const getInitials = (name: string) => {
     if (!name) return "C";

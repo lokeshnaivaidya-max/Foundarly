@@ -50,7 +50,7 @@ export default function Header() {
   const [logoUrl, setLogoUrl] = useState<string | null>("/foundarly-logo.png?v=20261104");
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, profile, isAdmin, isSuperAdmin, isDeveloperAdmin, isConsultant, isClient, signOut, loading: authLoading } = useAuth();
+  const { user, profile, isAdmin, isSuperAdmin, isDeveloperAdmin, isConsultant, isClient, signOut, loading: authLoading, isRoleResolving } = useAuth();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 15);
@@ -123,8 +123,10 @@ export default function Header() {
   };
 
   const isAdminRole = Boolean(isAdmin);
-  const isConsultantRole = Boolean(isConsultant);
-  const isClientRole = Boolean(isClient);
+  const isConsultantRole = !isAdminRole && Boolean(isConsultant);
+  // An authenticated user whose role is still resolving must NEVER temporarily appear as a client
+  const isResolvingAuth = Boolean(user && !isAdminRole && (isRoleResolving || authLoading || !profile));
+  const isClientRole = Boolean(isClient && !isResolvingAuth && (user ? Boolean(profile && profile.role === 'client') : true));
 
   // All CTA routing must use the same resolved role booleans below.
   // The CTA and route guard below share these exact variables — no duplicate
@@ -218,7 +220,7 @@ export default function Header() {
             </a>
           </div>
 
-          {isClientRole && (
+          {isClientRole && !isResolvingAuth && (
             <Link to="/apply-consultant" className="hidden xl:inline-flex shrink-0">
               <Button
                 variant="ghost"
@@ -262,7 +264,9 @@ export default function Header() {
                 Consultant Dashboard
               </Button>
             </Link>
-          ) : (
+          ) : isResolvingAuth ? (
+            null
+          ) : isClientRole ? (
             <Link to="/booking" className="shrink-0">
               <Button
                 size="sm"
@@ -271,7 +275,7 @@ export default function Header() {
                 Book a Session
               </Button>
             </Link>
-          )}
+          ) : null}
 
           {/* Kokonut UI Theme Switcher */}
           <SwitchButton size="sm" showLabel={false} className="shrink-0" />
@@ -296,13 +300,15 @@ export default function Header() {
                 Dashboard
               </Button>
             </Link>
-          ) : (
+          ) : isResolvingAuth ? (
+            null
+          ) : isClientRole ? (
             <Link to="/booking">
               <Button size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs rounded-full px-3 py-1.5 font-semibold">
                 Book
               </Button>
             </Link>
-          )}
+          ) : null}
 
           <button
             className="p-2 text-foreground rounded-full hover:bg-secondary/80 transition-colors"
@@ -367,7 +373,7 @@ export default function Header() {
                       </div>
                     </div>
 
-                    {isClientRole && (
+                    {isClientRole && !isResolvingAuth && (
                       <Link
                         to="/my-bookings"
                         className="flex items-center gap-2 text-xs py-2 px-3 font-medium text-muted-foreground hover:text-foreground"
@@ -397,7 +403,7 @@ export default function Header() {
                       </Link>
                     )}
 
-                    {isClientRole && (
+                    {isClientRole && !isResolvingAuth && (
                       <Link
                         to="/apply-consultant"
                         className="flex items-center gap-2 text-xs py-2 px-3 font-medium text-muted-foreground hover:text-foreground"
@@ -444,6 +450,8 @@ export default function Header() {
                       Consultant Dashboard
                     </Button>
                   </Link>
+                ) : isResolvingAuth ? (
+                  null
                 ) : (
                   <Link to="/booking" className="w-full mt-1">
                     <Button size="sm" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs rounded-full py-2.5">

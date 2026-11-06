@@ -66,6 +66,12 @@ interface AuthContextType {
   isAdmin: boolean;
   isClient: boolean;
   isConsultant: boolean;
+  /**
+   * True while an authenticated user's role is actively being resolved
+   * and has not yet completed. Callers must NOT render role-specific CTAs
+   * (e.g. client 'Book a Session') while this is true.
+   */
+  isRoleResolving: boolean;
   hasRole: (role: UserRole) => boolean;
   /**
    * True when an authenticated user's role resolution definitively FAILED
@@ -658,6 +664,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // proof that the user has no profile. Treating it as "no profile"
         // misclassifies consultants as clients (the original redirect bug).
         const profilesLookupFailed = Boolean(profileFetchError);
+        const consultantLookupDefinitivelyEmpty = Boolean(consultantOut?.definitivelyEmpty);
 
         // 2. Existing database super_admin
         if (profileData && profileData.role === 'super_admin') {
@@ -821,6 +828,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             full_name: consultantName || targetUser?.user_metadata?.full_name || 'Consultant',
           };
 
+          // Immediately commit consultant role to state and cache so UI switches
+          // synchronously without waiting on secondary database writes or network roundtrips
+          setCachedProfile(userId, consultantProfile);
+          setProfile(consultantProfile);
+          profileResolvedRef.current = { userId, role: 'consultant', resolvedAt: Date.now() };
+          secureLog.info('[AuthContext] fetchProfile: resolved role=consultant', { correlationId, userId });
+
           if (!profileData || profileData.role !== 'consultant') {
             try {
               const { error: upsertErr } = await withDbTimeout(
@@ -872,10 +886,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          setCachedProfile(userId, consultantProfile);
-          setProfile(consultantProfile);
-          profileResolvedRef.current = { userId, role: 'consultant', resolvedAt: Date.now() };
-          secureLog.info('[AuthContext] fetchProfile: resolved role=consultant', { correlationId, userId });
           return consultantProfile;
         }
 
@@ -993,22 +1003,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('foundarly_admin_auth');
 
     const normalizedEmail = email.trim().toLowerCase();
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
-      password,
-    });
+    setLoading(true);
+    setRoleResolutionFailed(false);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
 
-    if (error) {
+      if (error) {
+        setLoading(false);
+        return { error, user: null, session: null, profile: null };
+      }
+
+      if (data?.user) {
+        applyAuth(data.session || null, data.user);
+        const userProfile = await fetchProfile(data.user.id, data.user).catch(() => null);
+        return { error: null, user: data.user, session: data.session || null, profile: userProfile };
+      }
+
       return { error, user: null, session: null, profile: null };
+    } finally {
+      if (inFlightFetchRef.current.size === 0 && isMountedRef.current) {
+        setLoading(false);
+      }
     }
-
-    if (data?.user) {
-      applyAuth(data.session || null, data.user);
-      const userProfile = await fetchProfile(data.user.id, data.user).catch(() => null);
-      return { error: null, user: data.user, session: data.session || null, profile: userProfile };
-    }
-
-    return { error, user: null, session: null, profile: null };
   };
 
   const signInWithGoogle = async () => {
@@ -1102,8 +1121,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isCurrentSuperAdmin = isSuperAdmin(user, profile);
   const isCurrentDevAdmin = isDeveloperAdmin(user, profile);
   const isCurrentAdmin = isUserAdmin(user, profile);
-  const isCurrentConsultant = !isCurrentAdmin && profile?.role === 'consultant';
-  const isCurrentClient = !isCurrentAdmin && !isCurrentConsultant;
+  const isCurrentConsultant = !isCurrentAdmin && (profile?.role === 'consultant' || Boolean((profile as any)?.is_consultant));
+
+  // Explicit role resolution loading indicator:
+  // An authenticated user's role is actively being resolved if user is authenticated,
+  // their role is not immediately known via the admin allowlist, and their profile
+  // has not yet resolved (and has not terminally failed).
+  const isRoleResolving = Boolean(
+    user &&
+    !isCurrentAdmin &&
+    !isCurrentConsultant &&
+    !profile &&
+    !roleResolutionFailed
+  );
+
+  // An authenticated user must NEVER temporarily appear as a client during
+  // initial authentication or while their role is still being resolved.
+  // Unauthenticated visitors (!user) retain isCurrentClient: true so public exploration
+  // and consultant application flows stay accessible without pre-login.
+  const isCurrentClient = !isCurrentAdmin && !isCurrentConsultant && (!user || profile?.role === 'client' || (!isRoleResolving && Boolean(profile)));
 
   const hasRole = (role: UserRole) => {
     if (role === 'super_admin') return isCurrentSuperAdmin;
@@ -1146,6 +1182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isAdmin: isCurrentAdmin,
     isClient: isCurrentClient,
     isConsultant: isCurrentConsultant,
+    isRoleResolving,
     hasRole,
     roleResolutionFailed,
     retryProfileResolution,

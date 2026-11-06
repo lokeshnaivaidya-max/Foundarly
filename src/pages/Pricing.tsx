@@ -13,12 +13,13 @@ import { useAuth } from "@/contexts/AuthContext";
 
 export default function PricingPage() {
   const { formatPrice } = useCurrency();
-  const { profile, isAdmin } = useAuth();
+  const { user, profile, isAdmin, isRoleResolving } = useAuth();
   const [tiers, setTiers] = useState<PricingTier[]>([]);
   const [loading, setLoading] = useState(true);
 
   const isAdminRole = Boolean(isAdmin);
   const isConsultantRole = !isAdminRole && (profile?.role === "consultant" || profile?.is_consultant);
+  const isResolvingAuth = Boolean(user && !isAdminRole && (isRoleResolving || !profile));
 
   useEffect(() => {
     loadPricing();
@@ -100,7 +101,7 @@ export default function PricingPage() {
                             Consultant Dashboard
                           </Button>
                         </Link>
-                      ) : (
+                      ) : isResolvingAuth ? null : (
                         <Link to="/booking">
                           <Button className="w-full glow-gold-sm" variant="default">
                             Book Now

@@ -20,9 +20,6 @@ export default function Footer() {
                 className="h-8 sm:h-9 w-auto object-contain rounded-md"
                 onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
               />
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold tracking-wider uppercase">
-                Premium
-              </span>
             </div>
             <p className="text-sm text-muted-foreground leading-relaxed max-w-sm">
               By the Founders. For the Founders. The premier elite network for verified expert advisory and strategic consulting.

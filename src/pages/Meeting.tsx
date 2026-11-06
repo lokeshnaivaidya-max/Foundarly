@@ -17,10 +17,20 @@ import { WebRTCService, ChatMessage } from "@/services/webrtcService";
 import { meetingService, MeetingAccessResponse } from "@/services/meetingService";
 import { meetingTrackingService } from "@/services/meetingTracking";
 import { hasParticipantJoinedLocal, recordParticipantJoinLocal, getMeetingActionLabel } from "@/utils/meetingRejoin";
-import { getCountdownTargetMs, parseBookingDateTime } from "@/utils/timeSlots";
 import MeetingChatPanel from "@/components/meeting/MeetingChatPanel";
 import MeetingRecordingModal from "@/components/meeting/MeetingRecordingModal";
 import { MeetingRecorder, RecordingResult, RecordingStatus } from "@/utils/meetingRecorder";
+import { supabase } from "@/lib/supabase";
+import { agoraService, AGORA_CONFIG } from "@/services/agora";
+
+interface WaitingRoomParticipant {
+  userId: string;
+  name: string;
+  role?: string;
+  email?: string;
+  enteredAt?: string;
+  inCall?: boolean;
+}
 
 interface BookingWithConsultant {
   id: string;
@@ -356,6 +366,11 @@ export default function MeetingPage() {
   const [presenceParticipants, setPresenceParticipants] = useState<Array<{ id: string; name?: string; email?: string }>>([]);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 
+  // Real-time Waiting Room Notification States
+  const [waitingRoomParticipants, setWaitingRoomParticipants] = useState<WaitingRoomParticipant[]>([]);
+  const lastWaitingAlertRef = useRef<Map<string, number>>(new Map());
+  const waitingRoomChannelRef = useRef<any>(null);
+
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -651,6 +666,189 @@ export default function MeetingPage() {
     return () => clearInterval(interval);
   }, [user, effectiveRoomId, navigate, location.pathname, location.search, location.hash, authLoading, loadMeetingAccess]);
 
+  // Real-time notification system in the Meeting component using Supabase Realtime
+  // to alert the consultant and client when the other party enters the waiting room.
+  useEffect(() => {
+    const canonicalRoom = getCanonicalRoomId(effectiveRoomId, booking);
+    if (!canonicalRoom || !user || accessError || loading) return;
+
+    const myName = profile?.full_name || 
+                   (userRole === 'consultant' ? booking?.consultants?.name : booking?.name) || 
+                   user?.email?.split('@')[0] || 
+                   'Participant';
+    const myRole = userRole || (profile?.role === 'consultant' || profile?.is_consultant ? 'consultant' : 'client');
+
+    const channelName = `waiting_room_${canonicalRoom}`;
+    console.log(`[Meeting Realtime] Subscribing to waiting room channel: ${channelName}`);
+
+    const waitingChannel = supabase.channel(channelName, {
+      config: {
+        presence: { key: user.id },
+        broadcast: { self: false },
+      },
+    });
+    waitingRoomChannelRef.current = waitingChannel;
+
+    const triggerWaitingRoomAlert = (participant: WaitingRoomParticipant) => {
+      if (!participant || !participant.userId || participant.userId === user.id) return;
+
+      const now = Date.now();
+      const lastAlert = lastWaitingAlertRef.current.get(participant.userId) || 0;
+      if (now - lastAlert < 12000) {
+        return; // Suppress duplicate alert within 12 seconds
+      }
+      lastWaitingAlertRef.current.set(participant.userId, now);
+
+      const isEnteringConsultant = participant.role === 'consultant';
+      const isEnteringClient = participant.role === 'client';
+      const isMeConsultant = myRole === 'consultant';
+      const isMeClient = myRole === 'client';
+
+      let alertTitle = `${participant.name || 'Participant'} has entered the waiting room!`;
+      let alertDescription = "You can click 'Join Meeting' to enter the consultation.";
+
+      if (isMeClient && (isEnteringConsultant || participant.role !== 'client')) {
+        alertTitle = `${participant.name || booking?.consultants?.name || 'Your consultant'} has entered the waiting room!`;
+        alertDescription = "Your consultant is now present. Click 'Join Meeting' to connect.";
+      } else if (isMeConsultant && (isEnteringClient || participant.role !== 'consultant')) {
+        alertTitle = `${participant.name || booking?.name || 'The client'} has entered the waiting room!`;
+        alertDescription = "The client is waiting for you. Click 'Join Meeting' to begin the consultation.";
+      }
+
+      toast.success(alertTitle, {
+        id: `waiting-alert-${participant.userId}`,
+        duration: 8000,
+        description: alertDescription,
+      });
+    };
+
+    // 1. Listen for instant broadcast announcement when a participant opens the waiting room
+    waitingChannel.on('broadcast', { event: 'waiting_room_enter' }, ({ payload }) => {
+      console.log('[Meeting Realtime] Broadcast waiting_room_enter received:', payload);
+      if (payload && payload.userId && payload.userId !== user.id) {
+        setWaitingRoomParticipants((prev) => {
+          const filtered = prev.filter((p) => p.userId !== payload.userId);
+          return [...filtered, payload];
+        });
+        triggerWaitingRoomAlert(payload);
+      }
+    });
+
+    // 2. Listen for Realtime presence state synchronization
+    waitingChannel.on('presence', { event: 'sync' }, () => {
+      const state = waitingChannel.presenceState();
+      console.log('[Meeting Realtime] Waiting room presence sync:', state);
+      const active: WaitingRoomParticipant[] = [];
+      Object.entries(state).forEach(([_key, presences]: [string, any]) => {
+        if (Array.isArray(presences)) {
+          presences.forEach((p) => {
+            if (p?.userId && p.userId !== user.id) {
+              active.push(p);
+            }
+          });
+        }
+      });
+      setWaitingRoomParticipants(active);
+    });
+
+    // 3. Listen for presence joins
+    waitingChannel.on('presence', { event: 'join' }, ({ newPresences }) => {
+      console.log('[Meeting Realtime] Waiting room presence join:', newPresences);
+      if (Array.isArray(newPresences)) {
+        newPresences.forEach((p: any) => {
+          if (p?.userId && p.userId !== user.id) {
+            triggerWaitingRoomAlert(p);
+          }
+        });
+      }
+    });
+
+    // 4. Listen for presence leaves
+    waitingChannel.on('presence', { event: 'leave' }, ({ key }) => {
+      console.log('[Meeting Realtime] Waiting room presence leave:', key);
+      setWaitingRoomParticipants((prev) => prev.filter((p) => p.userId !== key));
+    });
+
+    // 5. Subscribe to channel, track presence, and broadcast arrival
+    waitingChannel.subscribe(async (subStatus) => {
+      if (subStatus === 'SUBSCRIBED') {
+        console.log('[Meeting Realtime] Subscribed to waiting room channel successfully');
+        const selfData: WaitingRoomParticipant = {
+          userId: user.id,
+          name: myName,
+          role: myRole,
+          email: user.email,
+          enteredAt: new Date().toISOString(),
+          inCall: callStarted,
+        };
+
+        try {
+          await waitingChannel.track(selfData);
+          await waitingChannel.send({
+            type: 'broadcast',
+            event: 'waiting_room_enter',
+            payload: selfData,
+          });
+        } catch (trackErr) {
+          console.warn('[Meeting Realtime] Waiting room presence track warning:', trackErr);
+        }
+      }
+    });
+
+    return () => {
+      console.log('[Meeting Realtime] Cleaning up waiting room channel subscription');
+      supabase.removeChannel(waitingChannel);
+      waitingRoomChannelRef.current = null;
+    };
+  }, [effectiveRoomId, booking, user, userRole, profile, accessError, loading, callStarted]);
+
+  // Automatic reconnection logic for Agora RTC stream
+  // Shows a 'Reconnecting...' toast notification whenever stream connection is interrupted
+  useEffect(() => {
+    agoraService.onConnectionStateChange = (curState, revState, reason) => {
+      console.log(`[Meeting Agora RTC] Connection state change: ${revState} -> ${curState} (${reason || 'normal'})`);
+      if (curState === "RECONNECTING") {
+        toast.loading("Reconnecting...", {
+          id: "agora-reconnect",
+          description: "Restoring Agora RTC video stream...",
+        });
+      } else if (curState === "CONNECTED" && revState === "RECONNECTING") {
+        toast.success("Reconnected!", {
+          id: "agora-reconnect",
+          description: "Agora RTC stream connection restored successfully.",
+        });
+      }
+    };
+
+    agoraService.onReconnecting = (attempt) => {
+      console.log(`[Meeting Agora RTC] Automatic reconnection attempt #${attempt}`);
+      toast.loading("Reconnecting...", {
+        id: "agora-reconnect",
+        description: `Restoring video stream (attempt ${attempt})...`,
+      });
+    };
+
+    agoraService.onReconnected = () => {
+      console.log("[Meeting Agora RTC] Stream successfully reconnected!");
+      toast.success("Reconnected!", {
+        id: "agora-reconnect",
+        description: "Your video stream has been restored.",
+      });
+    };
+
+    agoraService.onReconnectFailed = () => {
+      console.warn("[Meeting Agora RTC] Automatic reconnection failed after retries.");
+      toast.error("Stream Connection Lost", {
+        id: "agora-reconnect",
+        description: "Could not restore the video stream automatically. Please refresh or rejoin.",
+      });
+    };
+
+    return () => {
+      toast.dismiss("agora-reconnect");
+    };
+  }, []);
+
   // Timer countdown during active call
   useEffect(() => {
     if (!callStarted || callEnded || !booking || !callStartTime) return;
@@ -757,6 +955,27 @@ export default function MeetingPage() {
         setPresenceParticipants(participants);
       };
 
+      // Connection State Listener with Reconnecting Toast
+      service.onConnectionStateChange = (pcState, remoteUserId) => {
+        console.log(`[Meeting] Connection state changed for ${remoteUserId}: ${pcState}`);
+        if (pcState === 'disconnected') {
+          toast.loading("Reconnecting...", {
+            id: "agora-reconnect",
+            description: "Connection interrupted. Restoring stream...",
+          });
+        } else if (pcState === 'connected') {
+          toast.success("Reconnected!", {
+            id: "agora-reconnect",
+            description: "Stream connection restored successfully.",
+          });
+        } else if (pcState === 'failed') {
+          toast.loading("Reconnecting...", {
+            id: "agora-reconnect",
+            description: "Re-establishing stream connection...",
+          });
+        }
+      };
+
       // In-Meeting Chat Message Listener
       service.onChatMessage = (msg) => {
         setChatMessages((prev) => {
@@ -784,6 +1003,20 @@ export default function MeetingPage() {
       // 2. Join signaling channel using canonical room ID
       console.log(`[Meeting] Joining signaling channel with canonical room ID: ${canonicalRoom}`);
       await service.joinRoom(canonicalRoom);
+
+      // 3. Connect to Agora RTC stream if configured
+      if (AGORA_CONFIG.appId && AGORA_CONFIG.appId !== "your_agora_app_id_here") {
+        console.log(`[Meeting] Initializing Agora RTC stream for room: ${canonicalRoom}`);
+        agoraService.join({
+          appId: AGORA_CONFIG.appId,
+          channel: canonicalRoom,
+          uid: user?.id,
+        }).then(() => {
+          console.log("[Meeting] Agora RTC stream connected successfully");
+        }).catch((agoraErr: any) => {
+          console.warn("[Meeting] Agora RTC stream join note:", agoraErr?.message);
+        });
+      }
 
       if (stream.getTracks().length === 0) {
         toast.info("Connected to meeting room in listener mode (camera/mic unavailable).");
@@ -840,6 +1073,10 @@ export default function MeetingPage() {
         await webrtcServiceRef.current.leave();
         webrtcServiceRef.current = null;
       }
+      if (agoraService.isInChannel() || agoraService.isCurrentlyReconnecting()) {
+        await agoraService.leave().catch(console.warn);
+      }
+      toast.dismiss("agora-reconnect");
       setCallStarted(false);
       setCallEnded(true);
       setCallStartTime(null);
@@ -857,6 +1094,8 @@ export default function MeetingPage() {
       }
     } catch (error) {
       console.error("Error ending call:", error);
+      agoraService.leave().catch(console.warn);
+      toast.dismiss("agora-reconnect");
       setCallStarted(false);
       setCallEnded(true);
     }
@@ -923,6 +1162,8 @@ export default function MeetingPage() {
       if (webrtcServiceRef.current) {
         webrtcServiceRef.current.leave().catch(console.error);
       }
+      agoraService.leave().catch(console.warn);
+      toast.dismiss("agora-reconnect");
     };
   }, []);
 
@@ -1236,6 +1477,18 @@ export default function MeetingPage() {
                             An email notification with the meeting room link has been dispatched to {userRole === 'client' ? (booking?.consultants?.name || 'your consultant') : (booking?.name || 'the client')} inviting them to connect.
                           </p>
                         </div>
+
+                        {waitingRoomParticipants.length > 0 && (
+                          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 text-xs text-left space-y-1">
+                            <div className="flex items-center gap-1.5 font-semibold text-emerald-400">
+                              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                              <span>{waitingRoomParticipants.map((p) => p.name).join(", ")} is in the waiting room!</span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground">
+                              Connecting audio and video streams automatically...
+                            </p>
+                          </div>
+                        )}
 
                         <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground bg-secondary/60 rounded-full py-1.5 px-3">
                           <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
@@ -1751,6 +2004,36 @@ export default function MeetingPage() {
                     {window.location.origin}/meeting/{getCanonicalRoomId(effectiveRoomId, booking)}
                   </p>
                 </div>
+
+                {/* Real-time waiting room participant indicator */}
+                {waitingRoomParticipants.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 text-left space-y-1.5 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400">
+                        <span className="relative flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                        </span>
+                        <span>Waiting Room Active</span>
+                      </div>
+                      <Badge variant="outline" className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px] uppercase font-bold py-0 h-5">
+                        In Room Now
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-foreground font-medium">
+                      {waitingRoomParticipants.map((p) => p.name).join(", ")} {waitingRoomParticipants.length === 1 ? "is" : "are"} in the waiting room!
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {userRole === 'client' 
+                        ? "Your consultant is ready. Click 'Join Meeting' to connect."
+                        : "The client is waiting for you. Click 'Join Meeting' to begin your consultation."}
+                    </p>
+                  </motion.div>
+                )}
               </div>
             </div>
 

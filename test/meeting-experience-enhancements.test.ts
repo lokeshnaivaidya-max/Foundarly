@@ -23,10 +23,8 @@ describe('1. Automated Meeting Reminder Emails', () => {
   const testScheduledStartIso = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
 
   beforeEach(() => {
-    // Clean state for test keys
-    for (let h = 1; h <= 24; h++) {
-      // test against clean record
-    }
+    // Clean state for test booking
+    reminderStorage.reset(testBookingId);
   });
 
   test('Deduplication: Prevents duplicate reminder emails for the same hourly interval and role', () => {

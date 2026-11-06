@@ -1,4 +1,4 @@
-import AgoraRTC, {
+import type {
   IAgoraRTCClient,
   ICameraVideoTrack,
   IMicrophoneAudioTrack,
@@ -6,8 +6,22 @@ import AgoraRTC, {
 } from "agora-rtc-sdk-ng";
 import { generateMeetingToken, canGenerateTokens } from "./agoraToken";
 
+// Browser-safe lazy AgoraRTC module loader
+let agoraRTCModule: any = null;
+export async function getAgoraRTC(): Promise<any> {
+  if (!agoraRTCModule && typeof window !== "undefined") {
+    try {
+      const mod = await import("agora-rtc-sdk-ng");
+      agoraRTCModule = mod.default || mod;
+    } catch (e) {
+      console.warn("[AgoraService] Failed to load agora-rtc-sdk-ng:", e);
+    }
+  }
+  return agoraRTCModule;
+}
+
 // Agora configuration
-const AGORA_APP_ID = import.meta.env.VITE_AGORA_APP_ID;
+const AGORA_APP_ID = import.meta.env?.VITE_AGORA_APP_ID || "";
 
 export interface AgoraConfig {
   appId: string;
@@ -21,11 +35,52 @@ export class AgoraService {
   private localAudioTrack: IMicrophoneAudioTrack | null = null;
   private localVideoTrack: ICameraVideoTrack | null = null;
   private isJoined = false;
+  private manualLeave = false;
+  private currentConfig: AgoraConfig | null = null;
+  private isReconnecting = false;
+  private reconnectAttempts = 0;
+  private readonly maxReconnectAttempts = 5;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Reconnection and connection state callbacks
+  public onConnectionStateChange?: (curState: string, revState: string, reason?: string) => void;
+  public onReconnecting?: (attempt: number) => void;
+  public onReconnected?: () => void;
+  public onReconnectFailed?: () => void;
+  public onRemoteUserPublished?: (user: IAgoraRTCRemoteUser, mediaType: "audio" | "video") => void;
+  public onRemoteUserUnpublished?: (user: IAgoraRTCRemoteUser, mediaType: "audio" | "video") => void;
+  public onRemoteUserLeft?: (user: IAgoraRTCRemoteUser) => void;
 
   constructor() {
-    // Initialize Agora client following official documentation
-    this.client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
-    this.setupEventListeners();
+    // In browser environment, initialize Agora client
+    if (typeof window !== "undefined") {
+      this.initClient().catch((err) => {
+        console.warn("[AgoraService] Eager client initialization note:", err?.message);
+      });
+    }
+  }
+
+  /**
+   * Initialize Agora client instance safely in browser
+   */
+  async initClient(): Promise<IAgoraRTCClient | null> {
+    if (this.client) return this.client;
+    const RTC = await getAgoraRTC();
+    if (RTC && typeof RTC.createClient === "function") {
+      this.client = RTC.createClient({ mode: "rtc", codec: "vp8" });
+      this.setupEventListeners();
+    }
+    return this.client;
+  }
+
+  /**
+   * Set custom or mock client (e.g., for automated testing)
+   */
+  setClient(client: IAgoraRTCClient | null): void {
+    this.client = client;
+    if (this.client) {
+      this.setupEventListeners();
+    }
   }
 
   /**
@@ -52,6 +107,8 @@ export class AgoraService {
           // Play audio automatically
           user.audioTrack.play();
         }
+
+        this.onRemoteUserPublished?.(user, mediaType);
       } catch (error) {
         console.error(`Failed to subscribe to user ${user.uid}:`, error);
       }
@@ -60,18 +117,34 @@ export class AgoraService {
     // Handle user-unpublished event
     this.client.on("user-unpublished", (user, mediaType) => {
       console.log(`User ${user.uid} unpublished ${mediaType}`);
-      // The Meeting component will handle UI updates
+      this.onRemoteUserUnpublished?.(user, mediaType);
     });
 
     // Handle user-left event
     this.client.on("user-left", (user) => {
       console.log(`User ${user.uid} left the channel`);
-      // The Meeting component will handle UI updates
+      this.onRemoteUserLeft?.(user);
     });
 
-    // Handle connection state changes
-    this.client.on("connection-state-change", (curState, revState) => {
-      console.log(`Connection state changed from ${revState} to ${curState}`);
+    // Handle connection state changes and automatic reconnection
+    this.client.on("connection-state-change", (curState, revState, reason) => {
+      console.log(`[AgoraService] Connection state changed from ${revState} to ${curState} (reason: ${reason || 'normal'})`);
+      this.onConnectionStateChange?.(curState, revState, reason);
+
+      if (curState === "RECONNECTING") {
+        this.isReconnecting = true;
+        this.onReconnecting?.(this.reconnectAttempts + 1);
+      } else if (curState === "CONNECTED") {
+        if (this.isReconnecting || this.reconnectAttempts > 0) {
+          console.log("[AgoraService] Successfully reconnected to Agora RTC channel!");
+          this.isReconnecting = false;
+          this.reconnectAttempts = 0;
+          this.onReconnected?.();
+        }
+      } else if ((curState === "DISCONNECTED" || curState === "FAILED") && !this.manualLeave && this.isJoined) {
+        console.warn(`[AgoraService] Connection lost (${curState}). Initiating automatic reconnection...`);
+        this.reconnect();
+      }
     });
 
     // Handle network quality
@@ -85,6 +158,10 @@ export class AgoraService {
    */
   async join(config: AgoraConfig): Promise<void> {
     if (!this.client) {
+      await this.initClient();
+    }
+
+    if (!this.client) {
       throw new Error("Agora client not initialized");
     }
 
@@ -95,6 +172,10 @@ export class AgoraService {
 
     try {
       console.log("Joining Agora channel:", config.channel);
+      this.currentConfig = { ...config };
+      this.manualLeave = false;
+      this.isReconnecting = false;
+      this.reconnectAttempts = 0;
       
       // Prepare token (following official documentation)
       let token = config.token || null;
@@ -160,12 +241,16 @@ export class AgoraService {
    */
   async createLocalMediaTracks(): Promise<void> {
     try {
+      const RTC = await getAgoraRTC();
+      if (!RTC) {
+        throw new Error("AgoraRTC not available in current environment");
+      }
       // Create microphone audio track
-      this.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+      this.localAudioTrack = await RTC.createMicrophoneAudioTrack();
       console.log("Created local audio track");
 
       // Create camera video track
-      this.localVideoTrack = await AgoraRTC.createCameraVideoTrack();
+      this.localVideoTrack = await RTC.createCameraVideoTrack();
       console.log("Created local video track");
     } catch (error) {
       console.error("Failed to create local tracks:", error);
@@ -276,9 +361,107 @@ export class AgoraService {
   }
 
   /**
+   * Automatic reconnection logic for Agora RTC stream
+   */
+  async reconnect(): Promise<void> {
+    if (this.isReconnecting || this.manualLeave || !this.currentConfig) {
+      return;
+    }
+
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error(`[AgoraService] Maximum reconnect attempts (${this.maxReconnectAttempts}) reached.`);
+      this.isReconnecting = false;
+      this.onReconnectFailed?.();
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.reconnectAttempts++;
+    this.onReconnecting?.(this.reconnectAttempts);
+
+    // Exponential backoff delay: 1s, 2s, 4s, 8s max
+    const delayMs = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 8000);
+    console.log(`[AgoraService] Attempting automatic reconnection #${this.reconnectAttempts} in ${delayMs}ms...`);
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+
+    this.reconnectTimer = setTimeout(async () => {
+      try {
+        if (!this.currentConfig || this.manualLeave) {
+          this.isReconnecting = false;
+          return;
+        }
+
+        console.log(`[AgoraService] Executing reconnection attempt #${this.reconnectAttempts}...`);
+
+        // 1. Refresh RTC token if token service is available
+        let freshToken: string | null = null;
+        if (canGenerateTokens()) {
+          try {
+            const uid = this.currentConfig.uid || Math.floor(Math.random() * 1000000);
+            freshToken = await generateMeetingToken(this.currentConfig.channel, uid);
+            if (freshToken) {
+              console.log("[AgoraService] Refreshed Agora RTC token for reconnection");
+            }
+          } catch (tErr: any) {
+            console.warn("[AgoraService] Token refresh failed during reconnect, using cached token:", tErr?.message);
+          }
+        }
+
+        // 2. Safely leave and re-join channel
+        if (this.client) {
+          try {
+            await this.client.leave();
+          } catch (_ignore) {
+            // Ignore leave errors when already disconnected
+          }
+
+          const uid = this.currentConfig.uid || Math.floor(Math.random() * 1000000);
+          await this.client.join(
+            this.currentConfig.appId,
+            this.currentConfig.channel,
+            freshToken || this.currentConfig.token || null,
+            uid
+          );
+
+          // 3. Re-create & re-publish local media tracks if not live
+          if (!this.localAudioTrack || !this.localVideoTrack) {
+            await this.createLocalMediaTracks();
+          }
+          await this.publishLocalTracks();
+
+          this.isJoined = true;
+          this.isReconnecting = false;
+          this.reconnectAttempts = 0;
+          console.log("[AgoraService] Automatic reconnection succeeded!");
+          this.onReconnected?.();
+        }
+      } catch (err) {
+        console.error(`[AgoraService] Reconnection attempt #${this.reconnectAttempts} failed:`, err);
+        this.isReconnecting = false;
+        if (this.reconnectAttempts < this.maxReconnectAttempts && !this.manualLeave && this.isJoined) {
+          this.reconnect();
+        } else {
+          this.onReconnectFailed?.();
+        }
+      }
+    }, delayMs);
+  }
+
+  /**
    * Leave the channel and clean up (following official documentation)
    */
   async leave(): Promise<void> {
+    this.manualLeave = true;
+    this.isReconnecting = false;
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     if (!this.client) {
       return;
     }
@@ -331,6 +514,20 @@ export class AgoraService {
    */
   isInChannel(): boolean {
     return this.isJoined;
+  }
+
+  /**
+   * Check if currently reconnecting
+   */
+  isCurrentlyReconnecting(): boolean {
+    return this.isReconnecting;
+  }
+
+  /**
+   * Get current reconnection attempts count
+   */
+  getReconnectAttempts(): number {
+    return this.reconnectAttempts;
   }
 }
 

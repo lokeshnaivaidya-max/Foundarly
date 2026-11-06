@@ -30,6 +30,13 @@ export interface AgoraConfig {
   uid?: string | number;
 }
 
+export interface NetworkQualityStats {
+  uplink: number;
+  downlink: number;
+  packetLossRate?: number;
+  isUnstable: boolean;
+}
+
 export class AgoraService {
   private client: IAgoraRTCClient | null = null;
   private localAudioTrack: IMicrophoneAudioTrack | null = null;
@@ -42,11 +49,17 @@ export class AgoraService {
   private readonly maxReconnectAttempts = 5;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Network quality & packet loss tracking
+  private packetLossThreshold = 5; // Unstable when packet loss >= 5%
+  private isNetworkUnstable = false;
+  private currentPacketLossRate: number | null = null;
+
   // Reconnection and connection state callbacks
   public onConnectionStateChange?: (curState: string, revState: string, reason?: string) => void;
   public onReconnecting?: (attempt: number) => void;
   public onReconnected?: () => void;
   public onReconnectFailed?: () => void;
+  public onNetworkQualityChange?: (stats: NetworkQualityStats) => void;
   public onRemoteUserPublished?: (user: IAgoraRTCRemoteUser, mediaType: "audio" | "video") => void;
   public onRemoteUserUnpublished?: (user: IAgoraRTCRemoteUser, mediaType: "audio" | "video") => void;
   public onRemoteUserLeft?: (user: IAgoraRTCRemoteUser) => void;
@@ -147,9 +160,35 @@ export class AgoraService {
       }
     });
 
-    // Handle network quality
-    this.client.on("network-quality", (stats) => {
-      console.log("Network quality:", stats);
+    // Handle network quality and packet loss detection
+    this.client.on("network-quality", (stats: any) => {
+      const uplink = typeof stats?.uplinkNetworkQuality === "number" ? stats.uplinkNetworkQuality : 0;
+      const downlink = typeof stats?.downlinkNetworkQuality === "number" ? stats.downlinkNetworkQuality : 0;
+
+      let packetLossRate: number | undefined = undefined;
+      if (typeof stats?.packetLossRate === "number") {
+        packetLossRate = stats.packetLossRate;
+      } else {
+        try {
+          const remoteStats = (this.client as any)?.getRemoteVideoStats?.();
+          if (remoteStats && typeof remoteStats === "object") {
+            const keys = Object.keys(remoteStats);
+            if (keys.length > 0 && typeof remoteStats[keys[0]]?.packetLossRate === "number") {
+              packetLossRate = remoteStats[keys[0]].packetLossRate;
+            }
+          }
+          if (packetLossRate === undefined) {
+            const localStats = (this.client as any)?.getLocalVideoStats?.();
+            if (localStats && typeof localStats.packetLossRate === "number") {
+              packetLossRate = localStats.packetLossRate;
+            }
+          }
+        } catch (_ignore) {
+          // stats check safe ignore
+        }
+      }
+
+      this.evaluateNetworkQuality(uplink, downlink, packetLossRate);
     });
   }
 
@@ -528,6 +567,59 @@ export class AgoraService {
    */
   getReconnectAttempts(): number {
     return this.reconnectAttempts;
+  }
+
+  /**
+   * Evaluate network quality and packet loss against threshold
+   */
+  evaluateNetworkQuality(uplink: number, downlink: number, packetLossRate?: number): NetworkQualityStats {
+    this.currentPacketLossRate = typeof packetLossRate === "number" ? packetLossRate : null;
+
+    // Unstable if packet loss exceeds threshold (e.g. >= 5%) or Agora quality index is Poor/Bad/Down (>= 4)
+    const isUnstable =
+      (typeof packetLossRate === "number" && packetLossRate >= this.packetLossThreshold) ||
+      uplink >= 4 ||
+      downlink >= 4;
+
+    this.isNetworkUnstable = isUnstable;
+
+    const stats: NetworkQualityStats = {
+      uplink,
+      downlink,
+      packetLossRate,
+      isUnstable,
+    };
+
+    this.onNetworkQualityChange?.(stats);
+    return stats;
+  }
+
+  /**
+   * Check if network connection is currently unstable
+   */
+  getIsNetworkUnstable(): boolean {
+    return this.isNetworkUnstable;
+  }
+
+  /**
+   * Get latest measured packet loss rate percentage
+   */
+  getCurrentPacketLossRate(): number | null {
+    return this.currentPacketLossRate;
+  }
+
+  /**
+   * Configure packet loss percentage threshold for unstable badge (default: 5)
+   */
+  setPacketLossThreshold(threshold: number): void {
+    this.packetLossThreshold = threshold;
+  }
+
+  /**
+   * Get configured packet loss percentage threshold
+   */
+  getPacketLossThreshold(): number {
+    return this.packetLossThreshold;
   }
 }
 

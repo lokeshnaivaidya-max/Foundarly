@@ -240,4 +240,168 @@ describe("Meeting Real-time Waiting Room & Agora RTC Automatic Reconnection Suit
       assert.equal(service.getReconnectAttempts(), 0, "reconnectAttempts must be 0");
     });
   });
+
+  describe("3. Real-time 'Online' / 'Away' Participant Presence Status Suite", () => {
+    it("should correctly resolve presence status for both consultant and client from presence map", () => {
+      const presenceMap = new Map<string, { status: "Online" | "Away"; lastSeen: number }>();
+      presenceMap.set("consultant-123", { status: "Online", lastSeen: Date.now() });
+      presenceMap.set("client-456", { status: "Away", lastSeen: Date.now() });
+
+      const booking = {
+        id: "booking-001",
+        user_id: "client-456",
+        consultant_id: "consultant-123",
+        consultants: { user_id: "consultant-123", name: "Dr. Smith" },
+        name: "Client Alice",
+      };
+
+      // Client viewing consultant:
+      const otherUserIdForClient = booking.consultants?.user_id;
+      const consultantStatus = presenceMap.get(otherUserIdForClient!)?.status || "Offline";
+      assert.equal(consultantStatus, "Online", "Client should see consultant as Online");
+
+      // Consultant viewing client:
+      const otherUserIdForConsultant = booking.user_id;
+      const clientStatus = presenceMap.get(otherUserIdForConsultant)?.status || "Offline";
+      assert.equal(clientStatus, "Away", "Consultant should see client as Away");
+    });
+
+    it("should transition user presence to 'Away' when tab is hidden or window blurs and 'Online' when visible", () => {
+      let currentStatus: "Online" | "Away" = "Online";
+
+      function handleVisibilityChange(isHidden: boolean): "Online" | "Away" {
+        currentStatus = isHidden ? "Away" : "Online";
+        return currentStatus;
+      }
+
+      assert.equal(handleVisibilityChange(true), "Away", "Tab hidden should switch presence to Away");
+      assert.equal(handleVisibilityChange(false), "Online", "Tab visible should switch presence to Online");
+    });
+
+    it("should return 'Offline' when participant is not present in presence map or waiting room", () => {
+      const presenceMap = new Map<string, { status: "Online" | "Away"; lastSeen: number }>();
+      const unknownUserId = "missing-participant-789";
+
+      const status = presenceMap.get(unknownUserId)?.status || "Offline";
+      assert.equal(status, "Offline", "Unjoined participant should resolve to Offline");
+    });
+
+    it("should update presence map when receiving presence_status_change broadcast", () => {
+      const presenceMap = new Map<string, { status: "Online" | "Away"; lastSeen: number }>();
+      presenceMap.set("user-abc", { status: "Online", lastSeen: 1000 });
+
+      // Simulated broadcast event
+      const broadcastPayload = { userId: "user-abc", status: "Away" as const };
+      presenceMap.set(broadcastPayload.userId, {
+        status: broadcastPayload.status,
+        lastSeen: Date.now(),
+      });
+
+      assert.equal(presenceMap.get("user-abc")?.status, "Away");
+    });
+  });
+
+  describe("4. Agora Network Quality & Packet Loss Unstable Warning Badge Suite", () => {
+    it("should consider network stable when packet loss is 0% and quality index is Excellent (1)", async () => {
+      const { AgoraService } = await import("../src/services/agora.js");
+      const service = new AgoraService();
+
+      let qualityCallbackData: any = null;
+      service.onNetworkQualityChange = (stats) => {
+        qualityCallbackData = stats;
+      };
+
+      const result = service.evaluateNetworkQuality(1, 1, 0);
+
+      assert.equal(result.isUnstable, false, "Network should be stable with 0% packet loss and quality 1");
+      assert.equal(result.packetLossRate, 0);
+      assert.equal(service.getIsNetworkUnstable(), false);
+      assert.equal(qualityCallbackData?.isUnstable, false);
+    });
+
+    it("should trigger 'Network unstable' when packet loss exceeds threshold (>= 5%)", async () => {
+      const { AgoraService } = await import("../src/services/agora.js");
+      const service = new AgoraService();
+
+      service.setPacketLossThreshold(5);
+      assert.equal(service.getPacketLossThreshold(), 5);
+
+      let qualityCallbackData: any = null;
+      service.onNetworkQualityChange = (stats) => {
+        qualityCallbackData = stats;
+      };
+
+      // Below threshold (4%) -> stable
+      const stableResult = service.evaluateNetworkQuality(2, 2, 4);
+      assert.equal(stableResult.isUnstable, false, "4% packet loss should be under threshold");
+      assert.equal(service.getIsNetworkUnstable(), false);
+
+      // At/above threshold (6%) -> unstable
+      const unstableResult = service.evaluateNetworkQuality(2, 2, 6);
+      assert.equal(unstableResult.isUnstable, true, "6% packet loss should trigger unstable badge");
+      assert.equal(service.getIsNetworkUnstable(), true);
+      assert.equal(service.getCurrentPacketLossRate(), 6);
+      assert.equal(qualityCallbackData?.isUnstable, true);
+    });
+
+    it("should trigger 'Network unstable' when Agora quality index is Bad/Very Bad (>= 4) even if packet loss is unmeasured", async () => {
+      const { AgoraService } = await import("../src/services/agora.js");
+      const service = new AgoraService();
+
+      // Uplink 4 (Bad)
+      const uplinkBad = service.evaluateNetworkQuality(4, 2);
+      assert.equal(uplinkBad.isUnstable, true, "Uplink quality 4 should trigger unstable warning");
+
+      // Downlink 5 (Very Bad)
+      const downlinkBad = service.evaluateNetworkQuality(2, 5);
+      assert.equal(downlinkBad.isUnstable, true, "Downlink quality 5 should trigger unstable warning");
+    });
+
+    it("should recover to stable when network quality improves below threshold", async () => {
+      const { AgoraService } = await import("../src/services/agora.js");
+      const service = new AgoraService();
+
+      // Degraded state
+      service.evaluateNetworkQuality(5, 5, 12);
+      assert.equal(service.getIsNetworkUnstable(), true);
+
+      // Recovered state
+      service.evaluateNetworkQuality(1, 1, 1);
+      assert.equal(service.getIsNetworkUnstable(), false, "Network should recover to stable");
+      assert.equal(service.getCurrentPacketLossRate(), 1);
+    });
+
+    it("should coordinate network quality listener via client 'network-quality' event", async () => {
+      const { AgoraService } = await import("../src/services/agora.js");
+      const service = new AgoraService();
+
+      const listeners: Record<string, (...args: any[]) => any> = {};
+      const mockClient: any = {
+        on: (event: string, callback: (...args: any[]) => any) => {
+          listeners[event] = callback;
+        },
+        leave: async () => {},
+        join: async () => 12345,
+        getRemoteVideoStats: () => ({ "remote-user-1": { packetLossRate: 8.5 } }),
+      };
+
+      service.setClient(mockClient);
+
+      let qualityReceived: any = null;
+      service.onNetworkQualityChange = (stats) => {
+        qualityReceived = stats;
+      };
+
+      // Fire network-quality event
+      listeners["network-quality"]({ uplinkNetworkQuality: 2, downlinkNetworkQuality: 2 });
+
+      assert.ok(qualityReceived, "onNetworkQualityChange should have been invoked");
+      assert.equal(qualityReceived.packetLossRate, 8.5, "Should extract packet loss rate from remote stats");
+      assert.equal(qualityReceived.isUnstable, true, "8.5% packet loss should trigger unstable status");
+      assert.equal(service.getIsNetworkUnstable(), true);
+
+      await service.leave();
+    });
+  });
 });
+

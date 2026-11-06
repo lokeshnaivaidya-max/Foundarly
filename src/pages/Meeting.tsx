@@ -23,13 +23,16 @@ import { MeetingRecorder, RecordingResult, RecordingStatus } from "@/utils/meeti
 import { supabase } from "@/lib/supabase";
 import { agoraService, AGORA_CONFIG } from "@/services/agora";
 
-interface WaitingRoomParticipant {
+export type PresenceStatus = 'Online' | 'Away';
+
+export interface WaitingRoomParticipant {
   userId: string;
   name: string;
   role?: string;
   email?: string;
   enteredAt?: string;
   inCall?: boolean;
+  status?: PresenceStatus;
 }
 
 interface BookingWithConsultant {
@@ -212,6 +215,87 @@ function LocalVideo({ stream, videoOff, className }: { stream: MediaStream | nul
   );
 }
 
+/**
+ * Real-time Online / Away Presence Badge component for participant status
+ */
+function PresenceBadge({
+  status,
+  label,
+  className = "",
+}: {
+  status: PresenceStatus | 'Offline';
+  label?: string;
+  className?: string;
+}) {
+  const isOnline = status === 'Online';
+  const isAway = status === 'Away';
+
+  return (
+    <div
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
+        isOnline
+          ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+          : isAway
+          ? "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+          : "bg-muted text-muted-foreground border border-border"
+      } ${className}`}
+    >
+      <span className="relative flex h-2 w-2">
+        {isOnline && (
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+        )}
+        <span
+          className={`relative inline-flex rounded-full h-2 w-2 ${
+            isOnline ? "bg-emerald-500" : isAway ? "bg-amber-400" : "bg-slate-400"
+          }`}
+        />
+      </span>
+      <span>
+        {label ? `${label}: ` : ""}
+        {status}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Compact Presence Dot for in-video overlays
+ */
+function PresenceDot({
+  status,
+  showLabel = true,
+}: {
+  status: PresenceStatus | 'Offline';
+  showLabel?: boolean;
+}) {
+  const isOnline = status === 'Online';
+  const isAway = status === 'Away';
+
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="relative flex h-2 w-2">
+        {isOnline && (
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+        )}
+        <span
+          className={`relative inline-flex rounded-full h-2 w-2 ${
+            isOnline ? "bg-emerald-500" : isAway ? "bg-amber-400" : "bg-slate-400"
+          }`}
+        />
+      </span>
+      {showLabel && (
+        <span
+          className={`text-[11px] font-medium ${
+            isOnline ? "text-emerald-400" : isAway ? "text-amber-400" : "text-muted-foreground"
+          }`}
+        >
+          {status}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function getMeetingStatus(date: string, time: string, duration: number): "upcoming" | "live" | "completed" | "missed" {
   const start = parseBookingDateTime(date, time);
   if (!start || isNaN(start.getTime())) {
@@ -366,10 +450,17 @@ export default function MeetingPage() {
   const [presenceParticipants, setPresenceParticipants] = useState<Array<{ id: string; name?: string; email?: string }>>([]);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
 
-  // Real-time Waiting Room Notification States
+  // Real-time Waiting Room Notification & Presence States
   const [waitingRoomParticipants, setWaitingRoomParticipants] = useState<WaitingRoomParticipant[]>([]);
+  const [myPresenceStatus, setMyPresenceStatus] = useState<PresenceStatus>('Online');
+  const [participantPresenceMap, setParticipantPresenceMap] = useState<Map<string, { status: PresenceStatus; lastSeen: number }>>(new Map());
+  const selfDataRef = useRef<WaitingRoomParticipant | null>(null);
   const lastWaitingAlertRef = useRef<Map<string, number>>(new Map());
   const waitingRoomChannelRef = useRef<any>(null);
+
+  // Agora Network Stability & Packet Loss States
+  const [isNetworkUnstable, setIsNetworkUnstable] = useState<boolean>(false);
+  const [packetLossRate, setPacketLossRate] = useState<number | null>(null);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -726,50 +817,96 @@ export default function MeetingPage() {
     waitingChannel.on('broadcast', { event: 'waiting_room_enter' }, ({ payload }) => {
       console.log('[Meeting Realtime] Broadcast waiting_room_enter received:', payload);
       if (payload && payload.userId && payload.userId !== user.id) {
+        const participantWithStatus: WaitingRoomParticipant = {
+          ...payload,
+          status: payload.status || 'Online',
+        };
+        setParticipantPresenceMap((prev) => {
+          const next = new Map(prev);
+          next.set(payload.userId, { status: payload.status || 'Online', lastSeen: Date.now() });
+          return next;
+        });
         setWaitingRoomParticipants((prev) => {
           const filtered = prev.filter((p) => p.userId !== payload.userId);
-          return [...filtered, payload];
+          return [...filtered, participantWithStatus];
         });
-        triggerWaitingRoomAlert(payload);
+        triggerWaitingRoomAlert(participantWithStatus);
       }
     });
 
-    // 2. Listen for Realtime presence state synchronization
+    // 2. Listen for real-time presence status change broadcasts (Online <-> Away)
+    waitingChannel.on('broadcast', { event: 'presence_status_change' }, ({ payload }) => {
+      console.log('[Meeting Realtime] Participant presence status changed:', payload);
+      if (payload && payload.userId && payload.userId !== user.id) {
+        const newStatus: PresenceStatus = payload.status === 'Away' ? 'Away' : 'Online';
+        setParticipantPresenceMap((prev) => {
+          const next = new Map(prev);
+          next.set(payload.userId, { status: newStatus, lastSeen: Date.now() });
+          return next;
+        });
+        setWaitingRoomParticipants((prev) =>
+          prev.map((p) => (p.userId === payload.userId ? { ...p, status: newStatus } : p))
+        );
+      }
+    });
+
+    // 3. Listen for Realtime presence state synchronization
     waitingChannel.on('presence', { event: 'sync' }, () => {
       const state = waitingChannel.presenceState();
       console.log('[Meeting Realtime] Waiting room presence sync:', state);
       const active: WaitingRoomParticipant[] = [];
+      const presenceStatusUpdates = new Map<string, { status: PresenceStatus; lastSeen: number }>();
+
       Object.entries(state).forEach(([_key, presences]: [string, any]) => {
         if (Array.isArray(presences)) {
           presences.forEach((p) => {
             if (p?.userId && p.userId !== user.id) {
-              active.push(p);
+              const status: PresenceStatus = p.status === 'Away' ? 'Away' : 'Online';
+              active.push({ ...p, status });
+              presenceStatusUpdates.set(p.userId, { status, lastSeen: Date.now() });
             }
           });
         }
       });
+
+      setParticipantPresenceMap((prev) => {
+        const next = new Map(prev);
+        presenceStatusUpdates.forEach((val, k) => next.set(k, val));
+        return next;
+      });
       setWaitingRoomParticipants(active);
     });
 
-    // 3. Listen for presence joins
+    // 4. Listen for presence joins
     waitingChannel.on('presence', { event: 'join' }, ({ newPresences }) => {
       console.log('[Meeting Realtime] Waiting room presence join:', newPresences);
       if (Array.isArray(newPresences)) {
         newPresences.forEach((p: any) => {
           if (p?.userId && p.userId !== user.id) {
-            triggerWaitingRoomAlert(p);
+            const status: PresenceStatus = p.status === 'Away' ? 'Away' : 'Online';
+            setParticipantPresenceMap((prev) => {
+              const next = new Map(prev);
+              next.set(p.userId, { status, lastSeen: Date.now() });
+              return next;
+            });
+            triggerWaitingRoomAlert({ ...p, status });
           }
         });
       }
     });
 
-    // 4. Listen for presence leaves
+    // 5. Listen for presence leaves
     waitingChannel.on('presence', { event: 'leave' }, ({ key }) => {
       console.log('[Meeting Realtime] Waiting room presence leave:', key);
+      setParticipantPresenceMap((prev) => {
+        const next = new Map(prev);
+        next.delete(key);
+        return next;
+      });
       setWaitingRoomParticipants((prev) => prev.filter((p) => p.userId !== key));
     });
 
-    // 5. Subscribe to channel, track presence, and broadcast arrival
+    // 6. Subscribe to channel, track presence, and broadcast arrival
     waitingChannel.subscribe(async (subStatus) => {
       if (subStatus === 'SUBSCRIBED') {
         console.log('[Meeting Realtime] Subscribed to waiting room channel successfully');
@@ -780,7 +917,9 @@ export default function MeetingPage() {
           email: user.email,
           enteredAt: new Date().toISOString(),
           inCall: callStarted,
+          status: myPresenceStatus,
         };
+        selfDataRef.current = selfData;
 
         try {
           await waitingChannel.track(selfData);
@@ -795,24 +934,69 @@ export default function MeetingPage() {
       }
     });
 
+    // 7. Dynamic Online / Away presence transition based on page visibility and window focus
+    const updatePresenceStatus = (newStatus: PresenceStatus) => {
+      setMyPresenceStatus(newStatus);
+      if (waitingRoomChannelRef.current && selfDataRef.current) {
+        const updatedSelf = { ...selfDataRef.current, status: newStatus };
+        selfDataRef.current = updatedSelf;
+        waitingRoomChannelRef.current.track(updatedSelf).catch(() => {});
+        waitingRoomChannelRef.current.send({
+          type: 'broadcast',
+          event: 'presence_status_change',
+          payload: { userId: user.id, status: newStatus },
+        }).catch(() => {});
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      const isHidden = document.visibilityState === 'hidden';
+      updatePresenceStatus(isHidden ? 'Away' : 'Online');
+    };
+
+    const handleWindowBlur = () => {
+      updatePresenceStatus('Away');
+    };
+
+    const handleWindowFocus = () => {
+      updatePresenceStatus('Online');
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('focus', handleWindowFocus);
+
     return () => {
-      console.log('[Meeting Realtime] Cleaning up waiting room channel subscription');
+      console.log('[Meeting Realtime] Cleaning up waiting room channel subscription & presence listeners');
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('focus', handleWindowFocus);
       supabase.removeChannel(waitingChannel);
       waitingRoomChannelRef.current = null;
     };
   }, [effectiveRoomId, booking, user, userRole, profile, accessError, loading, callStarted]);
 
-  // Automatic reconnection logic for Agora RTC stream
+  // Automatic reconnection logic for Agora RTC stream & Network Quality Monitoring
   // Shows a 'Reconnecting...' toast notification whenever stream connection is interrupted
+  // and maintains packet loss threshold evaluation for the 'Network unstable' badge
   useEffect(() => {
+    // Monitor network quality and packet loss for 'Network unstable' warning badge
+    agoraService.onNetworkQualityChange = (stats) => {
+      console.log(`[Meeting Agora RTC] Network quality update: isUnstable=${stats.isUnstable}, loss=${stats.packetLossRate}%`);
+      setIsNetworkUnstable(stats.isUnstable);
+      setPacketLossRate(stats.packetLossRate ?? null);
+    };
+
     agoraService.onConnectionStateChange = (curState, revState, reason) => {
       console.log(`[Meeting Agora RTC] Connection state change: ${revState} -> ${curState} (${reason || 'normal'})`);
       if (curState === "RECONNECTING") {
+        setIsNetworkUnstable(true);
         toast.loading("Reconnecting...", {
           id: "agora-reconnect",
           description: "Restoring Agora RTC video stream...",
         });
       } else if (curState === "CONNECTED" && revState === "RECONNECTING") {
+        setIsNetworkUnstable(agoraService.getIsNetworkUnstable());
         toast.success("Reconnected!", {
           id: "agora-reconnect",
           description: "Agora RTC stream connection restored successfully.",
@@ -822,6 +1006,7 @@ export default function MeetingPage() {
 
     agoraService.onReconnecting = (attempt) => {
       console.log(`[Meeting Agora RTC] Automatic reconnection attempt #${attempt}`);
+      setIsNetworkUnstable(true);
       toast.loading("Reconnecting...", {
         id: "agora-reconnect",
         description: `Restoring video stream (attempt ${attempt})...`,
@@ -830,6 +1015,7 @@ export default function MeetingPage() {
 
     agoraService.onReconnected = () => {
       console.log("[Meeting Agora RTC] Stream successfully reconnected!");
+      setIsNetworkUnstable(agoraService.getIsNetworkUnstable());
       toast.success("Reconnected!", {
         id: "agora-reconnect",
         description: "Your video stream has been restored.",
@@ -838,6 +1024,7 @@ export default function MeetingPage() {
 
     agoraService.onReconnectFailed = () => {
       console.warn("[Meeting Agora RTC] Automatic reconnection failed after retries.");
+      setIsNetworkUnstable(true);
       toast.error("Stream Connection Lost", {
         id: "agora-reconnect",
         description: "Could not restore the video stream automatically. Please refresh or rejoin.",
@@ -1338,6 +1525,28 @@ export default function MeetingPage() {
 
   const remoteUsersList = Array.from(remoteParticipants.values());
 
+  // Determine other participant's real-time Online / Away presence status
+  const otherPartyUserId = userRole === 'client'
+    ? (booking.consultants?.user_id || booking.consultant_id)
+    : booking.user_id;
+
+  let otherPartyPresenceStatus: PresenceStatus | 'Offline' = 'Offline';
+  if (otherPartyUserId && participantPresenceMap.has(otherPartyUserId)) {
+    otherPartyPresenceStatus = participantPresenceMap.get(otherPartyUserId)!.status;
+  } else {
+    const matchedWaiting = waitingRoomParticipants.find((p) => {
+      if (otherPartyUserId && p.userId === otherPartyUserId) return true;
+      if (userRole === 'client' && p.role === 'consultant') return true;
+      if (userRole === 'consultant' && p.role === 'client') return true;
+      return false;
+    });
+    if (matchedWaiting) {
+      otherPartyPresenceStatus = matchedWaiting.status || 'Online';
+    }
+  }
+
+  const otherPartyRoleLabel = userRole === 'client' ? 'Consultant' : 'Client';
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <SEO
@@ -1364,6 +1573,9 @@ export default function MeetingPage() {
               <span className="text-xs text-muted-foreground">{booking.consultants?.title || "Professional"}</span>
             </div>
           </div>
+          {/* Real-time Presence Status for other party and self */}
+          <PresenceBadge status={otherPartyPresenceStatus} label={otherPartyRoleLabel} />
+          <PresenceBadge status={myPresenceStatus} label="You" />
           <div className="h-5 w-px bg-border hidden md:block" />
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Clock className="h-4 w-4 text-primary" />
@@ -1396,6 +1608,26 @@ export default function MeetingPage() {
             <div className="relative w-full h-full flex">
               {/* Main Video Display */}
               <div className="flex-1 relative">
+                {/* Subtle Network Unstable Warning Badge next to the video feed */}
+                <AnimatePresence>
+                  {isNetworkUnstable && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                      className="absolute top-6 left-6 z-30 flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-semibold backdrop-blur-md shadow-lg"
+                    >
+                      <AlertTriangle className="h-4 w-4 text-amber-400 animate-pulse" />
+                      <span>Network unstable</span>
+                      {typeof packetLossRate === 'number' && packetLossRate > 0 && (
+                        <span className="text-[11px] text-amber-200/80 font-mono font-normal">
+                          ({Math.round(packetLossRate)}% loss)
+                        </span>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {remoteUsersList.length > 0 ? (
                   <div className="w-full h-full relative">
                     <RemoteVideo 
@@ -1403,10 +1635,11 @@ export default function MeetingPage() {
                       name={booking?.consultants?.name || 'Participant'} 
                       className="w-full h-full object-contain"
                     />
-                    <div className="absolute bottom-6 left-6 bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full z-10">
+                    <div className="absolute bottom-6 left-6 bg-black/75 backdrop-blur-md px-3.5 py-1.5 rounded-full z-10 flex items-center gap-2 border border-white/10 shadow-lg">
                       <span className="text-sm font-medium text-white">
                         {booking?.consultants?.name || `Participant`}
                       </span>
+                      <PresenceDot status={otherPartyPresenceStatus} />
                     </div>
                   </div>
                 ) : (
@@ -1416,8 +1649,9 @@ export default function MeetingPage() {
                       videoOff={videoOff} 
                       className="w-full h-full object-contain"
                     />
-                    <div className="absolute bottom-6 left-6 bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full z-10">
+                    <div className="absolute bottom-6 left-6 bg-black/75 backdrop-blur-md px-3.5 py-1.5 rounded-full z-10 flex items-center gap-2 border border-white/10 shadow-lg">
                       <span className="text-sm font-medium text-white">You</span>
+                      <PresenceDot status={myPresenceStatus} />
                     </div>
 
                     {/* Waiting Screen Overlay */}
@@ -1508,8 +1742,9 @@ export default function MeetingPage() {
                         videoOff={videoOff} 
                         className="w-full h-full object-cover"
                       />
-                      <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-sm px-2 py-1 rounded-full z-10">
+                      <div className="absolute bottom-2 left-2 bg-black/75 backdrop-blur-md px-2 py-1 rounded-full z-10 flex items-center gap-1.5 border border-white/10">
                         <span className="text-xs font-medium text-white">You</span>
+                        <PresenceDot status={myPresenceStatus} showLabel={false} />
                       </div>
                       {muted && (
                         <div className="absolute top-2 right-2 bg-destructive/90 backdrop-blur-sm p-1.5 rounded-full z-10">
@@ -1705,7 +1940,10 @@ export default function MeetingPage() {
                           <User className="h-5 w-5 text-primary" />
                         </div>
                         <div className="flex-1">
-                          <p className="font-medium text-sm">You</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-sm">You</p>
+                            <PresenceBadge status={myPresenceStatus} className="text-[10px] py-0 px-1.5 h-4" />
+                          </div>
                           <p className="text-xs text-muted-foreground">{user?.email}</p>
                         </div>
                         <div className="flex items-center gap-1">
@@ -1736,9 +1974,15 @@ export default function MeetingPage() {
                               <User className="h-5 w-5 text-primary" />
                             </div>
                             <div className="flex-1">
-                              <p className="font-medium text-sm">
-                                {p.name || booking?.consultants?.name || `Participant ${index + 1}`}
-                              </p>
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium text-sm">
+                                  {p.name || booking?.consultants?.name || `Participant ${index + 1}`}
+                                </p>
+                                <PresenceBadge 
+                                  status={participantPresenceMap.get(p.id)?.status || 'Online'} 
+                                  className="text-[10px] py-0 px-1.5 h-4" 
+                                />
+                              </div>
                               <p className="text-xs text-muted-foreground">
                                 {p.email || 'Connected'}
                               </p>
@@ -1954,6 +2198,10 @@ export default function MeetingPage() {
               <div>
                 <h2 className="font-display text-2xl font-bold">{booking.consultants?.name || "Consultant"}</h2>
                 <p className="text-sm text-muted-foreground mt-1">{booking.consultants?.title}</p>
+                <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
+                  <PresenceBadge status={otherPartyPresenceStatus} label={otherPartyRoleLabel} />
+                  <PresenceBadge status={myPresenceStatus} label="You" />
+                </div>
               </div>
 
               <div className="flex items-center justify-center gap-4 text-sm text-muted-foreground flex-wrap">

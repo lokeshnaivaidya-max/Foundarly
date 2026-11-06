@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { getStoredSession } from '@/contexts/AuthContext';
 import {
   MeetingSessionStatus,
   calculateRejoinEligibility,
@@ -51,10 +52,18 @@ export const meetingService = {
 
     const cleanRoomId = roomId.trim();
 
-    // Get current authenticated user session
+    // Get current authenticated user session with synchronous fallback
     const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData?.session?.access_token;
-    const currentUser = sessionData?.session?.user;
+    let token = sessionData?.session?.access_token;
+    let currentUser = sessionData?.session?.user;
+
+    if (!token || !currentUser) {
+      const stored = getStoredSession();
+      if (stored?.access_token && stored?.user) {
+        token = stored.access_token;
+        currentUser = stored.user;
+      }
+    }
 
     if (!token || !currentUser) {
       return {
@@ -176,24 +185,51 @@ export const meetingService = {
         }
       }
 
-      const authCheck = validateParticipantAccess(
+      let authCheck = validateParticipantAccess(
         currentUser,
         booking,
         consultantObj,
         false
       );
 
-        if (!authCheck.authorized) {
-          return {
-            success: false,
-            authorized: false,
-            canJoin: false,
-            isRejoin: false,
-            sessionStatus: 'expired',
-            error: authCheck.reason || 'You are not authorized to access this meeting.',
-            code: authCheck.code || 'UNAUTHORIZED_PARTICIPANT',
-          };
+      if (!authCheck.authorized && booking.consultant_id) {
+        const userEmailClean = (currentUser.email || '').toLowerCase().trim();
+        const { data: matchedCons } = await supabase
+          .from('consultants')
+          .select('id, name, title, email, user_id')
+          .eq('id', booking.consultant_id)
+          .maybeSingle();
+
+        if (matchedCons) {
+          const consEmail = (matchedCons.email || '').toLowerCase().trim();
+          const matchesId = Boolean(matchedCons.user_id && matchedCons.user_id === currentUser.id);
+          const matchesEmail = Boolean(userEmailClean && consEmail && userEmailClean === consEmail);
+
+          if (matchesId || matchesEmail) {
+            consultantObj = matchedCons;
+            authCheck = { authorized: true, role: 'consultant' };
+            if (matchedCons.user_id !== currentUser.id) {
+              supabase
+                .from('consultants')
+                .update({ user_id: currentUser.id })
+                .eq('id', matchedCons.id)
+                .then();
+            }
+          }
         }
+      }
+
+      if (!authCheck.authorized) {
+        return {
+          success: false,
+          authorized: false,
+          canJoin: false,
+          isRejoin: false,
+          sessionStatus: 'expired',
+          error: authCheck.reason || 'You are not authorized to access this meeting.',
+          code: authCheck.code || 'UNAUTHORIZED_PARTICIPANT',
+        };
+      }
 
         const eligibility = calculateRejoinEligibility(booking, new Date());
         const hasJoined = hasParticipantJoinedLocal(
@@ -256,7 +292,7 @@ export const meetingService = {
     normalizedRoomId = normalizedRoomId.split('?')[0].split('#')[0].replace(/\/+$/, '').trim();
 
     const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
+    const token = session?.access_token || getStoredSession()?.access_token;
     if (!token) {
       return { success: false, error: 'User is not authenticated.' };
     }

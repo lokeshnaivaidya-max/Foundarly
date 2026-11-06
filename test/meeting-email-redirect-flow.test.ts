@@ -14,7 +14,7 @@ import {
   generateUserEmailHTML,
   generateSessionCompletedEmailHTML,
 } from '../src/utils/emailTemplates.js';
-import { calculateRejoinEligibility } from '../src/utils/meetingRejoin.js';
+import { calculateRejoinEligibility, validateParticipantAccess } from '../src/utils/meetingRejoin.js';
 
 // Polyfill window, sessionStorage, localStorage for Node environment testing
 const storageMock = () => {
@@ -269,6 +269,120 @@ describe('Meeting Email Link Authentication & Redirect Flow', () => {
       assert.equal(targetAfterLogin, rejoinMeetingUrl);
       assert.match(targetAfterLogin!, /rejoin=true/);
       assert.match(targetAfterLogin!, /session=followup/);
+    });
+  });
+
+  describe('7. Consultant Meeting Link Repeated Login Loop Prevention', () => {
+    const bookingId = 'c1234567-89ab-cdef-0123-456789abcdef';
+    const meetingRoomId = `foundarly-${bookingId}`;
+    const meetingPath = `/meeting/${meetingRoomId}`;
+    const consultantUserId = 'cons-user-uuid-1111';
+    const consultantEmail = 'consultant@expert.com';
+
+    it('Scenario 1: Authenticated consultant clicking meeting link directly preserves meeting target', () => {
+      // Simulates consultant clicking email link while session already active
+      const search = `?redirect=${encodeURIComponent(meetingPath)}&from=${encodeURIComponent(meetingPath)}`;
+      const target = getMeetingRedirect(null, search);
+      assert.equal(target, meetingPath);
+    });
+
+    it('Scenario 2: Unauthenticated consultant login flow routes directly to meeting room, NOT consultant dashboard', () => {
+      // Unauthenticated consultant hits meeting route, gets saved to redirect storage
+      saveMeetingRedirect(meetingPath);
+
+      // Consultant navigates to login with return params
+      const loginUrl = buildMeetingLoginUrl(meetingPath);
+      const search = loginUrl.substring(loginUrl.indexOf('?'));
+
+      // Both query param and storage resolve to exact original meeting URL
+      const targetFromQuery = getMeetingRedirect(null, search);
+      const targetFromStorage = getMeetingRedirect(null, '');
+      assert.equal(targetFromQuery, meetingPath);
+      assert.equal(targetFromStorage, meetingPath);
+
+      // Verify consultant role routing logic preserves meeting path
+      const isConsultant = true;
+      const validConsultantFrom = (typeof targetFromQuery === 'string' && (targetFromQuery.startsWith('/consultant') || isMeetingUrl(targetFromQuery)))
+        ? targetFromQuery
+        : '/consultant/dashboard';
+      assert.equal(validConsultantFrom, meetingPath);
+      assert.notEqual(validConsultantFrom, '/consultant/dashboard');
+    });
+
+    it('Scenario 3: Consultant page refresh preserves meeting room without login prompt', () => {
+      saveMeetingRedirect(meetingPath);
+      // Simulated page refresh: location state is reset, but storage preserves target
+      const targetOnRefresh = getMeetingRedirect(null, '');
+      assert.equal(targetOnRefresh, meetingPath);
+    });
+
+    it('Scenario 4: Consultant opens meeting in new tab with query parameters intact', () => {
+      const newTabSearch = `?from=${encodeURIComponent(meetingPath)}`;
+      const target = getMeetingRedirect(null, newTabSearch);
+      assert.equal(target, meetingPath);
+    });
+
+    it('Scenario 5: Chrome PWA shortcut or restore retains meeting room path', () => {
+      saveMeetingRedirect(meetingPath);
+      assert.equal((global as any).window.localStorage.getItem(MEETING_REDIRECT_KEY), meetingPath);
+      assert.equal((global as any).window.sessionStorage.getItem(MEETING_REDIRECT_KEY), meetingPath);
+    });
+
+    it('Scenario 6: Assigned consultant is authorized by user_id or verified email', () => {
+      const mockBooking = {
+        id: bookingId,
+        user_id: 'client-user-9999',
+        email: 'client@foundarly.in',
+        consultant_id: 'consultant-row-id',
+        status: 'confirmed',
+        payment_status: 'paid',
+      };
+
+      const mockConsultantObj = {
+        id: 'consultant-row-id',
+        user_id: consultantUserId,
+        email: consultantEmail,
+      };
+
+      // By user_id
+      const authById = validateParticipantAccess(
+        { id: consultantUserId, email: 'different@email.com' } as any,
+        mockBooking,
+        mockConsultantObj
+      );
+      assert.equal(authById.authorized, true);
+      assert.equal(authById.role, 'consultant');
+
+      // By email (e.g. unlinked user_id)
+      const authByEmail = validateParticipantAccess(
+        { id: 'new-auth-id-2222', email: consultantEmail } as any,
+        mockBooking,
+        mockConsultantObj
+      );
+      assert.equal(authByEmail.authorized, true);
+      assert.equal(authByEmail.role, 'consultant');
+    });
+
+    it('Scenario 7: Unauthorized third party is strictly denied access', () => {
+      const mockBooking = {
+        id: bookingId,
+        user_id: 'client-user-9999',
+        email: 'client@foundarly.in',
+        consultant_id: 'consultant-row-id',
+        status: 'confirmed',
+        payment_status: 'paid',
+      };
+
+      const mockConsultantObj = {
+        id: 'consultant-row-id',
+        user_id: consultantUserId,
+        email: consultantEmail,
+      };
+
+      const intruder = { id: 'intruder-uuid', email: 'stranger@example.com' };
+      const authResult = validateParticipantAccess(intruder as any, mockBooking, mockConsultantObj);
+      assert.equal(authResult.authorized, false);
+      assert.equal(authResult.code, 'UNAUTHORIZED_PARTICIPANT');
     });
   });
 });

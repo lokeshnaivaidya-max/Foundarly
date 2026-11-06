@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, getStoredSession } from "@/contexts/AuthContext";
 import { saveMeetingRedirect, clearMeetingRedirect, buildMeetingLoginUrl } from "@/utils/meetingRedirect";
 import { bookingsService } from "@/services/bookings";
 import { Button } from "@/components/ui/button";
@@ -553,6 +553,17 @@ export default function MeetingPage() {
       ]);
 
       if (!accessResult.success || !accessResult.authorized) {
+        if (accessResult.code === 'UNAUTHENTICATED') {
+          const currentFullUrl = `${location.pathname}${location.search}${location.hash}`;
+          const targetMeetingUrl = currentFullUrl.startsWith('/meeting/') ? currentFullUrl : `/meeting/${effectiveRoomId}`;
+          saveMeetingRedirect(targetMeetingUrl);
+          navigate(buildMeetingLoginUrl(targetMeetingUrl), {
+            replace: true,
+            state: { from: targetMeetingUrl }
+          });
+          return;
+        }
+
         setAccessError({
           title: accessResult.code === 'REJOIN_EXPIRED' ? '7-Day Follow-Up Window Expired' :
                  accessResult.code === 'ROOM_NOT_FOUND' ? 'Meeting Session Not Found' :
@@ -570,6 +581,8 @@ export default function MeetingPage() {
         return;
       }
 
+      // Successfully authorized into meeting room - clear redirect storage
+      clearMeetingRedirect();
       setAccessError(null);
       setBooking(accessResult.booking);
       
@@ -606,12 +619,17 @@ export default function MeetingPage() {
     } finally {
       setLoading(false);
     }
-  }, [effectiveRoomId, user?.id, user?.email]);
+  }, [effectiveRoomId, user?.id, user?.email, location.pathname, location.search, location.hash, navigate]);
 
   useEffect(() => {
     if (authLoading) return;
     
     if (!user) {
+      // Check if session is stored and being restored
+      const stored = getStoredSession();
+      if (stored?.user) {
+        return;
+      }
       const currentFullUrl = `${location.pathname}${location.search}${location.hash}`;
       const targetMeetingUrl = currentFullUrl.startsWith('/meeting/') ? currentFullUrl : `/meeting/${effectiveRoomId}`;
       saveMeetingRedirect(targetMeetingUrl);
@@ -621,9 +639,6 @@ export default function MeetingPage() {
       });
       return;
     }
-    
-    // User is authenticated and reached the meeting page
-    clearMeetingRedirect();
 
     if (!effectiveRoomId) { 
       setManualEntry(true); 

@@ -52,16 +52,18 @@ export default function LoginPage() {
       console.log("profile:", profile);
 
       // Critical: Prioritize meeting destination for ALL roles (consultant, client, admin)
-      const meetingTarget = getMeetingRedirect(location.state, location.search);
-      if (meetingTarget) {
-        clearMeetingRedirect();
-        navigate(meetingTarget, { replace: true });
-        return;
-      }
-
       const queryParams = new URLSearchParams(location.search);
       const queryFrom = queryParams.get('from') || queryParams.get('returnUrl') || queryParams.get('redirect');
       const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from || queryFrom;
+
+      const meetingTarget = getMeetingRedirect(location.state, location.search) || 
+        (isMeetingUrl(fromPath) ? normalizeMeetingPath(fromPath) : null);
+
+      if (meetingTarget) {
+        console.log("[Login] Redirecting authenticated user to meeting target:", meetingTarget);
+        navigate(meetingTarget, { replace: true, state: { from: meetingTarget } });
+        return;
+      }
 
       if (isAdmin || isUserAdmin(user, profile)) {
         console.log("[Login] Redirecting to admin", { fromPath, isAdmin, isUserAdmin: isUserAdmin(user, profile) });
@@ -69,7 +71,9 @@ export default function LoginPage() {
         navigate(validAdminFrom, { replace: true });
       } else if (isConsultant || profile?.role === 'consultant' || profile?.is_consultant) {
         console.log("[Login] Redirecting to consultant dashboard", { fromPath, isConsultant, profileRole: profile?.role, profileIsConsultant: profile?.is_consultant });
-        const validConsultantFrom = (typeof fromPath === 'string' && fromPath.startsWith('/consultant')) ? fromPath : '/consultant/dashboard';
+        const validConsultantFrom = (typeof fromPath === 'string' && (fromPath.startsWith('/consultant') || isMeetingUrl(fromPath))) 
+          ? fromPath 
+          : '/consultant/dashboard';
         navigate(validConsultantFrom, { replace: true });
       } else {
         console.log("[Login] Redirecting to client dashboard", { fromPath, isConsultant, profileRole: profile?.role });
@@ -133,11 +137,17 @@ export default function LoginPage() {
           activeProfileRole: (userProfile || profile)?.role ?? 'null',
         });
 
+        const queryParams = new URLSearchParams(location.search);
+        const queryFrom = queryParams.get('from') || queryParams.get('returnUrl') || queryParams.get('redirect');
+        const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from || queryFrom;
+
         // Priority 1: Check meeting redirect for both clients and consultants
-        const meetingTarget = getMeetingRedirect(location.state, location.search);
+        const meetingTarget = getMeetingRedirect(location.state, location.search) || 
+          (isMeetingUrl(fromPath) ? normalizeMeetingPath(fromPath) : null);
+
         if (meetingTarget) {
-          clearMeetingRedirect();
-          navigate(meetingTarget, { replace: true });
+          console.log("[Login] handleSubmit: redirecting to meeting target:", meetingTarget);
+          navigate(meetingTarget, { replace: true, state: { from: meetingTarget } });
           return;
         }
 
@@ -151,17 +161,15 @@ export default function LoginPage() {
           return;
         }
 
-        const queryParams = new URLSearchParams(location.search);
-        const queryFrom = queryParams.get('from') || queryParams.get('returnUrl') || queryParams.get('redirect');
-        const fromPath = (location.state as any)?.from?.pathname || (location.state as any)?.from || queryFrom;
-
         if (isUserAdmin(user, activeProfile)) {
           console.log("[Login] handleSubmit: redirecting to admin", { activeProfileRole: activeProfile?.role, fromPath });
           const validAdminFrom = (typeof fromPath === 'string' && fromPath.startsWith('/admin')) ? fromPath : '/admin';
           navigate(validAdminFrom, { replace: true });
         } else if (activeProfile?.role === 'consultant' || activeProfile?.is_consultant) {
           console.log("[Login] handleSubmit: redirecting to consultant dashboard", { activeProfileRole: activeProfile?.role, activeProfileIsConsultant: activeProfile?.is_consultant, fromPath });
-          const validConsultantFrom = (typeof fromPath === 'string' && fromPath.startsWith('/consultant')) ? fromPath : '/consultant/dashboard';
+          const validConsultantFrom = (typeof fromPath === 'string' && (fromPath.startsWith('/consultant') || isMeetingUrl(fromPath))) 
+            ? fromPath 
+            : '/consultant/dashboard';
           navigate(validConsultantFrom, { replace: true });
         } else {
           console.log("[Login] handleSubmit: redirecting to client dashboard", { activeProfileRole: activeProfile?.role, fromPath });

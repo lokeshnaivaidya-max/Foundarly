@@ -576,7 +576,36 @@ async function startServer() {
       }
 
       const isAdmin = isAllowedAdminEmail(user.email);
-      const authResult = validateParticipantAccess(user, booking, consultantObj, isAdmin);
+      let authResult = validateParticipantAccess(user, booking, consultantObj, isAdmin);
+
+      if (!authResult.authorized && booking.consultant_id) {
+        const userEmailClean = (user.email || "").toLowerCase().trim();
+        // Check if authenticated user matches the assigned consultant record
+        const { data: matchedCons } = await supabaseAdminClient
+          .from("consultants")
+          .select("id, name, title, email, user_id")
+          .eq("id", booking.consultant_id)
+          .maybeSingle();
+
+        if (matchedCons) {
+          const consEmail = (matchedCons.email || "").toLowerCase().trim();
+          const matchesId = Boolean(matchedCons.user_id && matchedCons.user_id === user.id);
+          const matchesEmail = Boolean(userEmailClean && consEmail && userEmailClean === consEmail);
+
+          if (matchesId || matchesEmail) {
+            consultantObj = matchedCons;
+            authResult = { authorized: true, role: 'consultant' };
+            // Self-heal consultant user_id if unlinked or outdated
+            if (matchedCons.user_id !== user.id) {
+              supabaseAdminClient
+                .from("consultants")
+                .update({ user_id: user.id })
+                .eq("id", matchedCons.id)
+                .then();
+            }
+          }
+        }
+      }
 
       if (!authResult.authorized) {
         return res.status(403).json({

@@ -30,12 +30,21 @@ function usePrefersReducedMotion() {
   const [reduced, setReduced] = useState(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setReduced(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    try {
+      const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const update = () => setReduced(query.matches);
+      update();
+      if (typeof query.addEventListener === "function") {
+        query.addEventListener("change", update);
+        return () => query.removeEventListener("change", update);
+      } else if (typeof (query as any).addListener === "function") {
+        (query as any).addListener(update);
+        return () => (query as any).removeListener(update);
+      }
+    } catch {
+      // ignore media query errors
+    }
   }, []);
 
   return reduced;
@@ -135,12 +144,21 @@ export function TextMorph({
     const nextLayer = nextLayerRef.current;
     if (!currentLayer || !nextLayer) return;
 
+    let resizeRaf: number | null = null;
     const observer = new ResizeObserver(() => {
-      if (!morphingRef.current) measureStage("current", true);
+      if (!morphingRef.current) {
+        if (resizeRaf) cancelAnimationFrame(resizeRaf);
+        resizeRaf = requestAnimationFrame(() => {
+          measureStage("current", true);
+        });
+      }
     });
     observer.observe(currentLayer);
     observer.observe(nextLayer);
-    return () => observer.disconnect();
+    return () => {
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      observer.disconnect();
+    };
   }, [measureStage]);
 
   const beginMorph = useCallback(() => {

@@ -124,10 +124,12 @@ export default function AIChatWidget() {
       const saved = sessionStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        return parsed.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }));
+        if (Array.isArray(parsed)) {
+          return parsed.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }));
+        }
       }
     } catch {
-      // ignore
+      // ignore corrupted or legacy storage
     }
     return [];
   });

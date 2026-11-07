@@ -17,7 +17,10 @@
             h.slice(-10) === '.localhost' ||
             h.slice(-6) === '.local' ||
             h.slice(-9) === '.internal' ||
-            h.slice(-8) === '.run.app'
+            h.slice(-8) === '.run.app' ||
+            h.includes('googleusercontent.com') ||
+            h.includes('aistudio') ||
+            h.includes('webcontainer')
           ) {
             return;
           }

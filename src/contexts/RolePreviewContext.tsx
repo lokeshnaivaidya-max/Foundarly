@@ -50,10 +50,13 @@ export function RolePreviewProvider({ children }: { children: React.ReactNode })
     try {
       const stored = sessionStorage.getItem(STORAGE_KEY_CONSULTANT);
       if (stored) {
-        return JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === "object" && typeof parsed.id === "string") {
+          return parsed;
+        }
       }
     } catch {
-      // ignore
+      // ignore corrupted or legacy storage
     }
     return null;
   });

@@ -75,7 +75,7 @@ function Shimmer() {
   return (
     <motion.div
       className="absolute inset-0 -translate-x-full"
-      animate={{ translateX: ["−100%", "200%"] }}
+      animate={{ translateX: ["-100%", "200%"] }}
       transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut", repeatDelay: 0.3 }}
       style={{
         background: "linear-gradient(90deg, transparent, hsl(45 100% 50% / 0.06), transparent)",

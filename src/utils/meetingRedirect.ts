@@ -35,6 +35,8 @@ export function normalizeMeetingPath(target?: string | null | { pathname?: strin
     return `${target.pathname}${target.search || ''}${target.hash || ''}`;
   }
 
+  if (typeof target !== 'string') return null;
+
   const clean = target.trim();
   if (!isMeetingUrl(clean)) return null;
 

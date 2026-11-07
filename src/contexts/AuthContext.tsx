@@ -90,7 +90,12 @@ const getCachedProfile = (userId: string): Profile | null => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       const raw = window.localStorage.getItem(`foundarly_profile_${userId}`);
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && typeof parsed.role === 'string') {
+          return parsed as Profile;
+        }
+      }
     }
   } catch {
     // ignore
@@ -430,23 +435,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await resolveProfile(data.session.user.id, data.session.user);
         }
       } else {
-        // Non-destructive: check storage and active ref before clearing.
-        // Do not clear the user if onAuthStateChange has not yet had a chance
-        // to deliver INITIAL_SESSION; doing so could briefly route a logged-in
-        // user to /login during a page refresh.
-        const stored = getStoredSession();
-        if (!initialAuthProcessedRef.current) {
-          // onAuthStateChange has not yet processed the initial session;
-          // defer to it rather than clearing user here.
-          if (stored?.user && !activeUserRef.current) {
-            applyAuth(stored, stored.user);
-            setLoading(true);
-            setAuthError(null);
-            await resolveProfile(stored.user.id, stored.user);
-          }
-        } else if (!stored && !activeUserRef.current) {
+        // Check for definitive authentication revocation or expired refresh token
+        const isExplicitAuthFailure = Boolean(
+          error && (
+            error.message.includes('Refresh Token') ||
+            error.message.includes('refresh_token_not_found') ||
+            error.message.includes('invalid_grant') ||
+            (error as any).status === 400 ||
+            (error as any).status === 401
+          )
+        );
+
+        if (isExplicitAuthFailure) {
+          secureLog.info('[AuthContext] Session expired or refresh token revoked; clearing stale session');
+          safeLocalStorage.removeItem(PRIMARY_AUTH_KEY);
+          safeLocalStorage.removeItem(FALLBACK_AUTH_KEY);
           applyAuth(null, null);
           setProfile(null);
+        } else {
+          // Non-destructive: check storage and active ref before clearing.
+          // Do not clear the user if onAuthStateChange has not yet had a chance
+          // to deliver INITIAL_SESSION; doing so could briefly route a logged-in
+          // user to /login during a page refresh.
+          const stored = getStoredSession();
+          if (!initialAuthProcessedRef.current) {
+            // onAuthStateChange has not yet processed the initial session;
+            // defer to it rather than clearing user here.
+            if (stored?.user && !activeUserRef.current) {
+              applyAuth(stored, stored.user);
+              setLoading(true);
+              setAuthError(null);
+              await resolveProfile(stored.user.id, stored.user);
+            }
+          } else if (!stored && !activeUserRef.current) {
+            applyAuth(null, null);
+            setProfile(null);
+          }
         }
       }
       initialAuthProcessedRef.current = true;

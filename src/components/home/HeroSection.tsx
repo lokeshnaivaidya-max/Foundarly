@@ -35,9 +35,14 @@ function HeroSection() {
   const [lottieData, setLottieData] = useState<any>(null);
 
   useEffect(() => {
-    fetch("/HELLO EXPERT.json")
-      .then(r => r.json())
-      .then(setLottieData)
+    fetch("/HELLO%20EXPERT.json")
+      .then(r => {
+        if (!r.ok) throw new Error("Failed to load Lottie animation");
+        return r.json();
+      })
+      .then(data => {
+        if (data && typeof data === "object") setLottieData(data);
+      })
       .catch(() => {});
   }, []);
 

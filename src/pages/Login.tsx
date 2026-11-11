@@ -11,7 +11,7 @@ import { isUserAdmin } from "@/lib/authorization";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Eye, EyeOff, Mail, CheckCircle2, AlertCircle } from "lucide-react";
 import { validateEmail } from "@/utils/security";
-import { getMeetingRedirect, saveMeetingRedirect, clearMeetingRedirect } from "@/utils/meetingRedirect";
+import { getMeetingRedirect, saveMeetingRedirect, clearMeetingRedirect, isMeetingUrl, normalizeMeetingPath } from "@/utils/meetingRedirect";
 import {
   Dialog,
   DialogContent,

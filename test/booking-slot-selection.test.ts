@@ -170,11 +170,15 @@ describe('Foundarly Consultation Time Slot & Scheduling System', () => {
       payment_status?: string;
     }
 
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 7);
+    const futureDateStr = futureDate.toISOString().split('T')[0];
+
     const bookings: MockBooking[] = [
       {
         id: 'b1',
         consultant_id: 'c-1',
-        date: '2026-11-10',
+        date: futureDateStr,
         time: '11:00 AM',
         status: 'cancelled',
         payment_status: 'refunded',
@@ -182,7 +186,7 @@ describe('Foundarly Consultation Time Slot & Scheduling System', () => {
       {
         id: 'b2',
         consultant_id: 'c-1',
-        date: '2026-11-10',
+        date: futureDateStr,
         time: '02:00 PM',
         status: 'rejected',
         payment_status: 'rejected',
@@ -190,7 +194,7 @@ describe('Foundarly Consultation Time Slot & Scheduling System', () => {
       {
         id: 'b3',
         consultant_id: 'c-1',
-        date: '2026-11-10',
+        date: futureDateStr,
         time: '04:00 PM',
         status: 'confirmed',
         payment_status: 'verified',
@@ -207,7 +211,7 @@ describe('Foundarly Consultation Time Slot & Scheduling System', () => {
     // Generating slots with activeBookings ensures 11:00 AM and 02:00 PM remain available
     const slots = generateAvailableSlots({
       consultantPreferredTime: 'Flexible',
-      dateStr: '2026-11-10',
+      dateStr: futureDateStr,
       sessionDuration: 60,
       bookedTimes: activeBookings.map((b) => b.time),
     });

@@ -22,6 +22,7 @@ import MeetingRecordingModal from "@/components/meeting/MeetingRecordingModal";
 import { MeetingRecorder, RecordingResult, RecordingStatus } from "@/utils/meetingRecorder";
 import { supabase } from "@/lib/supabase";
 import { agoraService, AGORA_CONFIG } from "@/services/agora";
+import { parseBookingDateTime, getCountdownTargetMs } from "@/utils/timeSlots";
 
 export type PresenceStatus = 'Online' | 'Away';
 
@@ -296,6 +297,35 @@ function PresenceDot({
   );
 }
 
+function formatBookingDateDisplay(dateStr?: string | null, format: 'short' | 'long' = 'long'): string {
+  if (!dateStr) return '';
+  try {
+    if (dateStr.includes('T')) {
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) {
+        return format === 'short'
+          ? d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+          : d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+      }
+    }
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      const localDate = new Date(y, m, d);
+      if (!isNaN(localDate.getTime())) {
+        return format === 'short'
+          ? localDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+          : localDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+      }
+    }
+    return dateStr;
+  } catch {
+    return dateStr;
+  }
+}
+
 function getMeetingStatus(date: string, time: string, duration: number): "upcoming" | "live" | "completed" | "missed" {
   const start = parseBookingDateTime(date, time);
   if (!start || isNaN(start.getTime())) {
@@ -324,23 +354,57 @@ function canJoinMeeting(date: string, time: string, duration: number): boolean {
   return now >= joinWindow && now <= end;
 }
 
-function Countdown({ targetDate, targetTime }: { targetDate: string; targetTime: string }) {
-  const [diff, setDiff] = useState<number | null>(null);
+function Countdown({
+  targetDate,
+  targetTime,
+  onTargetReached,
+}: {
+  targetDate: string;
+  targetTime: string;
+  onTargetReached?: () => void;
+}) {
+  const [diff, setDiff] = useState<number | null>(() => {
+    try {
+      const { targetMs, isValid } = getCountdownTargetMs(targetDate, targetTime);
+      return isValid && targetMs !== null ? Math.max(0, targetMs - Date.now()) : null;
+    } catch {
+      return null;
+    }
+  });
   const [isPendingTime, setIsPendingTime] = useState(false);
+  const reachedTriggeredRef = useRef(false);
 
   useEffect(() => {
-    const { targetMs, isValid } = getCountdownTargetMs(targetDate, targetTime);
-    if (!isValid || targetMs === null) {
+    let targetMs: number | null = null;
+    try {
+      const result = getCountdownTargetMs(targetDate, targetTime);
+      if (!result.isValid || result.targetMs === null) {
+        setIsPendingTime(true);
+        return;
+      }
+      targetMs = result.targetMs;
+    } catch {
       setIsPendingTime(true);
       return;
     }
 
     setIsPendingTime(false);
-    const tick = () => setDiff(Math.max(0, targetMs - Date.now()));
+
+    const tick = () => {
+      const remaining = Math.max(0, targetMs! - Date.now());
+      setDiff(remaining);
+      if (remaining === 0 && !reachedTriggeredRef.current) {
+        reachedTriggeredRef.current = true;
+        if (onTargetReached) {
+          onTargetReached();
+        }
+      }
+    };
+
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [targetDate, targetTime]);
+  }, [targetDate, targetTime, onTargetReached]);
 
   if (isPendingTime) {
     return (
@@ -357,16 +421,35 @@ function Countdown({ targetDate, targetTime }: { targetDate: string; targetTime:
   }
 
   const safeDiff = diff === null || isNaN(diff) || !isFinite(diff) ? 0 : Math.max(0, diff);
-  const h = Math.floor(safeDiff / 3600000);
-  const m = Math.floor((safeDiff % 3600000) / 60000);
-  const s = Math.floor((safeDiff % 60000) / 1000);
+  const days = Math.floor(safeDiff / 86400000);
+  const hours = Math.floor((safeDiff % 86400000) / 3600000);
+  const minutes = Math.floor((safeDiff % 3600000) / 60000);
+  const seconds = Math.floor((safeDiff % 60000) / 1000);
+
+  const units = days > 0
+    ? [
+        { v: days, l: days === 1 ? "Day" : "Days" },
+        { v: hours, l: "Hours" },
+        { v: minutes, l: "Minutes" },
+        { v: seconds, l: "Seconds" },
+      ]
+    : [
+        { v: hours, l: "Hours" },
+        { v: minutes, l: "Minutes" },
+        { v: seconds, l: "Seconds" },
+      ];
 
   return (
-    <div className="flex items-center gap-3 justify-center">
-      {[{ v: h, l: "Hours" }, { v: m, l: "Minutes" }, { v: s, l: "Seconds" }].map(({ v, l }) => (
-        <div key={l} className="flex flex-col items-center bg-secondary border border-border rounded-xl px-5 py-3 min-w-[70px]">
-          <span className="font-display text-3xl font-bold text-primary">{String(isNaN(v) ? 0 : v).padStart(2, "0")}</span>
-          <span className="text-xs text-muted-foreground mt-1">{l}</span>
+    <div className="flex items-center gap-2 sm:gap-3 justify-center flex-wrap">
+      {units.map(({ v, l }) => (
+        <div
+          key={l}
+          className="flex flex-col items-center bg-secondary border border-border rounded-xl px-3 sm:px-5 py-2.5 sm:py-3 min-w-[62px] sm:min-w-[70px]"
+        >
+          <span className="font-display text-2xl sm:text-3xl font-bold text-primary">
+            {String(isNaN(v) ? 0 : v).padStart(2, "0")}
+          </span>
+          <span className="text-[11px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">{l}</span>
         </div>
       ))}
     </div>
@@ -1579,7 +1662,7 @@ export default function MeetingPage() {
           <div className="h-5 w-px bg-border hidden md:block" />
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Clock className="h-4 w-4 text-primary" />
-            <span className="hidden sm:inline">{new Date(booking.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+            <span className="hidden sm:inline">{formatBookingDateDisplay(booking.date, 'short')}</span>
             <span>{booking.time}</span>
             <span className="text-xs">({booking.session_duration || 60} min)</span>
           </div>
@@ -2207,7 +2290,7 @@ export default function MeetingPage() {
               <div className="flex items-center justify-center gap-4 text-sm text-muted-foreground flex-wrap">
                 <span className="flex items-center gap-1.5">
                   <Clock className="h-4 w-4 text-primary" />
-                  {new Date(booking.date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                  {formatBookingDateDisplay(booking.date, 'long')}
                 </span>
                 <span>·</span>
                 <span>{booking.time}</span>
@@ -2294,9 +2377,13 @@ export default function MeetingPage() {
               >
                 <div className="flex items-center justify-center gap-2 text-yellow-500">
                   <AlertCircle className="h-4 w-4" />
-                  <p className="text-sm font-medium">Session hasn't started yet</p>
+                  <p className="text-sm font-medium">Your meeting hasn't started yet</p>
                 </div>
-                <Countdown targetDate={booking.date} targetTime={booking.time} />
+                <Countdown
+                  targetDate={booking.date}
+                  targetTime={booking.time}
+                  onTargetReached={loadMeetingAccess}
+                />
                 <p className="text-xs text-muted-foreground">
                   You can join 5 minutes before the scheduled time
                 </p>

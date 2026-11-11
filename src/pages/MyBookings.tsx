@@ -22,6 +22,7 @@ import {
   hasParticipantJoinedLocal,
   FollowUpRequest,
 } from "@/utils/meetingRejoin";
+import { parseBookingDateTime } from "@/utils/timeSlots";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -46,8 +47,9 @@ interface Booking {
 }
 
 function getMeetingStatus(date: string, time: string, duration: number) {
+  const start = parseBookingDateTime(date, time);
+  if (!start || isNaN(start.getTime())) return "upcoming";
   const now = new Date();
-  const start = new Date(`${date}T${time}`);
   const end = new Date(start.getTime() + duration * 60 * 1000);
   const joinWindow = new Date(start.getTime() - 5 * 60 * 1000);
   if (now < joinWindow) return "upcoming";
@@ -341,7 +343,15 @@ function BookingCard({ booking, index, onRetry, onCancel, onRemove, onReschedule
               'client'
             );
 
-            if (sessionStatus === "live") {
+            const isISTLive = Boolean(booking.date && booking.time && (() => {
+              const start = parseBookingDateTime(booking.date, booking.time);
+              if (!start) return false;
+              const now = Date.now();
+              const durationMs = (booking.session_duration || 60) * 60 * 1000;
+              return now >= start.getTime() - 5 * 60 * 1000 && now <= start.getTime() + durationMs;
+            })());
+
+            if (sessionStatus === "live" || isISTLive) {
               return (
                 <Link to={`/meeting/${effectiveRoomId}`}>
                   <Button size="sm" className="gap-2 glow-gold-sm">

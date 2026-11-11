@@ -127,38 +127,83 @@ export const meetingService = {
       const isRawUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawBookingId);
       const isCleanUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(normalizedRoomId);
 
-      const orFilters: string[] = [
-        `meeting_room_id.eq.${normalizedRoomId}`,
-        `meeting_room_id.eq.${prefixedRoomId}`,
-        `meeting_room_id.eq.${rawBookingId}`,
-      ];
-      if (isRawUuid) {
-        orFilters.push(`id.eq.${rawBookingId}`);
-      }
-      if (isCleanUuid && normalizedRoomId !== rawBookingId) {
-        orFilters.push(`id.eq.${normalizedRoomId}`);
-      }
+      let booking: any = null;
+      let consultantObj: any = null;
 
-      const baseQuery = supabase
-        .from('bookings')
-        .select('*, consultants(id, name, title, email, user_id)');
-
-      let { data: bookings, error: bookingErr } = await baseQuery
-        .or(orFilters.join(','))
-        .limit(1);
-
-      if (bookingErr || !bookings || bookings.length === 0) {
-        const flatQuery = supabase.from('bookings').select('*');
-        const flatResult = await flatQuery.or(orFilters.join(',')).limit(1);
-        if (flatResult.data && flatResult.data.length > 0) {
-          bookings = flatResult.data;
-          bookingErr = null;
+      // 1. Prioritize SECURITY DEFINER RPC lookup (bypasses RLS safely and joins consultant details)
+      try {
+        const { data: rpcData, error: rpcError } = await supabase
+          .rpc('lookup_meeting_room', { p_room_id: normalizedRoomId });
+        if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+          const row = rpcData[0];
+          booking = {
+            id: row.id,
+            user_id: row.user_id,
+            consultant_id: row.consultant_id,
+            name: row.name,
+            email: row.email,
+            date: row.date,
+            time: row.time,
+            message: row.message,
+            status: row.status,
+            payment_status: row.payment_status,
+            session_duration: row.session_duration,
+            session_price: row.session_price,
+            meeting_room_id: row.meeting_room_id || normalizedRoomId,
+            participants_count: row.participants_count,
+            meeting_started_at: row.meeting_started_at,
+            meeting_ended_at: row.meeting_ended_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+          };
+          if (row.consultant_name || row.consultant_email || row.consultant_user_id) {
+            consultantObj = {
+              id: row.consultant_id,
+              name: row.consultant_name,
+              email: row.consultant_email,
+              title: row.consultant_title,
+              user_id: row.consultant_user_id,
+            };
+          }
         }
+      } catch {
+        // Non-blocking: proceed to direct table queries
       }
 
-      const booking = bookings?.[0];
+      if (!booking) {
+        const orFilters: string[] = [
+          `meeting_room_id.eq.${normalizedRoomId}`,
+          `meeting_room_id.eq.${prefixedRoomId}`,
+          `meeting_room_id.eq.${rawBookingId}`,
+        ];
+        if (isRawUuid) {
+          orFilters.push(`id.eq.${rawBookingId}`);
+        }
+        if (isCleanUuid && normalizedRoomId !== rawBookingId) {
+          orFilters.push(`id.eq.${normalizedRoomId}`);
+        }
 
-      if (bookingErr || !booking) {
+        const baseQuery = supabase
+          .from('bookings')
+          .select('*, consultants(id, name, title, email, user_id)');
+
+        let { data: bookings, error: bookingErr } = await baseQuery
+          .or(orFilters.join(','))
+          .limit(1);
+
+        if (bookingErr || !bookings || bookings.length === 0) {
+          const flatQuery = supabase.from('bookings').select('*');
+          const flatResult = await flatQuery.or(orFilters.join(',')).limit(1);
+          if (flatResult.data && flatResult.data.length > 0) {
+            bookings = flatResult.data;
+            bookingErr = null;
+          }
+        }
+
+        booking = bookings?.[0];
+      }
+
+      if (!booking) {
         return {
           success: false,
           authorized: false,
@@ -170,9 +215,11 @@ export const meetingService = {
         };
       }
 
-      let consultantObj = Array.isArray(booking.consultants)
-        ? booking.consultants[0]
-        : booking.consultants;
+      if (!consultantObj) {
+        consultantObj = Array.isArray(booking.consultants)
+          ? booking.consultants[0]
+          : booking.consultants;
+      }
 
       if (!consultantObj && booking.consultant_id) {
         const { data: directConsultant } = await supabase
@@ -231,7 +278,27 @@ export const meetingService = {
         };
       }
 
-        const eligibility = calculateRejoinEligibility(booking, new Date());
+      // Auto-link guest booking user_id if client is now logged in with strictly matching verified email
+      const authUserEmail = (currentUser.email || '').trim().toLowerCase();
+      const bookingEmailClean = (booking.email || '').trim().toLowerCase();
+      if (
+        !booking.user_id &&
+        currentUser.id &&
+        authCheck.role === 'client' &&
+        authUserEmail &&
+        bookingEmailClean &&
+        authUserEmail === bookingEmailClean
+      ) {
+        supabase
+          .from('bookings')
+          .update({ user_id: currentUser.id })
+          .eq('id', booking.id)
+          .is('user_id', null)
+          .then();
+        booking.user_id = currentUser.id;
+      }
+
+      const eligibility = calculateRejoinEligibility(booking, new Date());
         const hasJoined = hasParticipantJoinedLocal(
           booking.id,
           currentUser.id,

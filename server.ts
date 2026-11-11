@@ -500,11 +500,12 @@ async function startServer() {
 
         if ((bookingError || !bookings || bookings.length === 0) && user?.email) {
           const userEmailClean = user.email.toLowerCase().trim();
-          // Check if client email matches
+          const escapedUserEmail = userEmailClean.replace(/[%_\\]/g, '\\$&');
+          // Check if client email matches (case-insensitive for robustness, wildcard-escaped for safety)
           const emailQuery = supabaseAdminClient
             .from("bookings")
             .select("*, consultants(id, name, title, email, user_id)")
-            .eq("email", userEmailClean);
+            .ilike("email", escapedUserEmail);
           const emailResult = await emailQuery.or(orFilters.join(",")).limit(1);
           if (emailResult.data && emailResult.data.length > 0) {
             bookings = emailResult.data;
@@ -613,6 +614,31 @@ async function startServer() {
           error: authResult.reason || "You are not authorized to access this meeting room.",
           code: authResult.code || "UNAUTHORIZED_PARTICIPANT",
         });
+      }
+
+      // Auto-link guest booking user_id if client is now logged in with strictly matching verified email
+      const authUserEmail = (user.email || "").trim().toLowerCase();
+      const bookingEmailClean = (booking.email || "").trim().toLowerCase();
+      if (
+        !booking.user_id &&
+        user.id &&
+        authResult.authorized &&
+        authResult.role === 'client' &&
+        authUserEmail &&
+        bookingEmailClean &&
+        authUserEmail === bookingEmailClean
+      ) {
+        try {
+          supabaseAdminClient
+            .from("bookings")
+            .update({ user_id: user.id })
+            .eq("id", booking.id)
+            .is("user_id", null)
+            .then();
+          booking.user_id = user.id;
+        } catch {
+          // Non-blocking self-healing attempt
+        }
       }
 
       // Authoritative server-side 7-day eligibility calculation

@@ -781,10 +781,20 @@ export default function MeetingPage() {
         (bookingId && hasParticipantJoinedLocal(bookingId, user?.id, user?.email, accessResult.role))
       );
       setHasJoinedBefore(joinedBefore);
-      setIsRejoinSession(joinedBefore);
+      // Evaluate live session status from both server eligibility and local IST booking timing
+      let effectiveCanJoin = Boolean(accessResult.canJoin);
+      let effectiveStatus = accessResult.sessionStatus as any;
 
-      setCanJoin(Boolean(accessResult.canJoin));
-      setStatus(accessResult.sessionStatus as any);
+      if (accessResult.booking?.date && accessResult.booking?.time && accessResult.booking?.status === 'confirmed' && accessResult.booking?.payment_status === 'paid') {
+        const localStatus = getMeetingStatus(accessResult.booking.date, accessResult.booking.time, accessResult.booking.session_duration || 60);
+        if (localStatus === 'live') {
+          effectiveCanJoin = true;
+          effectiveStatus = 'live';
+        }
+      }
+
+      setCanJoin(effectiveCanJoin);
+      setStatus(effectiveStatus);
       setUserRole(accessResult.role || null);
       setFollowUp(accessResult.followUp || null);
 
@@ -1160,8 +1170,11 @@ export default function MeetingPage() {
     }
 
     if (!canJoin && !isRejoinSession && status !== 'live' && status !== 'rejoin_eligible') {
-      toast.error("Meeting can only be joined during the active session or 7-day follow-up window.");
-      return;
+      const isCurrentlyLive = Boolean(booking?.date && booking?.time && getMeetingStatus(booking.date, booking.time, booking.session_duration || 60) === 'live');
+      if (!isCurrentlyLive) {
+        toast.error("Meeting can only be joined during the active session or 7-day follow-up window.");
+        return;
+      }
     }
 
     try {

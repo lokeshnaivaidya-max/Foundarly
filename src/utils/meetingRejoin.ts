@@ -9,6 +9,8 @@
  * - Cancelled or rejected bookings are never eligible for rejoin.
  */
 
+import { parseBookingDateTime } from './timeSlots.js';
+
 export const REJOIN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds (604,800,000 ms)
 export const EARLY_JOIN_WINDOW_MS = 5 * 60 * 1000; // 5 minutes before scheduled start
 
@@ -74,6 +76,8 @@ export function parseTimeString(timeStr?: string | null): { hours: number; minut
   return { hours: 10, minutes: 0 };
 }
 
+export const APP_TIMEZONE_OFFSET_MS = 330 * 60 * 1000; // 5 hours 30 mins (Asia/Kolkata, UTC+05:30)
+
 /**
  * Robustly parses a booking record into its session timing coordinates.
  */
@@ -83,33 +87,44 @@ export function parseSessionTimes(booking: {
   session_duration?: number | null;
   meeting_started_at?: string | null;
   meeting_ended_at?: string | null;
+  timezone?: string | null;
 }): SessionTiming {
   const durationMinutes = booking.session_duration && booking.session_duration > 0
     ? booking.session_duration
     : 60;
   const durationMs = durationMinutes * 60 * 1000;
 
-  const { hours, minutes } = parseTimeString(booking.time);
+  const isISTSlot = Boolean(
+    booking.time && (/AM|PM/i.test(booking.time) || /IST/i.test(booking.time) || booking.timezone === 'Asia/Kolkata')
+  );
 
-  // Parse YYYY-MM-DD cleanly to avoid cross-timezone shifts
-  let scheduledStart: Date;
-  if (booking.date && booking.date.includes('T')) {
-    scheduledStart = new Date(booking.date);
-  } else if (booking.date) {
-    const parts = booking.date.split('-');
-    if (parts.length === 3) {
-      const year = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1;
-      const day = parseInt(parts[2], 10);
-      scheduledStart = new Date(Date.UTC(year, month, day, hours, minutes, 0));
-    } else {
-      scheduledStart = new Date(`${booking.date}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00Z`);
-    }
-  } else {
-    scheduledStart = new Date();
+  // Canonical IST parsing parity with parseBookingDateTime for all app booking slots
+  let scheduledStart: Date | null = null;
+  if (isISTSlot) {
+    scheduledStart = parseBookingDateTime(booking.date, booking.time);
   }
 
-  if (isNaN(scheduledStart.getTime())) {
+  if (!scheduledStart || isNaN(scheduledStart.getTime())) {
+    const { hours, minutes } = parseTimeString(booking.time);
+    if (booking.date && booking.date.includes('T')) {
+      scheduledStart = new Date(booking.date);
+    } else if (booking.date) {
+      const parts = booking.date.split('-');
+      if (parts.length === 3) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const offsetMs = isISTSlot ? APP_TIMEZONE_OFFSET_MS : 0;
+        scheduledStart = new Date(Date.UTC(year, month, day, hours, minutes, 0) - offsetMs);
+      } else {
+        scheduledStart = new Date(`${booking.date}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00Z`);
+      }
+    } else {
+      scheduledStart = new Date();
+    }
+  }
+
+  if (!scheduledStart || isNaN(scheduledStart.getTime())) {
     scheduledStart = new Date();
   }
 
@@ -406,6 +421,11 @@ export interface FollowUpRequest {
  * Robustly parses a date string and time string into a valid Date object.
  */
 export function parseFollowUpDateTime(dateStr: string, timeStr?: string | null): Date {
+  const canonical = parseBookingDateTime(dateStr, timeStr);
+  if (canonical && !isNaN(canonical.getTime())) {
+    return canonical;
+  }
+
   const { hours, minutes } = parseTimeString(timeStr);
   if (!dateStr) return new Date();
 
@@ -420,10 +440,10 @@ export function parseFollowUpDateTime(dateStr: string, timeStr?: string | null):
     const year = parseInt(parts[0], 10);
     const month = parseInt(parts[1], 10) - 1;
     const day = parseInt(parts[2], 10);
-    return new Date(Date.UTC(year, month, day, hours, minutes, 0));
+    return new Date(Date.UTC(year, month, day, hours, minutes, 0) - APP_TIMEZONE_OFFSET_MS);
   }
 
-  const fallback = new Date(`${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00Z`);
+  const fallback = new Date(`${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00+05:30`);
   return isNaN(fallback.getTime()) ? new Date() : fallback;
 }
 

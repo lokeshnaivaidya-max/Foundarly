@@ -207,10 +207,11 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       // If user email is present, check if query filtered by email can locate the booking under email-scoped RLS
       if ((bookingError || !bookings || bookings.length === 0) && user?.email) {
         const userEmail = user.email.toLowerCase().trim();
+        const escapedUserEmail = userEmail.replace(/[%_\\]/g, '\\$&');
         const emailQuery = clientToUse
           .from('bookings')
           .select('*, consultants(id, name, title, email, user_id)')
-          .eq('email', userEmail);
+          .ilike('email', escapedUserEmail);
         const emailResult = await emailQuery.or(orFilters.join(',')).limit(1);
         if (emailResult.data && emailResult.data.length > 0) {
           bookings = emailResult.data;
@@ -260,13 +261,24 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       });
     }
 
-    // Auto-link guest booking user_id if client is now logged in with matching email
-    if (!booking.user_id && user.id && authResult.role === 'client') {
+    // Auto-link guest booking user_id if client is now logged in with strictly matching verified email
+    const authUserEmail = (user.email || '').trim().toLowerCase();
+    const bookingEmailClean = (booking.email || '').trim().toLowerCase();
+    if (
+      !booking.user_id &&
+      user.id &&
+      authResult.authorized &&
+      authResult.role === 'client' &&
+      authUserEmail &&
+      bookingEmailClean &&
+      authUserEmail === bookingEmailClean
+    ) {
       try {
         await clientToUse
           .from('bookings')
           .update({ user_id: user.id })
-          .eq('id', booking.id);
+          .eq('id', booking.id)
+          .is('user_id', null);
         booking.user_id = user.id;
       } catch {
         // Non-blocking self-healing attempt

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { SEO } from "@/components/SEO";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Video, VideoOff, Mic, MicOff, PhoneOff, Monitor, MonitorOff, User, Clock, ArrowLeft, AlertCircle, Copy, Check, Link2, Maximize, Minimize, Settings, Users, X, Calendar, RotateCcw, ShieldAlert, AlertTriangle, Bell, CheckCircle, MessageSquare, Disc, CircleDot, StopCircle, Pause, Play, Download } from "lucide-react";
+import { Video, VideoOff, Mic, MicOff, PhoneOff, Monitor, MonitorOff, User, Clock, ArrowLeft, AlertCircle, Copy, Check, Link2, Maximize, Minimize, Settings, Users, X, Calendar, RotateCcw, ShieldAlert, AlertTriangle, Bell, CheckCircle, MessageSquare, Disc, CircleDot, StopCircle, Pause, Play, Download, CheckSquare, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { PageLoader } from "@/components/PageLoader";
 import { motion, AnimatePresence } from "framer-motion";
@@ -18,6 +18,8 @@ import { meetingService, MeetingAccessResponse } from "@/services/meetingService
 import { meetingTrackingService } from "@/services/meetingTracking";
 import { hasParticipantJoinedLocal, recordParticipantJoinLocal, getMeetingActionLabel } from "@/utils/meetingRejoin";
 import MeetingChatPanel from "@/components/meeting/MeetingChatPanel";
+import MeetingNotesPanel from "@/components/meeting/MeetingNotesPanel";
+import { meetingNotesService } from "@/services/meetingNotesService";
 import MeetingRecordingModal from "@/components/meeting/MeetingRecordingModal";
 import { MeetingRecorder, RecordingResult, RecordingStatus } from "@/utils/meetingRecorder";
 import { supabase } from "@/lib/supabase";
@@ -550,6 +552,10 @@ export default function MeetingPage() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
 
+  // In-Meeting Real-time Meeting Notes & Action Items States
+  const [isNotesOpen, setIsNotesOpen] = useState(false);
+  const [notesActiveTab, setNotesActiveTab] = useState<"action_items" | "shared_notes" | "private_notes">("action_items");
+
   // In-Meeting Real-time Chat States
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
@@ -678,7 +684,24 @@ export default function MeetingPage() {
       const next = !prev;
       if (next) {
         setUnreadChatCount(0);
+        setIsNotesOpen(false);
         setShowParticipants(false);
+        setShowSettings(false);
+      }
+      return next;
+    });
+  };
+
+  const toggleNotes = (tab?: "action_items" | "shared_notes" | "private_notes") => {
+    if (tab) {
+      setNotesActiveTab(tab);
+    }
+    setIsNotesOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setIsChatOpen(false);
+        setShowParticipants(false);
+        setShowSettings(false);
       }
       return next;
     });
@@ -1920,7 +1943,40 @@ export default function MeetingPage() {
                   </Button>
 
                   <div className="w-px h-8 bg-border mx-1" />
+
+                  {/* Notes & Action Items Button */}
+                  <Button 
+                    variant={isNotesOpen ? "default" : "ghost"} 
+                    size="icon"
+                    onClick={() => toggleNotes()} 
+                    className={cn(
+                      "rounded-full h-12 w-12 relative transition-all",
+                      isNotesOpen ? "glow-gold bg-primary text-primary-foreground" : ""
+                    )}
+                    title="Meeting Notes & Real-time Action Items"
+                  >
+                    <CheckSquare className="h-5 w-5" />
+                  </Button>
+
+                  {/* In-Call Chat Button */}
+                  <Button 
+                    variant={isChatOpen ? "default" : "ghost"} 
+                    size="icon"
+                    onClick={toggleChat} 
+                    className={cn(
+                      "rounded-full h-12 w-12 relative transition-all",
+                      isChatOpen ? "glow-gold bg-primary text-primary-foreground" : ""
+                    )}
+                    title="In-Meeting Chat"
+                  >
+                    <MessageSquare className="h-5 w-5" />
+                    {unreadChatCount > 0 && (
+                      <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-background animate-pulse" />
+                    )}
+                  </Button>
                   
+                  <div className="w-px h-8 bg-border mx-1" />
+
                   <Button 
                     variant="ghost" 
                     size="icon"
@@ -1986,13 +2042,51 @@ export default function MeetingPage() {
               </div>
             </div>
 
-            {/* Participants Count */}
-            <div className="absolute top-6 right-6 z-10">
+            {/* Action Bar (Top Right) */}
+            <div className="absolute top-6 right-6 z-10 flex items-center gap-2">
               <Button
-                variant="ghost"
+                variant={isNotesOpen ? "default" : "ghost"}
                 size="sm"
-                onClick={() => setShowParticipants(!showParticipants)}
+                onClick={() => toggleNotes()}
+                className={cn(
+                  "bg-background/80 backdrop-blur-md border border-border rounded-lg px-3 py-2 shadow-lg hover:bg-background/90 flex items-center gap-1.5 transition-all text-xs",
+                  isNotesOpen ? "border-primary text-primary bg-primary/10" : ""
+                )}
+                title="Open Meeting Notes & Action Items"
+              >
+                <CheckSquare className="h-4 w-4 text-primary" />
+                <span className="font-medium hidden sm:inline">Notes & Actions</span>
+              </Button>
+
+              <Button
+                variant={isChatOpen ? "default" : "ghost"}
+                size="sm"
+                onClick={toggleChat}
+                className={cn(
+                  "bg-background/80 backdrop-blur-md border border-border rounded-lg px-3 py-2 shadow-lg hover:bg-background/90 relative flex items-center gap-1.5 transition-all text-xs",
+                  isChatOpen ? "border-primary text-primary bg-primary/10" : ""
+                )}
+                title="Open In-Meeting Chat"
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span className="font-medium hidden sm:inline">Chat</span>
+                {unreadChatCount > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                )}
+              </Button>
+
+              <Button
+                variant={showParticipants ? "default" : "ghost"}
+                size="sm"
+                onClick={() => {
+                  setShowParticipants(!showParticipants);
+                  if (!showParticipants) {
+                    setIsNotesOpen(false);
+                    setIsChatOpen(false);
+                  }
+                }}
                 className="bg-background/80 backdrop-blur-md border border-border rounded-lg px-4 py-2 shadow-lg hover:bg-background/90"
+                title="View Participants"
               >
                 <div className="flex items-center gap-2 text-sm">
                   <Users className="h-4 w-4" />
@@ -2000,6 +2094,53 @@ export default function MeetingPage() {
                 </div>
               </Button>
             </div>
+
+            {/* Meeting Notes Panel */}
+            <AnimatePresence>
+              {isNotesOpen && (
+                <motion.div
+                  initial={{ x: 340, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: 340, opacity: 0 }}
+                  transition={{ type: "spring", damping: 25 }}
+                  className="absolute top-0 right-0 h-full z-30"
+                >
+                  <MeetingNotesPanel
+                    roomId={getCanonicalRoomId(effectiveRoomId, booking)}
+                    booking={booking}
+                    currentUserId={user?.id || 'unknown'}
+                    currentUserName={profile?.full_name || (userRole === 'consultant' ? booking?.consultants?.name : booking?.name) || user?.email?.split('@')[0] || 'Participant'}
+                    currentUserRole={(userRole === 'consultant' ? 'consultant' : userRole === 'admin' ? 'admin' : 'client')}
+                    onClose={() => setIsNotesOpen(false)}
+                    broadcastChannel={waitingRoomChannelRef.current}
+                    activeTabDefault={notesActiveTab}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* In-Meeting Chat Panel */}
+            <AnimatePresence>
+              {isChatOpen && (
+                <motion.div
+                  initial={{ x: 340, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: 340, opacity: 0 }}
+                  transition={{ type: "spring", damping: 25 }}
+                  className="absolute top-0 right-0 h-full z-30"
+                >
+                  <MeetingChatPanel
+                    messages={chatMessages}
+                    currentUserId={user?.id || 'unknown'}
+                    currentUserName={profile?.full_name || (userRole === 'consultant' ? booking?.consultants?.name : booking?.name) || user?.email?.split('@')[0] || 'Participant'}
+                    currentUserRole={userRole || 'client'}
+                    onSendMessage={handleSendChatMessage}
+                    onClose={() => setIsChatOpen(false)}
+                    bookingTitle={booking?.consultants?.name ? `Consultation with ${booking.consultants.name}` : undefined}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Participants Sidebar */}
             <AnimatePresence>
@@ -2378,6 +2519,24 @@ export default function MeetingPage() {
                     </p>
                   </motion.div>
                 )}
+
+                {/* Meeting Notes & Action Items Quick Access */}
+                <div className="pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => toggleNotes()}
+                    className="w-full justify-between items-center text-xs h-10 px-3.5 bg-secondary/40 border-border hover:bg-secondary/70 hover:border-primary/40 rounded-xl transition-all"
+                  >
+                    <div className="flex items-center gap-2 text-foreground">
+                      <CheckSquare className="h-4 w-4 text-primary" />
+                      <span className="font-medium">Meeting Notes & Action Items</span>
+                    </div>
+                    <Badge variant="outline" className="text-[10px] py-0 px-2 border-primary/30 text-primary bg-primary/5">
+                      Collaborative
+                    </Badge>
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -2636,6 +2795,25 @@ export default function MeetingPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Lobby Meeting Notes Dialog */}
+      {!callStarted && (
+        <Dialog open={isNotesOpen} onOpenChange={setIsNotesOpen}>
+          <DialogContent className="max-w-md sm:max-w-lg h-[85vh] p-0 overflow-hidden border-border bg-card">
+            <MeetingNotesPanel
+              roomId={getCanonicalRoomId(effectiveRoomId, booking)}
+              booking={booking}
+              currentUserId={user?.id || 'unknown'}
+              currentUserName={profile?.full_name || (userRole === 'consultant' ? booking?.consultants?.name : booking?.name) || user?.email?.split('@')[0] || 'Participant'}
+              currentUserRole={(userRole === 'consultant' ? 'consultant' : userRole === 'admin' ? 'admin' : 'client')}
+              onClose={() => setIsNotesOpen(false)}
+              broadcastChannel={waitingRoomChannelRef.current}
+              activeTabDefault={notesActiveTab}
+              className="w-full h-full border-none shadow-none"
+            />
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -76,6 +76,7 @@ import {
 } from "./src/utils/timeSlots.js";
 import { completionEmailStorage } from "./src/server/completionEmailStorage.js";
 import { meetingParticipantStorage } from "./src/server/meetingParticipantStorage.js";
+import notesHandler from "./src/server/meeting/notes.js";
 import agoraAccessToken from "agora-access-token";
 
 const { RtcTokenBuilder, RtcRole } = agoraAccessToken;
@@ -1079,6 +1080,11 @@ async function startServer() {
   // API Endpoint: Send email notification when a participant is waiting in room
   app.post("/api/meeting/notify-waiting", (req, res) => {
     handleMeetingNotifyWaiting(req.body?.roomId, req, res);
+  });
+
+  // API Endpoint: Secure Meeting Notes & Action Items (GET/POST)
+  app.all("/api/meeting/notes", (req, res) => {
+    notesHandler(req, res);
   });
 
   // API Endpoint: Generate secure Agora RTC Token for video rooms

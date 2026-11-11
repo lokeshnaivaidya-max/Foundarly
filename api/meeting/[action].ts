@@ -1,6 +1,7 @@
 import validateAccessHandler from '../../src/server/meeting/validate-access.js';
 import recordJoinHandler from '../../src/server/meeting/record-join.js';
 import notifyWaitingHandler from '../../src/server/meeting/notify-waiting.js';
+import notesHandler from '../../src/server/meeting/notes.js';
 
 /**
  * Consolidated meeting API router (Vercel Hobby 12-function limit).
@@ -9,6 +10,7 @@ import notifyWaitingHandler from '../../src/server/meeting/notify-waiting.js';
  *   POST /api/meeting/validate-access  -> validateAccessHandler
  *   POST /api/meeting/record-join      -> recordJoinHandler
  *   POST /api/meeting/notify-waiting   -> notifyWaitingHandler
+ *   POST /api/meeting/notes            -> notesHandler
  *
  * Vercel maps the dynamic [action] segment onto req.query.action. Every action
  * keeps its own method validation, CORS, rate limiting, authentication,
@@ -44,10 +46,12 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       return recordJoinHandler(req, res);
     case 'notify-waiting':
       return notifyWaitingHandler(req, res);
+    case 'notes':
+      return notesHandler(req, res);
     default:
       return res.status(404).json({
         success: false,
-        error: 'Unknown meeting API action. Supported actions: validate-access, record-join, notify-waiting.',
+        error: 'Unknown meeting API action. Supported actions: validate-access, record-join, notify-waiting, notes.',
       });
   }
 }

@@ -500,6 +500,9 @@ export default function MeetingPage() {
   const dashboardPath = isAdmin ? '/admin' : (profile?.role === 'consultant' || profile?.is_consultant) ? '/consultant/dashboard' : '/my-bookings';
 
   const webrtcServiceRef = useRef<WebRTCService | null>(null);
+  // Guards against duplicate / concurrent Start Meeting clicks initializing
+  // multiple WebRTC/Agora clients or joining the signaling channel more than once.
+  const startCallInFlightRef = useRef(false);
   const meetingContainerRef = useRef<HTMLDivElement | null>(null);
 
   const [booking, setBooking] = useState<BookingWithConsultant | null>(null);
@@ -1213,6 +1216,18 @@ export default function MeetingPage() {
       }
     }
 
+    // Prevent duplicate / concurrent Start Meeting clicks from initializing
+    // multiple WebRTC/Agora clients or joining the signaling channel more than once.
+    if (startCallInFlightRef.current || callStarted || webrtcServiceRef.current) {
+      toast.info("Meeting is already starting or in progress.");
+      return;
+    }
+    startCallInFlightRef.current = true;
+
+    // Invocation-scoped handle to the stream created during THIS start attempt,
+    // so failure cleanup can stop the tracks even if React state is stale.
+    let activeStream: MediaStream | null = null;
+
     try {
       setCallStarted(true);
       setCallStartTime(new Date());
@@ -1318,6 +1333,7 @@ export default function MeetingPage() {
       // 1. Initialize local stream
       const stream = await service.initLocalStream(!videoOff, !muted);
       setLocalStream(stream);
+      activeStream = stream;
 
       // 2. Join signaling channel using canonical room ID
       console.log(`[Meeting] Joining signaling channel with canonical room ID: ${canonicalRoom}`);
@@ -1443,8 +1459,25 @@ export default function MeetingPage() {
       toast.error(`Failed to start video call [${errName || 'Error'}]: ${errMsg}`);
       setCallStarted(false);
       setCallStartTime(null);
+
+      // Clean up any partially-initialized WebRTC/Agora service & tracks so a
+      // failed start cannot leave a dangling client, open microphone/camera
+      // tracks, or a half-joined signaling channel behind.
+      if (webrtcServiceRef.current) {
+        webrtcServiceRef.current.leave().catch(console.error);
+        webrtcServiceRef.current = null;
+      }
+      if (activeStream) {
+        activeStream.getTracks().forEach((track) => track.stop());
+      }
+      setLocalStream(null);
+      if (agoraService.isInChannel()) {
+        await agoraService.leave().catch(console.warn);
+      }
+    } finally {
+      startCallInFlightRef.current = false;
     }
-  }, [booking, effectiveRoomId, user, videoOff, muted, canJoin, isRejoinSession, isAdmitted, status, userRole, profile]);
+  }, [booking, effectiveRoomId, user, videoOff, muted, canJoin, isRejoinSession, isAdmitted, status, userRole, profile, callStarted]);
 
   useEffect(() => {
     startCallRef.current = startCall;

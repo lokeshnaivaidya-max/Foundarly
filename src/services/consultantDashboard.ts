@@ -76,56 +76,84 @@ function parseUserIdentifier(userParam: UserIdentifier): { userId: string; userE
   };
 }
 
+const consultantCache = new Map<string, { data: any; expiry: number }>();
+const consultantInFlight = new Map<string, Promise<any>>();
+
+export function clearConsultantCache(userId?: string) {
+  if (userId) {
+    consultantCache.delete(userId);
+    consultantInFlight.delete(userId);
+  } else {
+    consultantCache.clear();
+    consultantInFlight.clear();
+  }
+}
+
 async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; name: string; email: string | null; user_id: string | null; is_active?: boolean } | null> {
   const { userId, userEmail } = parseUserIdentifier(userParam);
+  if (!userId) return null;
 
-  // 1. Direct Supabase query first (instant ~20ms resolution for active linked consultants)
-  try {
-    const { data: userMatches, error: userErr } = await supabase
-      .from("consultants")
-      .select("id, name, email, user_id, is_active")
-      .eq("user_id", userId)
-      .limit(2);
-
-    if (!userErr && userMatches && userMatches.length === 1) {
-      return userMatches[0];
-    }
-  } catch (dbErr) {
-    console.warn("[consultantDashboard] Direct consultant lookup error:", dbErr);
+  // Check cache first (5s TTL to eliminate redundant sequential & parallel queries during tab/view mount)
+  const cached = consultantCache.get(userId);
+  if (cached && Date.now() < cached.expiry) {
+    return cached.data;
   }
 
-  // 2. Server API /api/consultant/me fallback (authoritative auto-linking for approved applicants)
-  try {
-    const session = (await supabase.auth.getSession()).data.session;
-    if (session?.access_token) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
-      const res = await fetch("/api/consultant/me", {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      const json = await res.json().catch(() => null);
-      if (res.ok && json?.success && json?.consultant) {
-        return json.consultant;
+  // Deduplicate in-flight promises
+  if (consultantInFlight.has(userId)) {
+    return consultantInFlight.get(userId)!;
+  }
+
+  const lookupPromise = (async () => {
+    try {
+      // 1. Direct Supabase query first (instant ~20ms resolution for active linked consultants)
+      try {
+        const { data: userMatches, error: userErr } = await supabase
+          .from("consultants")
+          .select("id, name, email, user_id, is_active")
+          .eq("user_id", userId)
+          .limit(2);
+
+        if (!userErr && userMatches && userMatches.length === 1) {
+          const res = userMatches[0];
+          consultantCache.set(userId, { data: res, expiry: Date.now() + 5000 });
+          return res;
+        }
+      } catch (dbErr) {
+        console.warn("[consultantDashboard] Direct consultant lookup error:", dbErr);
       }
+
+      // 2. Server API /api/consultant/me fallback (authoritative auto-linking for approved applicants)
+      try {
+        const session = (await supabase.auth.getSession()).data.session;
+        if (session?.access_token) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
+          const res = await fetch("/api/consultant/me", {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          const json = await res.json().catch(() => null);
+          if (res.ok && json?.success && json?.consultant) {
+            consultantCache.set(userId, { data: json.consultant, expiry: Date.now() + 5000 });
+            return json.consultant;
+          }
+        }
+      } catch (apiErr) {
+        console.warn("[consultantDashboardService] API /api/consultant/me check error:", apiErr);
+      }
+
+      return null;
+    } finally {
+      consultantInFlight.delete(userId);
     }
-  } catch (apiErr) {
-    console.warn("[consultantDashboardService] API /api/consultant/me check error:", apiErr);
-  }
+  })();
 
-  return null;
-
-  // 3. No consultant listing record: return null. Account activation
-  // (profiles.role = consultant) independently grants dashboard access —
-  // an approved consultant_application must NEVER be presented as a
-  // consultant record: its id is an application id, and writes keyed by
-  // consultant_id (availability, pricing) would silently orphan. A
-  // non-public draft consultants row is created by /api/consultant/me
-  // when an approved application exists.
-  return null;
+  consultantInFlight.set(userId, lookupPromise);
+  return lookupPromise;
 }
 
 export const consultantDashboardService = {
@@ -543,9 +571,11 @@ export const consultantDashboardService = {
         });
         const json = await res.json().catch(() => null);
         if (res.ok && json?.success) {
+          const { userId } = parseUserIdentifier(userParam);
+          clearConsultantCache(userId);
           return { success: true, message: json.message };
         }
-        if (json?.error) {
+        if (json?.error && res.status !== 404) {
           return { success: false, error: json.error, conflicts: json.conflicts };
         }
       }

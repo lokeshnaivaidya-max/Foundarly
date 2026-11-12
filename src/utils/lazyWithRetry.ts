@@ -24,7 +24,7 @@ export function isChunkLoadError(error: unknown): boolean {
     msg.includes("error loading dynamically imported module") ||
     msg.includes("importing a module script failed") ||
     msg.includes("loading chunk") ||
-    msg.includes("failed to load resource")
+    (msg.includes("failed to load resource") && (msg.includes(".js") || msg.includes("chunk") || msg.includes("assets/")))
   );
 }
 

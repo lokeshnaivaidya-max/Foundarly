@@ -494,11 +494,60 @@ export default function ConsultantAvailabilityEditor({
 
   if (loading) {
     return (
-      <Card className="p-8 text-center border-border/40">
-        <div className="flex flex-col items-center justify-center space-y-3">
-          <CalendarClock className="h-8 w-8 text-primary animate-pulse" />
-          <p className="text-muted-foreground text-sm font-medium">Loading your availability settings...</p>
+      <div className="space-y-6">
+        <Card className="border-primary/20 bg-muted/10 p-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-2">
+              <div className="h-6 w-72 bg-muted/60 rounded-md animate-pulse" />
+              <div className="h-4 w-96 bg-muted/40 rounded-md animate-pulse" />
+            </div>
+            <div className="h-10 w-44 bg-muted/40 rounded-xl animate-pulse" />
+          </div>
+        </Card>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
+            <Card className="border-border/60 p-6 space-y-4">
+              <div className="flex justify-between items-center pb-2">
+                <div className="h-5 w-48 bg-muted/60 rounded animate-pulse" />
+                <div className="h-7 w-32 bg-muted/40 rounded animate-pulse" />
+              </div>
+              {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+                <div key={i} className="p-4 rounded-xl border border-border/40 bg-card/60 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <div className="h-5 w-28 bg-muted/50 rounded animate-pulse" />
+                    <div className="h-6 w-20 bg-muted/40 rounded animate-pulse" />
+                  </div>
+                </div>
+              ))}
+            </Card>
+          </div>
+          <div className="space-y-6">
+            <Card className="border-primary/30 p-6 space-y-3">
+              <div className="h-4 w-20 bg-muted/50 rounded animate-pulse" />
+              <div className="h-10 w-full bg-primary/20 rounded-lg animate-pulse" />
+            </Card>
+            <Card className="border-border/60 p-6 space-y-3">
+              <div className="h-5 w-36 bg-muted/60 rounded animate-pulse" />
+              <div className="h-20 w-full bg-muted/30 rounded-lg animate-pulse" />
+            </Card>
+          </div>
         </div>
+      </div>
+    );
+  }
+
+  if (!loading && !data) {
+    return (
+      <Card className="p-8 text-center border-destructive/30 bg-destructive/5 space-y-4">
+        <AlertTriangle className="h-10 w-10 text-destructive mx-auto" />
+        <h3 className="font-bold text-lg text-foreground">Couldn't load your availability</h3>
+        <p className="text-sm text-muted-foreground max-w-md mx-auto">
+          We encountered an issue fetching your availability schedule. Please check your connection and retry.
+        </p>
+        <Button onClick={() => loadAvailability()} className="gap-2">
+          <RotateCcw className="h-4 w-4" />
+          Retry Loading
+        </Button>
       </Card>
     );
   }

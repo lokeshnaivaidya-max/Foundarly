@@ -1,12 +1,16 @@
 import meHandler from '../../src/server/consultant/me.js';
 import bookingsHandler from '../../src/server/consultant/bookings.js';
+import availabilityHandler from '../../src/server/consultant/availability.js';
+import statsHandler from '../../src/server/consultant/stats.js';
 
 /**
  * Consolidated consultant API router (Vercel Hobby 12-function limit).
  *
  * Serves the SAME public URLs as before via a single Serverless Function:
- *   GET  /api/consultant/me        -> meHandler
- *   GET  /api/consultant/bookings  -> bookingsHandler
+ *   GET / POST  /api/consultant/me            -> meHandler
+ *   GET         /api/consultant/bookings      -> bookingsHandler
+ *   GET / PUT   /api/consultant/availability  -> availabilityHandler
+ *   GET         /api/consultant/stats         -> statsHandler
  *
  * Vercel maps the dynamic [action] segment onto req.query.action. Every action
  * keeps its own authentication, authorization, CORS, validation, bounded
@@ -40,10 +44,14 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       return meHandler(req, res);
     case 'bookings':
       return bookingsHandler(req, res);
+    case 'availability':
+      return availabilityHandler(req, res);
+    case 'stats':
+      return statsHandler(req, res);
     default:
       return res.status(404).json({
         success: false,
-        error: 'Unknown consultant API action. Supported actions: me, bookings.',
+        error: 'Unknown consultant API action. Supported actions: me, bookings, availability, stats.',
       });
   }
 }

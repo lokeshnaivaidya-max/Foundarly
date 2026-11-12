@@ -18,9 +18,8 @@ export interface Profile {
 
 // How often an ordinary client's resolved role is re-checked. A client role can
 // transition to 'consultant' when an application is approved mid-session.
-// Set to 10 seconds so mid-session Client → Consultant approvals are detected promptly
-// without excessive load, picking up approvals as soon as the user focuses the window or navigates.
-const CLIENT_ROLE_RECHECK_MS = 10 * 1000;
+// Set to 60 seconds so mid-session approvals are detected without excessive background load or flicker.
+const CLIENT_ROLE_RECHECK_MS = 60 * 1000;
 
 // Every profile-resolution DB operation is bounded so fetchProfile ALWAYS
 // settles. An unbounded awaited write (e.g. a profiles upsert) that hangs would
@@ -368,14 +367,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (currentSession?.user) {
           applyAuth(currentSession, currentSession.user);
           setAuthError(null);
-          // STABILITY: an already-authoritatively-resolved role (privileged
-          // roles, or a client within its re-check window) must NEVER restart
-          // resolution nor flash the loading state when TOKEN_REFRESHED /
-          // USER_UPDATED fire. The dashboard stays mounted and untouched.
+          // Skip if already authoritatively resolved to avoid loading flash
           if (shouldSkipResolution(currentSession.user.id)) {
             return;
           }
-          setLoading(true);
+          if (!activeUserRef.current || !profileResolvedRef.current) {
+            setLoading(true);
+          }
           await resolveProfile(currentSession.user.id, currentSession.user);
         }
         initialAuthProcessedRef.current = true;
@@ -390,7 +388,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           applyAuth(currentSession, currentSession.user);
           setAuthError(null);
           if (!shouldSkipResolution(currentSession.user.id)) {
-            setLoading(true);
+            if (!profileResolvedRef.current) {
+              setLoading(true);
+            }
             await resolveProfile(currentSession.user.id, currentSession.user);
           }
         } else {
@@ -400,7 +400,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             applyAuth(stored, stored.user);
             setAuthError(null);
             if (!shouldSkipResolution(stored.user.id)) {
-              setLoading(true);
+              if (!profileResolvedRef.current) {
+                setLoading(true);
+              }
               await resolveProfile(stored.user.id, stored.user);
             }
           } else if (!activeUserRef.current) {
@@ -430,7 +432,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         applyAuth(data.session, data.session.user);
         setAuthError(null);
         if (!shouldSkipResolution(data.session.user.id)) {
-          setLoading(true);
+          if (!profileResolvedRef.current) {
+            setLoading(true);
+          }
           await resolveProfile(data.session.user.id, data.session.user);
         }
       } else {
@@ -534,11 +538,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const currentUser = activeUserRef.current;
       if (!currentUser || !isMountedRef.current) return;
       const existing = profileResolvedRef.current;
-      // If the current resolved role is client or not yet resolved, re-check on focus/visibility change
+      // If the current resolved role is client or not yet resolved, re-check on focus/visibility change with cooldown
       if (!existing || existing.role === 'client' || existing.role === 'null') {
         const timeSince = existing ? Date.now() - existing.resolvedAt : Infinity;
-        if (timeSince > 3000) {
-          resolveProfile(currentUser.id, currentUser, 0, true).catch(() => null);
+        if (timeSince > 30000) {
+          resolveProfile(currentUser.id, currentUser, 0, false).catch(() => null);
         }
       }
     };

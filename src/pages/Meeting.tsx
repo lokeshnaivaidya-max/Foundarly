@@ -1460,19 +1460,49 @@ export default function MeetingPage() {
       setCallStarted(false);
       setCallStartTime(null);
 
-      // Clean up any partially-initialized WebRTC/Agora service & tracks so a
-      // failed start cannot leave a dangling client, open microphone/camera
-      // tracks, or a half-joined signaling channel behind.
+      // --- Comprehensive cleanup: stop any local tracks, leave channels,
+      //     and reset all in-flight resources so a failed start cannot leave
+      //     dangling WebRTC clients, open microphone/camera tracks, or a
+      //     half-joined signaling channel behind.
+      //
+      //     Each step is wrapped to prevent one cleanup failure from masking
+      //     another or from propagating an unhandled error out of this catch.
+
+      // 1. Leave and reset WebRTC service
       if (webrtcServiceRef.current) {
-        webrtcServiceRef.current.leave().catch(console.error);
-        webrtcServiceRef.current = null;
+        try {
+          await webrtcServiceRef.current.leave();
+        } catch (e) {
+          console.warn("[startCall cleanup] WebRTC leave error:", e);
+        } finally {
+          webrtcServiceRef.current = null;
+        }
       }
+
+      // 2. Stop any local tracks that were initialized during this attempt
       if (activeStream) {
-        activeStream.getTracks().forEach((track) => track.stop());
+        try {
+          activeStream.getTracks().forEach((track) => {
+            try { track.stop(); } catch (e) { /* ignore */ }
+          });
+        } catch (e) {
+          console.warn("[startCall cleanup] track.stop error:", e);
+        }
       }
       setLocalStream(null);
-      if (agoraService.isInChannel()) {
-        await agoraService.leave().catch(console.warn);
+
+      // 3. Leave Agora channel if we joined one
+      try {
+        if (agoraService?.isInChannel()) {
+          await agoraService.leave().catch(console.warn);
+        }
+      } catch (e) {
+        console.warn("[startCall cleanup] Agora leave error:", e);
+      }
+
+      // 4. Drain any remaining track references as a safety net
+      if (activeStream) {
+        activeStream = null;
       }
     } finally {
       startCallInFlightRef.current = false;

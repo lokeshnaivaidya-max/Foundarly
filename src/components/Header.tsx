@@ -34,7 +34,7 @@ import ProfileDropdown from "@/components/kokonutui/profile-dropdown";
 import SwitchButton from "@/components/kokonutui/switch-button";
 
 const navLinks = [
-  { label: "Home", path: "/" },
+  { label: "Home", path: "/home" },
   { label: "Experts", path: "/consultants" },
   { label: "Network", path: "/network" },
   { label: "Pricing", path: "/pricing" },
@@ -88,11 +88,11 @@ export default function Header() {
   };
 
   const isActive = (path: string) => {
-    if (path === "/") {
-      return location.pathname === "/" || location.pathname === "/home";
+    if (path === "/home") {
+      return location.pathname === "/home";
     }
-    if (path === "/consultants") {
-      return location.pathname === "/consultants" || location.pathname.startsWith("/consultants/");
+    if (path === "/consultants" || path === "/") {
+      return location.pathname === "/consultants" || location.pathname === "/" || location.pathname.startsWith("/consultants/");
     }
     return location.pathname === path || location.pathname.startsWith(path + "/");
   };

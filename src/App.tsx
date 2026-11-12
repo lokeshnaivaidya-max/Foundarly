@@ -17,11 +17,11 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 import { PageLoader } from "@/components/PageLoader";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 
-// Eager load primary landing page for maximum initial load performance
-import Index from "./pages/Index";
+// Eager load default landing page (Experts) for maximum initial load performance without chunk delay or flash
+import Consultants from "./pages/Consultants";
 
 // Lazy-load secondary and role-specific routes with resilient retry and chunk recovery
-const Consultants = lazyWithRetry(() => import("./pages/Consultants"), { pageName: "Consultants" });
+const Index = lazyWithRetry(() => import("./pages/Index"), { pageName: "Index" });
 const Booking = lazyWithRetry(() => import("./pages/Booking"), { pageName: "Booking" });
 const MyBookings = lazyWithRetry(() => import("./pages/MyBookings"), { pageName: "MyBookings" });
 const NetworkHub = lazyWithRetry(() => import("./pages/NetworkHub"), { pageName: "NetworkHub" });
@@ -155,7 +155,7 @@ const App = () => (
                     <CookieConsent />
                     <Suspense fallback={<PageLoader text="Loading..." />}>
                       <Routes>
-                        <Route path="/" element={<Index />} />
+                        <Route path="/" element={<Consultants />} />
                         <Route path="/home" element={<Index />} />
                         <Route path="/consultants" element={<Consultants />} />
                         <Route path="/consultants/:id" element={<ConsultantProfile />} />

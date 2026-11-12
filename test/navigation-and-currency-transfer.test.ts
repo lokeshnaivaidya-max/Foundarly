@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-test("Navigation links: Home links to root ('/') and Experts links to ('/consultants')", () => {
+test("Navigation links: Home links to separate route ('/home') and Experts links to ('/consultants')", () => {
   const navLinks = [
-    { label: "Home", path: "/" },
+    { label: "Home", path: "/home" },
     { label: "Experts", path: "/consultants" },
     { label: "Network", path: "/network" },
     { label: "Pricing", path: "/pricing" },
@@ -15,34 +15,46 @@ test("Navigation links: Home links to root ('/') and Experts links to ('/consult
   const homeLink = navLinks.find(l => l.label === "Home");
   const expertsLink = navLinks.find(l => l.label === "Experts");
 
-  assert.equal(homeLink?.path, "/", "Home link must point to root URL '/'");
+  assert.equal(homeLink?.path, "/home", "Home link must point to separate route '/home'");
   assert.equal(expertsLink?.path, "/consultants", "Experts link must point to '/consultants'");
 });
 
-test("Header isActive logic matches correctly for root Home and Experts", () => {
+test("Header isActive logic matches correctly for root Experts and separate Home route", () => {
   const isActive = (targetPath: string, currentPath: string) => {
-    if (targetPath === "/") {
-      return currentPath === "/" || currentPath === "/home";
+    if (targetPath === "/home") {
+      return currentPath === "/home";
     }
-    if (targetPath === "/consultants") {
-      return currentPath === "/consultants" || currentPath.startsWith("/consultants/");
+    if (targetPath === "/consultants" || targetPath === "/") {
+      return currentPath === "/consultants" || currentPath === "/" || currentPath.startsWith("/consultants/");
     }
     return currentPath === targetPath || currentPath.startsWith(targetPath + "/");
   };
 
-  // Visiting root '/'
-  assert.equal(isActive("/", "/"), true, "'/' must be active when at '/'");
-  assert.equal(isActive("/consultants", "/"), false, "'/consultants' must NOT be active when at '/'");
+  // Visiting root '/' (now default Experts landing page)
+  assert.equal(isActive("/consultants", "/"), true, "'/consultants' (Experts) must be active when at root '/'");
+  assert.equal(isActive("/home", "/"), false, "'/home' must NOT be active when at '/'");
 
-  // Visiting '/home'
-  assert.equal(isActive("/", "/home"), true, "'/' must be active when at '/home'");
+  // Visiting '/home' (Homepage)
+  assert.equal(isActive("/home", "/home"), true, "'/home' must be active when at '/home'");
+  assert.equal(isActive("/consultants", "/home"), false, "'/consultants' must NOT be active when at '/home'");
 
   // Visiting '/consultants'
   assert.equal(isActive("/consultants", "/consultants"), true, "'/consultants' must be active when at '/consultants'");
-  assert.equal(isActive("/", "/consultants"), false, "'/' must NOT be active when at '/consultants'");
+  assert.equal(isActive("/home", "/consultants"), false, "'/home' must NOT be active when at '/consultants'");
 
   // Visiting a specific consultant profile '/consultants/123'
   assert.equal(isActive("/consultants", "/consultants/123"), true, "Experts link must be active on consultant profile");
+});
+
+test("App routing: root '/' renders Consultants directly and '/home' renders Index", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const appPath = path.resolve(process.cwd(), "src/App.tsx");
+  const appSource = fs.readFileSync(appPath, "utf-8");
+
+  assert.ok(appSource.includes('<Route path="/" element={<Consultants />} />'), "Root route '/' must render Consultants directly");
+  assert.ok(appSource.includes('<Route path="/home" element={<Index />} />'), "Route '/home' must render Index (Homepage)");
+  assert.ok(appSource.includes('<Route path="/consultants" element={<Consultants />} />'), "Route '/consultants' must also render Consultants");
 });
 
 test("Dashboard reload prevention: Tab state preservation via searchParams", () => {

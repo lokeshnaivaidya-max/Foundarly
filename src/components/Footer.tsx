@@ -104,6 +104,11 @@ export default function Footer() {
             <h4 className="font-sans text-xs font-bold uppercase tracking-wider text-foreground/80 mb-4">Company</h4>
             <ul className="space-y-2.5 text-sm">
               <li>
+                <Link to="/home" className="text-muted-foreground hover:text-primary transition-colors inline-block hover:translate-x-0.5 duration-200">
+                  Home
+                </Link>
+              </li>
+              <li>
                 <Link to="/about" className="text-muted-foreground hover:text-primary transition-colors inline-block hover:translate-x-0.5 duration-200">
                   Our Story
                 </Link>

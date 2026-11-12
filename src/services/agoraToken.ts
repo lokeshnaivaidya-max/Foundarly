@@ -2,6 +2,22 @@
 
 const APP_ID = (typeof import.meta !== "undefined" && import.meta.env?.VITE_AGORA_APP_ID) || process.env?.VITE_AGORA_APP_ID || "";
 
+export function toNumericUid(uid?: string | number | null): number {
+  if (typeof uid === 'number' && !isNaN(uid) && uid > 0) return uid;
+  if (!uid) return Math.floor(Math.random() * 900000) + 100000;
+  if (typeof uid === 'string' && /^\d+$/.test(uid)) {
+    const parsed = parseInt(uid, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  let hash = 0;
+  const str = String(uid);
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return (Math.abs(hash) % 9000000) + 100000;
+}
+
 export interface TokenConfig {
   channelName: string;
   uid: string | number;
@@ -14,7 +30,7 @@ export interface TokenConfig {
  */
 export async function generateAgoraToken(config: TokenConfig): Promise<string | null> {
   const { channelName, uid } = config;
-  const numericUid = typeof uid === 'string' ? parseInt(uid, 10) || 0 : uid;
+  const numericUid = toNumericUid(uid);
 
   try {
     const res = await fetch('/api/agora/token', {

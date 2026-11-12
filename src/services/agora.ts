@@ -4,7 +4,7 @@ import type {
   IMicrophoneAudioTrack,
   IAgoraRTCRemoteUser,
 } from "agora-rtc-sdk-ng";
-import { generateMeetingToken, canGenerateTokens } from "./agoraToken";
+import { generateMeetingToken, canGenerateTokens, toNumericUid } from "./agoraToken";
 
 // Browser-safe lazy AgoraRTC module loader
 let agoraRTCModule: any = null;
@@ -195,7 +195,7 @@ export class AgoraService {
   /**
    * Join a channel (following official documentation)
    */
-  async join(config: AgoraConfig): Promise<void> {
+  async join(config: AgoraConfig, existingStream?: MediaStream | null): Promise<void> {
     if (!this.client) {
       await this.initClient();
     }
@@ -216,14 +216,15 @@ export class AgoraService {
       this.isReconnecting = false;
       this.reconnectAttempts = 0;
       
+      const numericUid = toNumericUid(config.uid);
+
       // Prepare token (following official documentation)
       let token = config.token || null;
       
       if (!token && canGenerateTokens()) {
         try {
-          console.log("Attempting to generate Agora token...");
-          const uid = config.uid || Math.floor(Math.random() * 1000000);
-          token = await generateMeetingToken(config.channel, uid);
+          console.log("Attempting to generate Agora token for UID:", numericUid);
+          token = await generateMeetingToken(config.channel, numericUid);
           if (token) {
             console.log("Token generated successfully from server");
           } else {
@@ -237,26 +238,24 @@ export class AgoraService {
       } else if (!token) {
         console.log("Using App ID only mode (no token generation available)");
       }
-      
-      const uid = config.uid || Math.floor(Math.random() * 1000000);
 
-      // Join the channel (official documentation step)
+      // Join the channel with consistent numeric UID
       const joinedUid = await this.client.join(
         config.appId,
         config.channel,
         token,
-        uid
+        numericUid
       );
 
       console.log("Joined channel successfully with UID:", joinedUid);
       this.isJoined = true;
 
-      // Create and publish local media tracks (following official flow)
-      await this.createLocalMediaTracks();
+      // Create and publish local media tracks (reusing existing stream tracks when available)
+      await this.createLocalMediaTracks(existingStream);
       await this.publishLocalTracks();
 
       return;
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to join channel:", error);
       
       // Provide helpful error message for common issues
@@ -276,24 +275,58 @@ export class AgoraService {
   }
 
   /**
-   * Create local media tracks (following official documentation)
+   * Create local media tracks (reusing tracks from existingStream if already acquired)
    */
-  async createLocalMediaTracks(): Promise<void> {
+  async createLocalMediaTracks(existingStream?: MediaStream | null): Promise<void> {
     try {
       const RTC = await getAgoraRTC();
       if (!RTC) {
         throw new Error("AgoraRTC not available in current environment");
       }
-      // Create microphone audio track
-      this.localAudioTrack = await RTC.createMicrophoneAudioTrack();
-      console.log("Created local audio track");
 
-      // Create camera video track
-      this.localVideoTrack = await RTC.createCameraVideoTrack();
-      console.log("Created local video track");
+      if (existingStream) {
+        const audioTracks = existingStream.getAudioTracks();
+        const videoTracks = existingStream.getVideoTracks();
+
+        if (audioTracks.length > 0 && typeof RTC.createCustomAudioTrack === "function") {
+          try {
+            this.localAudioTrack = await RTC.createCustomAudioTrack({ mediaStreamTrack: audioTracks[0] });
+            console.log("Created custom audio track from existing stream");
+          } catch (e) {
+            console.warn("[AgoraService] Reusing custom audio track note:", e);
+          }
+        }
+
+        if (videoTracks.length > 0 && typeof RTC.createCustomVideoTrack === "function") {
+          try {
+            this.localVideoTrack = await RTC.createCustomVideoTrack({ mediaStreamTrack: videoTracks[0] });
+            console.log("Created custom video track from existing stream");
+          } catch (e) {
+            console.warn("[AgoraService] Reusing custom video track note:", e);
+          }
+        }
+      }
+
+      // Fallback to standard track creation if custom tracks weren't created
+      if (!this.localAudioTrack && typeof RTC.createMicrophoneAudioTrack === "function") {
+        try {
+          this.localAudioTrack = await RTC.createMicrophoneAudioTrack();
+          console.log("Created local audio track");
+        } catch (e) {
+          console.warn("[AgoraService] Local audio track initialization note:", e);
+        }
+      }
+
+      if (!this.localVideoTrack && typeof RTC.createCameraVideoTrack === "function") {
+        try {
+          this.localVideoTrack = await RTC.createCameraVideoTrack();
+          console.log("Created local video track");
+        } catch (e) {
+          console.warn("[AgoraService] Local video track initialization note:", e);
+        }
+      }
     } catch (error) {
-      console.error("Failed to create local tracks:", error);
-      throw error;
+      console.warn("Notice while initializing local tracks for Agora:", error);
     }
   }
 
@@ -301,16 +334,17 @@ export class AgoraService {
    * Publish local tracks (following official documentation)
    */
   async publishLocalTracks(): Promise<void> {
-    if (!this.client || !this.localAudioTrack || !this.localVideoTrack) {
-      throw new Error("Client or tracks not initialized");
+    if (!this.client) {
+      return;
     }
-
-    try {
-      await this.client.publish([this.localAudioTrack, this.localVideoTrack]);
-      console.log("Published local tracks successfully");
-    } catch (error) {
-      console.error("Failed to publish local tracks:", error);
-      throw error;
+    const tracksToPublish = [this.localAudioTrack, this.localVideoTrack].filter(Boolean) as any[];
+    if (tracksToPublish.length > 0) {
+      try {
+        await this.client.publish(tracksToPublish);
+        console.log(`[AgoraService] Published ${tracksToPublish.length} local track(s)`);
+      } catch (err) {
+        console.warn("[AgoraService] Error publishing local tracks:", err);
+      }
     }
   }
 

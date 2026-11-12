@@ -539,9 +539,10 @@ export default function MeetingPage() {
   const [waitingRoomParticipants, setWaitingRoomParticipants] = useState<WaitingRoomParticipant[]>([]);
   const [myPresenceStatus, setMyPresenceStatus] = useState<PresenceStatus>('Online');
   const [participantPresenceMap, setParticipantPresenceMap] = useState<Map<string, { status: PresenceStatus; lastSeen: number }>>(new Map());
-  const selfDataRef = useRef<WaitingRoomParticipant | null>(null);
   const lastWaitingAlertRef = useRef<Map<string, number>>(new Map());
   const waitingRoomChannelRef = useRef<any>(null);
+  const [isAdmitted, setIsAdmitted] = useState<boolean>(false);
+  const startCallRef = useRef<() => Promise<void>>(async () => {});
 
   // Agora Network Stability & Packet Loss States
   const [isNetworkUnstable, setIsNetworkUnstable] = useState<boolean>(false);
@@ -966,7 +967,18 @@ export default function MeetingPage() {
       }
     });
 
-    // 3. Listen for Realtime presence state synchronization
+    // 3. Listen for admission broadcast from host/consultant
+    waitingChannel.on('broadcast', { event: 'meeting_admit' }, ({ payload }) => {
+      console.log('[Meeting Realtime] Admission broadcast received from host:', payload);
+      setIsAdmitted(true);
+      toast.success("Host has admitted you to the consultation!", {
+        duration: 5000,
+        description: "Connecting to the live meeting room now..."
+      });
+      startCallRef.current?.();
+    });
+
+    // 4. Listen for Realtime presence state synchronization
     waitingChannel.on('presence', { event: 'sync' }, () => {
       const state = waitingChannel.presenceState();
       console.log('[Meeting Realtime] Waiting room presence sync:', state);
@@ -1192,9 +1204,10 @@ export default function MeetingPage() {
       return;
     }
 
-    if (!canJoin && !isRejoinSession && status !== 'live' && status !== 'rejoin_eligible') {
+    const isHost = userRole === 'consultant' || profile?.role === 'consultant' || profile?.is_consultant;
+    if (!canJoin && !isRejoinSession && !isAdmitted && status !== 'live' && status !== 'rejoin_eligible') {
       const isCurrentlyLive = Boolean(booking?.date && booking?.time && getMeetingStatus(booking.date, booking.time, booking.session_duration || 60) === 'live');
-      if (!isCurrentlyLive) {
+      if (!isCurrentlyLive && !isHost && !isAdmitted) {
         toast.error("Meeting can only be joined during the active session or 7-day follow-up window.");
         return;
       }
@@ -1205,7 +1218,7 @@ export default function MeetingPage() {
       setCallStartTime(new Date());
       toast.info(hasJoinedBefore 
         ? "Rejoining video call..." 
-        : "Connecting to real-time WebRTC video call..."
+        : "Connecting to real-time video consultation..."
       );
 
       const canonicalRoom = getCanonicalRoomId(effectiveRoomId, booking);
@@ -1234,7 +1247,7 @@ export default function MeetingPage() {
       });
       webrtcServiceRef.current = service;
 
-      // Event handlers
+      // Event handlers for WebRTC
       service.onRemoteStream = (stream, remoteUserId) => {
         console.log(`[Meeting] Remote stream updated for ${remoteUserId}. Stream ID: ${stream.id}`);
         setRemoteParticipants((prev) => {
@@ -1310,14 +1323,83 @@ export default function MeetingPage() {
       console.log(`[Meeting] Joining signaling channel with canonical room ID: ${canonicalRoom}`);
       await service.joinRoom(canonicalRoom);
 
-      // 3. Connect to Agora RTC stream if configured
+      // 3. Connect to Agora RTC stream if configured and bind remote tracks
       if (AGORA_CONFIG.appId && AGORA_CONFIG.appId !== "your_agora_app_id_here") {
         console.log(`[Meeting] Initializing Agora RTC stream for room: ${canonicalRoom}`);
+
+        agoraService.onRemoteUserPublished = (remoteUser, mediaType) => {
+          console.log(`[Meeting Agora] Remote user published ${mediaType}:`, remoteUser.uid);
+          const remoteUidStr = String(remoteUser.uid);
+          setRemoteParticipants((prev) => {
+            const next = new Map(prev);
+            const existing = next.get(remoteUidStr);
+            let mediaStream = existing?.stream;
+            if (!mediaStream) {
+              mediaStream = new MediaStream();
+            }
+            if (mediaType === "video" && remoteUser.videoTrack) {
+              try {
+                const videoTrack = remoteUser.videoTrack.getMediaStreamTrack();
+                if (!mediaStream.getTrackById(videoTrack.id)) {
+                  mediaStream.addTrack(videoTrack);
+                }
+              } catch (e) {
+                console.warn("[Meeting Agora] Failed to attach video track:", e);
+              }
+            }
+            if (mediaType === "audio" && remoteUser.audioTrack) {
+              try {
+                const audioTrack = remoteUser.audioTrack.getMediaStreamTrack();
+                if (!mediaStream.getTrackById(audioTrack.id)) {
+                  mediaStream.addTrack(audioTrack);
+                }
+              } catch (e) {
+                console.warn("[Meeting Agora] Failed to attach audio track:", e);
+              }
+            }
+            next.set(remoteUidStr, { id: remoteUidStr, stream: mediaStream });
+            return next;
+          });
+          toast.success("Participant media connected via Agora!");
+        };
+
+        agoraService.onRemoteUserUnpublished = (remoteUser, mediaType) => {
+          console.log(`[Meeting Agora] Remote user unpublished ${mediaType}:`, remoteUser.uid);
+          const remoteUidStr = String(remoteUser.uid);
+          setRemoteParticipants((prev) => {
+            const next = new Map(prev);
+            const existing = next.get(remoteUidStr);
+            if (existing && existing.stream) {
+              if (mediaType === "video") {
+                existing.stream.getVideoTracks().forEach((t) => existing.stream.removeTrack(t));
+              }
+              if (mediaType === "audio") {
+                existing.stream.getAudioTracks().forEach((t) => existing.stream.removeTrack(t));
+              }
+              if (existing.stream.getTracks().length === 0) {
+                next.delete(remoteUidStr);
+              }
+            }
+            return next;
+          });
+        };
+
+        agoraService.onRemoteUserLeft = (remoteUser) => {
+          console.log(`[Meeting Agora] Remote user left:`, remoteUser.uid);
+          const remoteUidStr = String(remoteUser.uid);
+          setRemoteParticipants((prev) => {
+            const next = new Map(prev);
+            next.delete(remoteUidStr);
+            return next;
+          });
+          toast.info("Participant left the meeting");
+        };
+
         agoraService.join({
           appId: AGORA_CONFIG.appId,
           channel: canonicalRoom,
           uid: user?.id,
-        }).then(() => {
+        }, stream).then(() => {
           console.log("[Meeting] Agora RTC stream connected successfully");
         }).catch((agoraErr: any) => {
           console.warn("[Meeting] Agora RTC stream join note:", agoraErr?.message);
@@ -1362,7 +1444,32 @@ export default function MeetingPage() {
       setCallStarted(false);
       setCallStartTime(null);
     }
-  }, [booking, effectiveRoomId, user, videoOff, muted]);
+  }, [booking, effectiveRoomId, user, videoOff, muted, canJoin, isRejoinSession, isAdmitted, status, userRole, profile]);
+
+  useEffect(() => {
+    startCallRef.current = startCall;
+  }, [startCall]);
+
+  const handleAdmitAndJoin = useCallback(async () => {
+    console.log("=== ADMIT CLIENT & START MEETING ===");
+    toast.info("Admitting participant and starting meeting...");
+    if (waitingRoomChannelRef.current) {
+      try {
+        await waitingRoomChannelRef.current.send({
+          type: 'broadcast',
+          event: 'meeting_admit',
+          payload: {
+            admittedBy: user?.id,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      } catch (err) {
+        console.warn("[Meeting] Error broadcasting admission:", err);
+      }
+    }
+    setIsAdmitted(true);
+    await startCall();
+  }, [user?.id, startCall]);
 
   const endCall = async () => {
     try {
@@ -2514,9 +2621,32 @@ export default function MeetingPage() {
                     </p>
                     <p className="text-[11px] text-muted-foreground">
                       {userRole === 'client' 
-                        ? "Your consultant is ready. Click 'Join Meeting' to connect."
-                        : "The client is waiting for you. Click 'Join Meeting' to begin your consultation."}
+                        ? (isAdmitted ? "Host has admitted you! Click 'Join Meeting' to enter." : "Your consultant is ready. Click 'Join Meeting' to connect.")
+                        : "The client is waiting in the room. Click 'Admit Client' to start the live consultation."}
                     </p>
+                    <div className="pt-1.5 flex gap-2">
+                      {userRole === 'consultant' ? (
+                        <Button
+                          size="sm"
+                          onClick={handleAdmitAndJoin}
+                          disabled={callStarted}
+                          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs py-2 shadow"
+                        >
+                          <Video className="w-3.5 h-3.5 mr-1.5" />
+                          Admit Client & Start Call
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          onClick={() => startCall()}
+                          disabled={callStarted}
+                          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs py-2 shadow"
+                        >
+                          <Video className="w-3.5 h-3.5 mr-1.5" />
+                          Join Meeting Room
+                        </Button>
+                      )}
+                    </div>
                   </motion.div>
                 )}
 
@@ -2559,6 +2689,32 @@ export default function MeetingPage() {
                 <p className="text-xs text-muted-foreground">
                   You can join 5 minutes before the scheduled time
                 </p>
+                {userRole === 'consultant' && (
+                  <div className="pt-2">
+                    <Button
+                      size="lg"
+                      className="w-full bg-emerald-600 hover:bg-emerald-500 text-white gap-2 text-base py-6 font-semibold glow-gold shadow-lg"
+                      onClick={handleAdmitAndJoin}
+                      disabled={callStarted}
+                    >
+                      <Video className="h-5 w-5" />
+                      {callStarted ? "Connecting..." : (waitingRoomParticipants.length > 0 ? "Admit Client & Start Meeting" : "Start Meeting as Host")}
+                    </Button>
+                  </div>
+                )}
+                {userRole === 'client' && (waitingRoomParticipants.length > 0 || isAdmitted) && (
+                  <div className="pt-2">
+                    <Button
+                      size="lg"
+                      className="w-full glow-gold gap-2 text-base py-6 font-semibold"
+                      onClick={() => startCall()}
+                      disabled={callStarted}
+                    >
+                      <Video className="h-5 w-5" />
+                      {callStarted ? "Connecting..." : "Join Consultation"}
+                    </Button>
+                  </div>
+                )}
               </motion.div>
             )}
 
@@ -2580,11 +2736,17 @@ export default function MeetingPage() {
                 <Button 
                   size="lg" 
                   className="w-full glow-gold gap-2 text-base py-6 font-semibold" 
-                  onClick={() => startCall()}
+                  onClick={() => {
+                    if (userRole === 'consultant') {
+                      handleAdmitAndJoin();
+                    } else {
+                      startCall();
+                    }
+                  }}
                   disabled={callStarted}
                 >
                   {hasJoinedBefore ? <RotateCcw className="h-5 w-5" /> : <Video className="h-5 w-5" />}
-                  {callStarted ? "Connecting..." : (hasJoinedBefore ? "Rejoin Meeting" : "Join Meeting")}
+                  {callStarted ? "Connecting..." : (userRole === 'consultant' && waitingRoomParticipants.length > 0 ? "Admit Client & Join Meeting" : (hasJoinedBefore ? "Rejoin Meeting" : "Join Meeting"))}
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   Make sure your camera and microphone are ready

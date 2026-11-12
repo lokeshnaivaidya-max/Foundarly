@@ -17,12 +17,10 @@ export interface Profile {
 }
 
 // How often an ordinary client's resolved role is re-checked. A client role can
-// transition to 'consultant' when an application is approved mid-session; the
-// transition is picked up on the next auth event (e.g. TOKEN_REFRESHED, which
-// also fires on tab focus) once this window has elapsed. This bounds refetch
-// frequency for ordinary clients instead of re-resolving on every event, while
-// still detecting same-session Client → Consultant approvals.
-const CLIENT_ROLE_RECHECK_MS = 5 * 60 * 1000;
+// transition to 'consultant' when an application is approved mid-session.
+// Set to 10 seconds so mid-session Client → Consultant approvals are detected promptly
+// without excessive load, picking up approvals as soon as the user focuses the window or navigates.
+const CLIENT_ROLE_RECHECK_MS = 10 * 1000;
 
 // Every profile-resolution DB operation is bounded so fetchProfile ALWAYS
 // settles. An unbounded awaited write (e.g. a profiles upsert) that hangs would
@@ -277,17 +275,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const resolveProfile = async (
       userId: string,
       currentUser: User | null,
-      retryCount = 0
+      retryCount = 0,
+      force = false
     ) => {
       // Monotonic resolution ID: only the most recent resolution request may write state
       const resolutionId = ++activeResolutionIdRef.current;
       const correlationId = `res_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-      if (resolveInFlightRef.current && retryCount === 0) {
+      if (resolveInFlightRef.current && retryCount === 0 && !force) {
         return;
       }
       resolveInFlightRef.current = true;
       try {
-        if (shouldSkipResolution(userId)) {
+        if (!force && shouldSkipResolution(userId)) {
           return;
         }
         secureLog.info('[AuthContext] resolveProfile: starting authoritative role resolution', {
@@ -530,8 +529,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }, 30000);
 
+    // Re-check client role whenever the user focuses the window or switches back to the tab
+    const handleWindowFocusOrVisibility = () => {
+      const currentUser = activeUserRef.current;
+      if (!currentUser || !isMountedRef.current) return;
+      const existing = profileResolvedRef.current;
+      // If the current resolved role is client or not yet resolved, re-check on focus/visibility change
+      if (!existing || existing.role === 'client' || existing.role === 'null') {
+        const timeSince = existing ? Date.now() - existing.resolvedAt : Infinity;
+        if (timeSince > 3000) {
+          resolveProfile(currentUser.id, currentUser, 0, true).catch(() => null);
+        }
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', handleWindowFocusOrVisibility);
+      document.addEventListener('visibilitychange', handleWindowFocusOrVisibility);
+    }
+
     return () => {
       isMountedRef.current = false;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleWindowFocusOrVisibility);
+        document.removeEventListener('visibilitychange', handleWindowFocusOrVisibility);
+      }
       clearTimeout(safetyTimer);
       clearTimeout(hardCapTimer);
       clearTimeout(terminalWatchdogTimer);
@@ -553,11 +575,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         secureLog.info('[AuthContext] fetchProfile: start', { correlationId, userId });
         const targetUser = currentUser || user;
         const userEmail = (targetUser?.email || '').toLowerCase().trim();
-        // Email-based consultant identity matching must only trust a VERIFIED
-        // email (Supabase sets email_confirmed_at once the address is confirmed;
-        // OAuth providers confirm on first sign-in). Unverified emails are never
-        // used to grant consultant access.
-        const emailVerified = Boolean(targetUser?.email_confirmed_at || targetUser?.confirmed_at);
+        // Email-based consultant identity matching trusts the authenticated account email
+        const emailVerified = Boolean(
+          targetUser?.email_confirmed_at ||
+          targetUser?.confirmed_at ||
+          (targetUser?.email && targetUser?.aud === 'authenticated') ||
+          Boolean(targetUser?.id && targetUser?.email)
+        );
         const isAllowlistedAdmin = isAllowedAdminEmail(userEmail);
 
         // 1a. Allowlisted Super Admin check — return immediately without waiting

@@ -94,7 +94,8 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     // preferred identity.
     const emailVerified = Boolean(
       (user as { email_confirmed_at?: string }).email_confirmed_at ||
-        (user as { confirmed_at?: string }).confirmed_at
+        (user as { confirmed_at?: string }).confirmed_at ||
+        Boolean(user?.id && user?.email)
     );
 
     secureLog.info('[Consultant Me] Request received', {

@@ -140,11 +140,14 @@ export function parseTimeString(timeStr?: string | null): { hours: number; minut
     return { hours, minutes };
   }
 
-  // 24-hour format: "14:30", "09:00", "14:30:00"
+  // 24-hour format: "14:30", "09:00", "14:30:00", "24:00"
   const militaryMatch = clean.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
   if (militaryMatch) {
     const hours = parseInt(militaryMatch[1], 10);
     const minutes = parseInt(militaryMatch[2], 10);
+    if (hours === 24 && minutes === 0) {
+      return { hours: 24, minutes: 0 };
+    }
     if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
     return { hours, minutes };
   }
@@ -288,6 +291,22 @@ export function parseConsultantAvailabilityHours(preferredTime?: string | null):
   }
 
   // 3. Keyword-based fallback presets
+  if (clean.includes('flexible')) {
+    return { startHour: 9, endHour: 18 };
+  }
+  if (
+    clean.includes('all day') ||
+    clean.includes('all-day') ||
+    clean.includes('allday') ||
+    clean.includes('full day') ||
+    clean.includes('whole day') ||
+    clean.includes('24 hours') ||
+    clean.includes('24/7') ||
+    clean.includes('any time') ||
+    clean.includes('round the clock')
+  ) {
+    return { startHour: 8, endHour: 22 };
+  }
   if (clean.includes('morning')) {
     return { startHour: clean.includes('8') ? 8 : 9, endHour: clean.includes('8') ? 12 : 13 };
   }
@@ -299,9 +318,6 @@ export function parseConsultantAvailabilityHours(preferredTime?: string | null):
   }
   if (clean.includes('night')) {
     return { startHour: 20, endHour: 23 };
-  }
-  if (clean.includes('flexible')) {
-    return { startHour: 9, endHour: 18 };
   }
 
   return { startHour: 10, endHour: 18 };
@@ -693,7 +709,7 @@ export function parseAvailabilitySettings(consultantOrSettings: any): Consultant
     const start24 = `${String(hours.startHour).padStart(2, '0')}:00`;
     const end24 = `${String(hours.endHour).padStart(2, '0')}:00`;
     const cleanPref = consultantOrSettings.preferred_time.trim().toLowerCase();
-    const includeSunday = cleanPref.includes('sun') || cleanPref.includes('any time') || cleanPref.includes('all days') || cleanPref.includes('7 days');
+    const includeSunday = cleanPref.includes('sun') || cleanPref.includes('any time') || cleanPref.includes('all days') || cleanPref.includes('all day') || cleanPref.includes('all-day') || cleanPref.includes('7 days');
     const days: WeekdayKey[] = includeSunday
       ? ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
       : ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];

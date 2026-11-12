@@ -66,7 +66,7 @@ const TIME_OPTIONS = [
   "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30",
   "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30",
   "18:00", "18:30", "19:00", "19:30", "20:00", "20:30", "21:00", "21:30",
-  "22:00", "22:30", "23:00"
+  "22:00", "22:30", "23:00", "23:30", "24:00"
 ];
 
 function formatTimeOption(time24: string): string {
@@ -252,6 +252,40 @@ export default function ConsultantAvailabilityEditor({
       };
     });
     setSaveSuccess(false);
+  };
+
+  // Set All Day for a specific day (8:00 AM to 10:00 PM IST)
+  const handleSetDayAllDay = (day: WeekdayKey) => {
+    setSettings((prev) => ({
+      ...prev,
+      weeklySchedule: {
+        ...prev.weeklySchedule,
+        [day]: {
+          enabled: true,
+          windows: [{ start: "08:00", end: "22:00" }],
+        },
+      },
+    }));
+    setSaveSuccess(false);
+  };
+
+  // Set All Day for all working days
+  const handleSetAllDaysAllDay = () => {
+    setSettings((prev) => {
+      const updatedSchedule = { ...prev.weeklySchedule };
+      for (const d of WEEKDAY_ORDER) {
+        updatedSchedule[d] = {
+          enabled: true,
+          windows: [{ start: "08:00", end: "22:00" }],
+        };
+      }
+      return {
+        ...prev,
+        weeklySchedule: updatedSchedule,
+      };
+    });
+    setSaveSuccess(false);
+    toast.success("All days set to All-Day availability (8:00 AM – 10:00 PM IST)");
   };
 
   // Remove Window from a Day
@@ -560,9 +594,20 @@ export default function ConsultantAvailabilityEditor({
                     Enable weekdays and set multiple time windows (e.g. 10:00 AM–1:00 PM and 3:00 PM–6:00 PM).
                   </CardDescription>
                 </div>
-                <Badge variant="outline" className="text-xs bg-muted/40">
-                  IST (UTC+05:30)
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSetAllDaysAllDay}
+                    className="h-8 text-xs font-medium border-primary/40 text-primary hover:bg-primary/10"
+                    title="Quickly set all 7 days to All-Day availability (8:00 AM – 10:00 PM IST)"
+                  >
+                    All Days to All-Day (8 AM – 10 PM)
+                  </Button>
+                  <Badge variant="outline" className="text-xs bg-muted/40">
+                    IST (UTC+05:30)
+                  </Badge>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -600,15 +645,26 @@ export default function ConsultantAvailabilityEditor({
                       </div>
 
                       {isEnabled ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleAddWindow(day)}
-                          className="h-8 px-2.5 text-xs text-primary hover:text-primary hover:bg-primary/10 gap-1 font-medium"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          Add Window
-                        </Button>
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSetDayAllDay(day)}
+                            className="h-7 px-2.5 text-[11px] font-medium text-foreground hover:bg-secondary border-border/80"
+                            title="Set this day to All Day (8:00 AM – 10:00 PM IST)"
+                          >
+                            All Day (8 AM – 10 PM)
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleAddWindow(day)}
+                            className="h-8 px-2.5 text-xs text-primary hover:text-primary hover:bg-primary/10 gap-1 font-medium"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Add Window
+                          </Button>
+                        </div>
                       ) : (
                         <span className="text-xs text-muted-foreground font-medium">
                           Unavailable

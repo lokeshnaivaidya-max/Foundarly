@@ -82,7 +82,7 @@ export default function ApplyConsultant() {
     setLoading(true);
     try {
       const parsedAge = parseInt(String(formData.age).trim(), 10) || 25;
-      await consultantApplicationsService.create({
+      const appPayload: any = {
         name: formData.name.trim(),
         email: formData.email.trim().toLowerCase(),
         phone: formData.phone.trim(),
@@ -95,7 +95,11 @@ export default function ApplyConsultant() {
         experience: (formData.experience || '').trim(),
         preferred_session_timing: formData.preferred_session_timing.trim(),
         linkedin_url: formData.linkedin_url ? formData.linkedin_url.trim() : null,
-      });
+      };
+      if (user?.id) {
+        appPayload.user_id = user.id;
+      }
+      await consultantApplicationsService.create(appPayload);
 
       setSubmitted(true);
       toast({

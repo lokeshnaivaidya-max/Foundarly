@@ -195,8 +195,29 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     // If neither succeeds, the consultant record is created UNLINKED; the
     // applicant's next authenticated /api/consultant/me call links it by
     // verified email.
+    const passedUserId = typeof body?.userId === 'string' && body.userId.trim().length > 20
+      ? body.userId.trim()
+      : (typeof body?.user_id === 'string' && body.user_id.trim().length > 20 ? body.user_id.trim() : null);
+
     let linkedUserId: string | null =
-      typeof app.user_id === 'string' && app.user_id.trim().length > 20 ? app.user_id.trim() : null;
+      (typeof app.user_id === 'string' && app.user_id.trim().length > 20 ? app.user_id.trim() : null) ||
+      passedUserId;
+
+    if (!linkedUserId) {
+      try {
+        const { data: existingC } = await activeDbClient
+          .from('consultants')
+          .select('user_id')
+          .ilike('email', cleanEmail)
+          .not('user_id', 'is', null)
+          .limit(1);
+        if (existingC?.[0]?.user_id) {
+          linkedUserId = existingC[0].user_id;
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     if (linkedUserId) {
       console.log(`[Approve Consultant] Application carries authenticated user_id; linking by UUID: ${linkedUserId}`);

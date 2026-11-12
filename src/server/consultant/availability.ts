@@ -3,19 +3,162 @@ import { createClient } from '@supabase/supabase-js';
 import {
   parseAvailabilitySettings,
   serializeAvailabilitySettings,
-  validateAvailabilitySettings,
-  validateConfirmedBookingConflicts,
+  validateAvailabilitySettings as baseValidateAvailabilitySettings,
+  validateConfirmedBookingConflicts as baseValidateConfirmedBookingConflicts,
   ConsultantAvailabilitySettings,
+  ConfirmedBookingConflict,
   APP_TIMEZONE,
   getNowInIST,
+  getDayOfWeekInIST,
+  WEEKDAY_LABELS,
+  time24ToMinutes,
+  parseTimeString,
 } from '../../utils/timeSlots.js';
 import { isAllowedAdminEmail } from '../../lib/authorization.js';
 import { secureLog } from '../../utils/security.js';
 
-export {
-  validateAvailabilitySettings,
-  validateConfirmedBookingConflicts,
-};
+export const VALID_PRESETS = [
+  'all-day',
+  'weekdays',
+  'custom',
+  'morning',
+  'afternoon',
+  'evening',
+  'night',
+  'flexible',
+] as const;
+
+export function validateAvailabilitySettings(input: any): {
+  valid: boolean;
+  error?: string;
+  settings?: any;
+} {
+  if (!input || typeof input !== 'object') {
+    return { valid: false, error: 'Availability settings object is required.' };
+  }
+
+  if (input.preset !== undefined) {
+    if (!VALID_PRESETS.includes(input.preset)) {
+      return {
+        valid: false,
+        error: `Invalid preset: "${input.preset}". Supported presets: ${VALID_PRESETS.join(', ')}`,
+      };
+    }
+
+    if (Array.isArray(input.customSlots)) {
+      for (const slot of input.customSlots) {
+        if (slot.startTime && slot.endTime) {
+          const startM = time24ToMinutes(slot.startTime);
+          const endM = time24ToMinutes(slot.endTime);
+          if (endM <= startM) {
+            return {
+              valid: false,
+              error: `Invalid slot time on ${slot.day || 'day'}: end time (${slot.endTime}) must be after start time (${slot.startTime}).`,
+            };
+          }
+        }
+      }
+    }
+
+    return {
+      valid: true,
+      settings: {
+        preset: input.preset,
+        timezone: input.timezone || APP_TIMEZONE,
+        days: input.days || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+        slotDuration: input.slotDuration || 30,
+        bufferTime: input.bufferTime || 0,
+        customSlots: input.customSlots || [],
+        weeklySchedule: input.weeklySchedule,
+      },
+    };
+  }
+
+  return baseValidateAvailabilitySettings(input);
+}
+
+export function validateConfirmedBookingConflicts(
+  settings: any,
+  confirmedBookings: any[]
+): {
+  hasConflict: boolean;
+  conflicts: ConfirmedBookingConflict[];
+  errorMessage?: string;
+  message?: string;
+} {
+  if (!Array.isArray(confirmedBookings) || confirmedBookings.length === 0) {
+    return { hasConflict: false, conflicts: [] };
+  }
+
+  if (settings && (settings.preset !== undefined || Array.isArray(settings.days))) {
+    const conflicts: ConfirmedBookingConflict[] = [];
+    const enabledDays = Array.isArray(settings.days)
+      ? new Set(settings.days.map((d: string) => d.toLowerCase().trim()))
+      : null;
+
+    for (const b of confirmedBookings) {
+      if (b.status !== 'confirmed') continue;
+      const clientName = b.name || 'Client';
+      const bookingDate = b.date.includes('T') ? b.date.split('T')[0] : b.date;
+      const dayOfWeek = getDayOfWeekInIST(bookingDate);
+
+      if (enabledDays && !enabledDays.has(dayOfWeek)) {
+        conflicts.push({
+          bookingId: b.id,
+          clientName,
+          date: bookingDate,
+          time: b.time,
+          reason: 'day_disabled',
+          details: `${WEEKDAY_LABELS[dayOfWeek]} is disabled, but ${bookingDate} has an active confirmed booking with ${clientName} at ${b.time}.`,
+        });
+        continue;
+      }
+
+      if (settings.preset && settings.preset !== 'all-day' && Array.isArray(settings.customSlots) && settings.customSlots.length > 0) {
+        const parsedTime = parseTimeString(b.time);
+        if (parsedTime) {
+          const bookingStartM = parsedTime.hours * 60 + parsedTime.minutes;
+          const duration = b.duration_minutes || b.session_duration || 30;
+          const bookingEndM = bookingStartM + duration;
+          const daySlots = settings.customSlots.filter((s: any) => s.day?.toLowerCase() === dayOfWeek);
+          const fitsAnySlot = daySlots.some((s: any) => {
+            const startM = time24ToMinutes(s.startTime);
+            const endM = time24ToMinutes(s.endTime);
+            return bookingStartM >= startM && bookingEndM <= endM;
+          });
+          if (daySlots.length > 0 && !fitsAnySlot) {
+            conflicts.push({
+              bookingId: b.id,
+              clientName,
+              date: bookingDate,
+              time: b.time,
+              reason: 'time_outside_windows',
+              details: `Booking with ${clientName} at ${b.time} on ${bookingDate} falls outside custom slot windows.`,
+            });
+          }
+        }
+      }
+    }
+
+    if (conflicts.length > 0) {
+      const msg = `Cannot update availability: ${conflicts.length} confirmed booking(s) conflict with this schedule. Please reschedule or complete these bookings first.`;
+      return {
+        hasConflict: true,
+        conflicts,
+        errorMessage: msg,
+        message: msg,
+      };
+    }
+
+    return { hasConflict: false, conflicts: [] };
+  }
+
+  const res = baseValidateConfirmedBookingConflicts(settings, confirmedBookings);
+  return {
+    ...res,
+    message: res.errorMessage,
+  };
+}
 
 dotenv.config();
 
@@ -62,7 +205,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     : null;
 
   if (!token) {
-    return res.status(401).json({ success: false, error: 'Authentication required. Missing Bearer token.' });
+    return res.status(401).json({ success: false, error: 'Authentication required. Bearer token required.' });
   }
 
   try {
@@ -240,7 +383,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
         });
       }
 
-      // 3. Strict Authorization Scope:
+      // 3. Strict Authorization Scope & Admin-managed pricing integrity:
       // Preserves admin-managed pricing. Consultant cannot alter platform fees!
       const mergedSettings: ConsultantAvailabilitySettings = {
         version: 1,

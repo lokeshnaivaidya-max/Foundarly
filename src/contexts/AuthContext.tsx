@@ -533,18 +533,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }, 30000);
 
+    const FOCUS_RECHECK_COOLDOWN_MS = 30000;
+
     // Re-check client role whenever the user focuses the window or switches back to the tab
     const handleWindowFocusOrVisibility = () => {
-      const currentUser = activeUserRef.current;
-      if (!currentUser || !isMountedRef.current) return;
-      const existing = profileResolvedRef.current;
-      // If the current resolved role is client or not yet resolved, re-check on focus/visibility change with cooldown
-      if (!existing || existing.role === 'client' || existing.role === 'null') {
-        const timeSince = existing ? Date.now() - existing.resolvedAt : Infinity;
-        if (timeSince > 30000) {
-          resolveProfile(currentUser.id, currentUser, 0, false).catch(() => null);
+      const checkSession = (force = false) => {
+        const currentUser = activeUserRef.current;
+        if (!currentUser || !isMountedRef.current) return;
+        const existing = profileResolvedRef.current;
+        // If the current resolved role is client or not yet resolved, re-check on focus/visibility change with cooldown
+        if (!existing || existing.role === 'client' || existing.role === 'null') {
+          const timeSince = existing ? Date.now() - existing.resolvedAt : Infinity;
+          if (timeSince > FOCUS_RECHECK_COOLDOWN_MS || force) {
+            resolveProfile(currentUser.id, currentUser, 0, force).catch(() => null);
+          }
         }
-      }
+      };
+      checkSession(false);
     };
 
     if (typeof window !== 'undefined') {

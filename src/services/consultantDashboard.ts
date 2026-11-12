@@ -76,16 +76,17 @@ function parseUserIdentifier(userParam: UserIdentifier): { userId: string; userE
   };
 }
 
+export const CONSULTANT_CACHE_TTL_MS = 5000;
 const consultantCache = new Map<string, { data: any; expiry: number }>();
-const consultantInFlight = new Map<string, Promise<any>>();
+const inFlightConsultantPromises = new Map<string, Promise<any>>();
 
 export function clearConsultantCache(userId?: string) {
   if (userId) {
     consultantCache.delete(userId);
-    consultantInFlight.delete(userId);
+    inFlightConsultantPromises.delete(userId);
   } else {
     consultantCache.clear();
-    consultantInFlight.clear();
+    inFlightConsultantPromises.clear();
   }
 }
 
@@ -100,8 +101,8 @@ async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; n
   }
 
   // Deduplicate in-flight promises
-  if (consultantInFlight.has(userId)) {
-    return consultantInFlight.get(userId)!;
+  if (inFlightConsultantPromises.has(userId)) {
+    return inFlightConsultantPromises.get(userId)!;
   }
 
   const lookupPromise = (async () => {
@@ -116,7 +117,7 @@ async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; n
 
         if (!userErr && userMatches && userMatches.length === 1) {
           const res = userMatches[0];
-          consultantCache.set(userId, { data: res, expiry: Date.now() + 5000 });
+          consultantCache.set(userId, { data: res, expiry: Date.now() + CONSULTANT_CACHE_TTL_MS });
           return res;
         }
       } catch (dbErr) {
@@ -138,7 +139,7 @@ async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; n
           clearTimeout(timeoutId);
           const json = await res.json().catch(() => null);
           if (res.ok && json?.success && json?.consultant) {
-            consultantCache.set(userId, { data: json.consultant, expiry: Date.now() + 5000 });
+            consultantCache.set(userId, { data: json.consultant, expiry: Date.now() + CONSULTANT_CACHE_TTL_MS });
             return json.consultant;
           }
         }
@@ -148,11 +149,11 @@ async function getConsultant(userParam: UserIdentifier): Promise<{ id: string; n
 
       return null;
     } finally {
-      consultantInFlight.delete(userId);
+      inFlightConsultantPromises.delete(userId);
     }
   })();
 
-  consultantInFlight.set(userId, lookupPromise);
+  inFlightConsultantPromises.set(userId, lookupPromise);
   return lookupPromise;
 }
 
